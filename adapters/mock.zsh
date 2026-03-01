@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env zsh
 set -euo pipefail
 
 workdir="$1"; prompt_file="$2"; stdout_log="$3"; stderr_log="$4"

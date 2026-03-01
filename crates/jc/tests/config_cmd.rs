@@ -191,7 +191,7 @@ fn dispatcher_uses_config_max_concurrent() {
     fs::write(tdir.join("spec.md"), "").unwrap();
     fs::write(tdir.join("prompt.md"), "{{spec}}\n").unwrap();
 
-    let mock_adapter = repo_root().join("adapters").join("mock.sh");
+    let mock_adapter = repo_root().join("adapters").join("mock.zsh");
     let mock_cmd = mock_adapter.to_str().unwrap();
     let providers_json = format!(
         r#"{{"providers":{{"mock":{{"command":"{}","rate_limit_exit":75}}}}}}"#,

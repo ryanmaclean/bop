@@ -59,7 +59,7 @@ fn providers_list_shows_all_fields() {
     // Manually write a provider with a model and cooldown
     let now_plus_300 = chrono::Utc::now().timestamp() + 300;
     let json = format!(
-        r#"{{"providers":{{"cool-provider":{{"command":"adapters/mock.sh","rate_limit_exit":75,"cooldown_until_epoch_s":{},"model":"gpt-4o"}},"no-cool":{{"command":"adapters/mock.sh","rate_limit_exit":75}}}}}}"#,
+        r#"{{"providers":{{"cool-provider":{{"command":"adapters/mock.zsh","rate_limit_exit":75,"cooldown_until_epoch_s":{},"model":"gpt-4o"}},"no-cool":{{"command":"adapters/mock.zsh","rate_limit_exit":75}}}}}}"#,
         now_plus_300
     );
     fs::write(cards.join("providers.json"), json).unwrap();
@@ -85,7 +85,7 @@ fn providers_add_creates_provider() {
     let td = tempfile::tempdir().unwrap();
     let cards = init_cards(td.path());
 
-    let mock_adapter = repo_root().join("adapters").join("mock.sh");
+    let mock_adapter = repo_root().join("adapters").join("mock.zsh");
 
     let status = Command::new(jc_bin())
         .args([
@@ -118,7 +118,7 @@ fn providers_add_rejects_duplicate_name() {
     let td = tempfile::tempdir().unwrap();
     let cards = init_cards(td.path());
 
-    let mock_adapter = repo_root().join("adapters").join("mock.sh");
+    let mock_adapter = repo_root().join("adapters").join("mock.zsh");
 
     // Add once — should succeed
     let status = Command::new(jc_bin())
@@ -334,7 +334,7 @@ fn providers_status_shows_cooldown() {
 
     let now_plus_300 = chrono::Utc::now().timestamp() + 300;
     let json = format!(
-        r#"{{"providers":{{"cool-prov":{{"command":"adapters/mock.sh","rate_limit_exit":75,"cooldown_until_epoch_s":{}}}}}}}"#,
+        r#"{{"providers":{{"cool-prov":{{"command":"adapters/mock.zsh","rate_limit_exit":75,"cooldown_until_epoch_s":{}}}}}}}"#,
         now_plus_300
     );
     fs::write(cards.join("providers.json"), json).unwrap();

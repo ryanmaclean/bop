@@ -6,11 +6,11 @@ ROOT=/Users/studio/gtfs
 JC=$ROOT/target/debug/jc
 
 TEAMS=(
-  "team-cli:claude:adapters/claude.sh"
-  "team-arch:claude:adapters/claude.sh"
-  "team-quality:aider:adapters/aider.sh"
-  "team-intelligence:opencode:adapters/opencode.sh"
-  "team-platform:codex:adapters/codex.sh"
+  "team-cli:claude:adapters/claude.zsh"
+  "team-arch:claude:adapters/claude.zsh"
+  "team-quality:aider:adapters/aider.zsh"
+  "team-intelligence:opencode:adapters/opencode.zsh"
+  "team-platform:codex:adapters/codex.zsh"
 )
 
 SESSION="jobcard-teams"

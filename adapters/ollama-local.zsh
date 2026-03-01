@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env zsh
 set -euo pipefail
 
 workdir="$1"; prompt_file="$2"; stdout_log="$3"; stderr_log="$4"
@@ -29,7 +29,7 @@ if echo "$full_prompt" | grep -qi "ideation\|brainstorm\|enhancement\|innovation
     model="qwen2.5:7b"
     system_prompt="You are an expert innovation consultant and systems thinker. Your task is to run a comprehensive ideation session. Think step-by-step, explore multiple angles, and provide structured, actionable insights. Use the following framework:
 1. Current State Analysis
-2. Problem Identification  
+2. Problem Identification
 3. Brainstorming (multiple ideas)
 4. Feasibility Assessment
 5. Prioritization Matrix

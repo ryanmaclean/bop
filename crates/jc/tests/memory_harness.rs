@@ -148,10 +148,10 @@ fn dispatcher_injects_memory_and_merges_memory_output() {
     let new = run_jc(&cards, &["new", "implement", "job-memory"]);
     assert!(new.status.success());
 
-    let adapter = td.path().join("memory_adapter.sh");
+    let adapter = td.path().join("memory_adapter.zsh");
     fs::write(
         &adapter,
-        r#"#!/usr/bin/env bash
+        r#"#!/usr/bin/env zsh
 set -euo pipefail
 workdir="$1"; prompt_file="$2"; stdout_log="$3"; stderr_log="$4"; memory_out="${5:-${JOBCARD_MEMORY_OUT:-}}"
 cat "$prompt_file" >> "$stdout_log"
@@ -186,5 +186,52 @@ echo '{"set":{"learned_fact":"always run cargo test first"}}' > "$memory_out"
     assert_eq!(
         store_json["entries"]["learned_fact"]["value"].as_str(),
         Some("always run cargo test first")
+    );
+}
+
+#[test]
+fn dispatcher_merges_flat_memory_output_format() {
+    build_jc();
+
+    let td = tempfile::tempdir().unwrap();
+    let cards = td.path().join(".cards");
+
+    let init = run_jc(&cards, &["init"]);
+    assert!(init.status.success());
+
+    let new = run_jc(&cards, &["new", "implement", "job-memory-flat"]);
+    assert!(new.status.success());
+
+    let adapter = td.path().join("memory_adapter_flat.zsh");
+    fs::write(
+        &adapter,
+        r#"#!/usr/bin/env zsh
+set -euo pipefail
+workdir="$1"; prompt_file="$2"; stdout_log="$3"; stderr_log="$4"; memory_out="${5:-${JOBCARD_MEMORY_OUT:-}}"
+cat "$prompt_file" >> "$stdout_log"
+echo '{"flat_fact":"prefer deterministic tests"}' > "$memory_out"
+"#,
+    )
+    .unwrap();
+    let mut perms = fs::metadata(&adapter).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&adapter, perms).unwrap();
+
+    let dispatch = run_jc(
+        &cards,
+        &[
+            "dispatcher",
+            "--adapter",
+            adapter.to_str().unwrap(),
+            "--once",
+        ],
+    );
+    assert!(dispatch.status.success());
+
+    let memory_store = fs::read_to_string(cards.join("memory").join("implement.json")).unwrap();
+    let store_json: serde_json::Value = serde_json::from_str(&memory_store).unwrap();
+    assert_eq!(
+        store_json["entries"]["flat_fact"]["value"].as_str(),
+        Some("prefer deterministic tests")
     );
 }

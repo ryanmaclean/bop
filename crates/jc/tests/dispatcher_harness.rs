@@ -25,7 +25,7 @@ fn jc_bin() -> PathBuf {
 }
 
 fn mock_adapter() -> PathBuf {
-    repo_root().join("adapters").join("mock.sh")
+    repo_root().join("adapters").join("mock.zsh")
 }
 
 fn write_providers(cards: &Path) {
@@ -230,7 +230,7 @@ fn dispatcher_relative_adapter_path_works() {
         .unwrap();
     assert!(status.success());
 
-    // Run the dispatcher from repo_root() so that "adapters/mock.sh" resolves.
+    // Run the dispatcher from repo_root() so that "adapters/mock.zsh" resolves.
     let status = Command::new(jc_bin())
         .env("MOCK_EXIT", "0")
         .args([
@@ -238,7 +238,7 @@ fn dispatcher_relative_adapter_path_works() {
             cards.to_str().unwrap(),
             "dispatcher",
             "--adapter",
-            "adapters/mock.sh", // relative path
+            "adapters/mock.zsh", // relative path
             "--once",
         ])
         .current_dir(repo_root())

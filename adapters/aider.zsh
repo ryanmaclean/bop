@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env zsh
 set -euo pipefail
 
 workdir="$1"; prompt_file="$2"; stdout_log="$3"; stderr_log="$4"
@@ -20,9 +20,9 @@ if [[ "$stderr_log" != /* ]]; then
     stderr_log="$orig_dir/$stderr_log"
 fi
 
-claude -p "$(cat "$prompt_file")" \
-  --dangerously-skip-permissions \
-  --output-format json \
+aider "$(cat "$prompt_file")" \
+  --yes \
+  --no-git \
   > "$stdout_log" 2> "$stderr_log"
 rc=$?
 

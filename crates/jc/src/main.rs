@@ -86,7 +86,7 @@ enum Command {
         realtime: bool,
     },
     Dispatcher {
-        #[arg(long, default_value = "adapters/mock.sh")]
+        #[arg(long, default_value = "adapters/mock.zsh")]
         adapter: String,
 
         #[arg(long)]
@@ -427,7 +427,7 @@ fn seed_providers(cards_dir: &Path) -> anyhow::Result<()> {
     pf.providers.insert(
         "mock".to_string(),
         Provider {
-            command: "adapters/mock.sh".to_string(),
+            command: "adapters/mock.zsh".to_string(),
             rate_limit_exit: 75,
             cooldown_until_epoch_s: None,
             model: None,
@@ -436,7 +436,7 @@ fn seed_providers(cards_dir: &Path) -> anyhow::Result<()> {
     pf.providers.insert(
         "mock2".to_string(),
         Provider {
-            command: "adapters/mock.sh".to_string(),
+            command: "adapters/mock.zsh".to_string(),
             rate_limit_exit: 75,
             cooldown_until_epoch_s: None,
             model: None,
@@ -749,8 +749,8 @@ async fn run_provider_prompt(adapter: &str, prompt: &str) -> anyhow::Result<(i32
 
     fs::write(&prompt_file, prompt)?;
 
-    let mut cmd = if adapter.ends_with(".sh") {
-        let mut c = TokioCommand::new("bash");
+    let mut cmd = if adapter.ends_with(".zsh") {
+        let mut c = TokioCommand::new("zsh");
         let adapter_path = if std::path::Path::new(adapter).is_absolute() {
             adapter.to_string()
         } else {
@@ -3550,8 +3550,8 @@ async fn run_card(
         let _ = write_meta(card_dir, m);
     }
 
-    let mut cmd = if adapter.ends_with(".sh") {
-        let mut c = TokioCommand::new("bash");
+    let mut cmd = if adapter.ends_with(".zsh") {
+        let mut c = TokioCommand::new("zsh");
         let adapter_path = if std::path::Path::new(adapter).is_absolute() {
             adapter.to_string()
         } else {

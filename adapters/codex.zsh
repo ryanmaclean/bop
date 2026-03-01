@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env zsh
 set -euo pipefail
 
 workdir="$1"; prompt_file="$2"; stdout_log="$3"; stderr_log="$4"
@@ -9,9 +9,12 @@ cd "$workdir" || exit 1
 [[ "$stdout_log"  != /* ]] && stdout_log="$orig_dir/$stdout_log"
 [[ "$stderr_log"  != /* ]] && stderr_log="$orig_dir/$stderr_log"
 
-opencode run "$(cat "$prompt_file")" \
+codex exec \
+  --dangerously-bypass-approvals-and-sandbox \
+  -c 'sandbox_permissions=["disk-full-read-access","disk-write-access"]' \
+  "$(cat "$prompt_file")" \
   > "$stdout_log" 2> "$stderr_log"
 rc=$?
 
-grep -qiE 'rate limit|429|too many requests' "$stderr_log" && exit 75
+grep -qiE 'rate.?limit|429|too many requests' "$stderr_log" && exit 75
 exit $rc
