@@ -10,7 +10,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use clap::{Parser, Subcommand, ValueEnum};
-use jobcard_core::{write_meta, Meta, VcsEngine as CoreVcsEngine};
+use jobcard_core::{write_meta, Meta};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::convert::Infallible;
@@ -188,10 +188,10 @@ enum VcsEngine {
 }
 
 impl VcsEngine {
-    fn as_core(self) -> CoreVcsEngine {
+    fn as_str(&self) -> &'static str {
         match self {
-            VcsEngine::GitGt => CoreVcsEngine::GitGt,
-            VcsEngine::Jj => CoreVcsEngine::Jj,
+            VcsEngine::GitGt => "git_gt",
+            VcsEngine::Jj => "jj",
         }
     }
 }
@@ -3110,7 +3110,7 @@ fn persist_workspace_meta(
     ws: Option<&WorkspaceInfo>,
 ) {
     if let Some(m) = meta.as_mut() {
-        m.vcs_engine = Some(vcs_engine.as_core());
+        m.vcs_engine = Some(vcs_engine.as_str().to_string());
         if let Some(info) = ws {
             m.workspace_name = Some(info.name.clone());
             m.workspace_path = Some(info.path.to_string_lossy().to_string());
@@ -4391,7 +4391,7 @@ fn cmd_worktree_create(root: &Path, id: &str) -> anyhow::Result<()> {
     {
         anyhow::bail!("jj workspace create failed: {}", e);
     }
-    meta.vcs_engine = Some(CoreVcsEngine::Jj);
+    meta.vcs_engine = Some("jj".to_string());
     meta.workspace_name = Some(ws_name);
     meta.workspace_path = Some(ws_path.to_string_lossy().to_string());
     meta.change_ref = jj_head_ref(&ws_path);
