@@ -45,6 +45,18 @@ enum Command {
         template: String,
         id: String,
     },
+    /// Create a new job draft from a natural-language description.
+    Create {
+        /// Plain-language task description used to generate the card draft.
+        #[arg(long = "from-description")]
+        from_description: String,
+        /// Optional explicit id for the generated card.
+        #[arg(long)]
+        id: Option<String>,
+        /// Skip confirmation prompt and write draft immediately.
+        #[arg(long)]
+        yes: bool,
+    },
     Status {
         #[arg(default_value = "")]
         id: String,
@@ -266,8 +278,22 @@ struct Provider {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct ProvidersFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    default_provider: Option<String>,
     #[serde(default)]
     providers: std::collections::BTreeMap<String, Provider>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct GeneratedCardDraft {
+    #[serde(default, alias = "template")]
+    suggested_template: String,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default, alias = "spec")]
+    spec_md: String,
+    #[serde(default)]
+    acceptance_criteria: Vec<String>,
 }
 
 fn providers_path(cards_dir: &Path) -> PathBuf {
@@ -296,6 +322,7 @@ fn seed_providers(cards_dir: &Path) -> anyhow::Result<()> {
     }
 
     let mut pf = ProvidersFile::default();
+    pf.default_provider = Some("mock".to_string());
     pf.providers.insert(
         "mock".to_string(),
         Provider {
@@ -520,6 +547,329 @@ fn create_card(
     }
 
     Ok(card_dir)
+}
+
+fn list_templates(cards_dir: &Path) -> anyhow::Result<Vec<String>> {
+    let templates_dir = cards_dir.join("templates");
+    let entries = fs::read_dir(&templates_dir).with_context(|| {
+        format!(
+            "failed to read templates directory: {}",
+            templates_dir.display()
+        )
+    })?;
+
+    let mut templates = Vec::new();
+    for ent in entries.flatten() {
+        let path = ent.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if let Some(stripped) = name.strip_suffix(".jobcard") {
+            if !stripped.trim().is_empty() {
+                templates.push(stripped.to_string());
+            }
+        }
+    }
+    templates.sort();
+    if templates.is_empty() {
+        anyhow::bail!("no templates found under {}", templates_dir.display());
+    }
+    Ok(templates)
+}
+
+fn select_default_provider(cards_dir: &Path) -> anyhow::Result<(String, Provider)> {
+    let pf = read_providers(cards_dir)?;
+    if pf.providers.is_empty() {
+        anyhow::bail!(
+            "no providers configured in {}",
+            providers_path(cards_dir).display()
+        );
+    }
+
+    if let Some(name) = pf
+        .default_provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let provider = pf
+            .providers
+            .get(name)
+            .cloned()
+            .with_context(|| format!("default provider '{}' not found", name))?;
+        return Ok((name.to_string(), provider));
+    }
+
+    if let Some(provider) = pf.providers.get("mock").cloned() {
+        return Ok(("mock".to_string(), provider));
+    }
+
+    let (name, provider) = pf
+        .providers
+        .iter()
+        .next()
+        .map(|(name, provider)| (name.clone(), provider.clone()))
+        .context("no providers configured")?;
+    Ok((name, provider))
+}
+
+fn build_generation_prompt(description: &str, templates: &[String]) -> String {
+    let available = templates.join(", ");
+    format!(
+        "You generate JobCard drafts.\n\
+Return ONLY JSON and no markdown.\n\
+Required keys: suggested_template, id, spec_md, acceptance_criteria.\n\
+- suggested_template: choose one of: {available}\n\
+- id: kebab-case short id\n\
+- spec_md: complete markdown spec\n\
+- acceptance_criteria: array of concrete acceptance criteria strings\n\
+Task description:\n\
+{description}\n"
+    )
+}
+
+async fn run_provider_prompt(adapter: &str, prompt: &str) -> anyhow::Result<(i32, String, String)> {
+    let nonce = Utc::now()
+        .timestamp_nanos_opt()
+        .unwrap_or_else(|| Utc::now().timestamp_millis().saturating_mul(1_000_000));
+    let temp_dir =
+        std::env::temp_dir().join(format!("jc-create-draft-{}-{}", std::process::id(), nonce));
+    fs::create_dir_all(&temp_dir)?;
+
+    let prompt_file = temp_dir.join("prompt.md");
+    let stdout_log = temp_dir.join("stdout.log");
+    let stderr_log = temp_dir.join("stderr.log");
+    let memory_out = temp_dir.join("memory-out.json");
+
+    fs::write(&prompt_file, prompt)?;
+
+    let mut cmd = if adapter.ends_with(".sh") {
+        let mut c = TokioCommand::new("bash");
+        let adapter_path = if std::path::Path::new(adapter).is_absolute() {
+            adapter.to_string()
+        } else {
+            format!("{}/{}", std::env::current_dir()?.display(), adapter)
+        };
+        c.arg(adapter_path);
+        c
+    } else {
+        TokioCommand::new(adapter)
+    };
+
+    let status = cmd
+        .arg(&temp_dir)
+        .arg(&prompt_file)
+        .arg(&stdout_log)
+        .arg(&stderr_log)
+        .arg(&memory_out)
+        .env("JOBCARD_MEMORY_OUT", &memory_out)
+        .status()
+        .await
+        .with_context(|| format!("failed to spawn adapter: {}", adapter))?;
+
+    let code = status.code().unwrap_or(1);
+    let stdout = fs::read_to_string(&stdout_log).unwrap_or_default();
+    let stderr = fs::read_to_string(&stderr_log).unwrap_or_default();
+    let _ = fs::remove_dir_all(&temp_dir);
+
+    Ok((code, stdout, stderr))
+}
+
+fn parse_generated_draft(stdout: &str) -> anyhow::Result<GeneratedCardDraft> {
+    let trimmed = stdout.trim();
+    if let Ok(draft) = serde_json::from_str::<GeneratedCardDraft>(trimmed) {
+        return Ok(draft);
+    }
+
+    for (idx, ch) in stdout.char_indices() {
+        if ch != '{' {
+            continue;
+        }
+        let slice = &stdout[idx..];
+        let mut de = serde_json::Deserializer::from_str(slice);
+        let Ok(value) = serde_json::Value::deserialize(&mut de) else {
+            continue;
+        };
+        let Ok(draft) = serde_json::from_value::<GeneratedCardDraft>(value) else {
+            continue;
+        };
+        return Ok(draft);
+    }
+
+    anyhow::bail!("provider output did not contain parseable draft JSON");
+}
+
+fn sanitize_card_id_candidate(raw: &str) -> String {
+    let mut out = String::new();
+    let mut prev_dash = false;
+
+    for ch in raw.trim().chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+
+    while out.starts_with('-') {
+        out.remove(0);
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+
+    if out.is_empty() {
+        "job".to_string()
+    } else {
+        out
+    }
+}
+
+fn card_exists_anywhere(cards_dir: &Path, id: &str) -> bool {
+    for dir in ["pending", "running", "done", "merged", "failed"] {
+        if cards_dir.join(dir).join(format!("{}.jobcard", id)).exists() {
+            return true;
+        }
+    }
+    false
+}
+
+fn ensure_unique_card_id(cards_dir: &Path, base_id: &str) -> String {
+    let base = sanitize_card_id_candidate(base_id);
+    if !card_exists_anywhere(cards_dir, &base) {
+        return base;
+    }
+
+    let mut i = 2_u64;
+    loop {
+        let candidate = format!("{}-{}", base, i);
+        if !card_exists_anywhere(cards_dir, &candidate) {
+            return candidate;
+        }
+        i = i.saturating_add(1);
+    }
+}
+
+fn choose_template(templates: &[String], suggested: &str) -> String {
+    let trimmed = suggested.trim();
+    if templates.iter().any(|t| t == trimmed) {
+        return trimmed.to_string();
+    }
+
+    if templates.iter().any(|t| t == "implement") {
+        return "implement".to_string();
+    }
+
+    templates[0].clone()
+}
+
+fn read_confirmation() -> anyhow::Result<bool> {
+    print!("Write this draft to pending/? [y/N]: ");
+    std::io::stdout().flush()?;
+    let mut line = String::new();
+    let n = std::io::stdin().read_line(&mut line)?;
+    if n == 0 {
+        return Ok(false);
+    }
+    let answer = line.trim().to_ascii_lowercase();
+    Ok(answer == "y" || answer == "yes")
+}
+
+async fn cmd_create_from_description(
+    cards_dir: &Path,
+    description: &str,
+    id_override: Option<&str>,
+    auto_confirm: bool,
+) -> anyhow::Result<()> {
+    let description = description.trim();
+    if description.is_empty() {
+        anyhow::bail!("description cannot be empty");
+    }
+
+    ensure_cards_layout(cards_dir)?;
+    seed_default_templates(cards_dir)?;
+    seed_providers(cards_dir)?;
+
+    let templates = list_templates(cards_dir)?;
+    let (provider_name, provider) = select_default_provider(cards_dir)?;
+    let prompt = build_generation_prompt(description, &templates);
+    let (code, stdout, stderr) = run_provider_prompt(&provider.command, &prompt).await?;
+    if code != 0 {
+        anyhow::bail!(
+            "provider '{}' failed with exit code {}: {}",
+            provider_name,
+            code,
+            stderr.trim()
+        );
+    }
+
+    let draft = parse_generated_draft(&stdout)
+        .with_context(|| format!("provider '{}' returned invalid draft output", provider_name))?;
+
+    let template = choose_template(&templates, &draft.suggested_template);
+
+    let spec = if draft.spec_md.trim().is_empty() {
+        description.to_string()
+    } else {
+        draft.spec_md.trim().to_string()
+    };
+
+    let mut acceptance_criteria: Vec<String> = draft
+        .acceptance_criteria
+        .into_iter()
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+        .collect();
+    if acceptance_criteria.is_empty() {
+        acceptance_criteria.push(
+            "Implementation matches the requested description and passes validation.".to_string(),
+        );
+    }
+
+    let id_source = id_override
+        .filter(|s| !s.trim().is_empty())
+        .map(str::trim)
+        .or_else(|| draft.id.as_deref().map(str::trim))
+        .filter(|s| !s.is_empty())
+        .unwrap_or(description);
+    let card_id = ensure_unique_card_id(cards_dir, id_source);
+
+    println!("Generated job card draft:");
+    println!("provider: {}", provider_name);
+    println!("template: {}", template);
+    println!("id: {}", card_id);
+    println!();
+    println!("=== spec.md ===");
+    println!("{}", spec);
+    println!();
+    println!("=== acceptance_criteria ===");
+    for criterion in &acceptance_criteria {
+        println!("- {}", criterion);
+    }
+    println!();
+
+    let confirmed = if auto_confirm {
+        true
+    } else {
+        read_confirmation()?
+    };
+    if !confirmed {
+        println!("aborted: draft was not written");
+        return Ok(());
+    }
+
+    let card_dir = create_card(cards_dir, &template, &card_id, Some(&spec))?;
+    let mut meta = jobcard_core::read_meta(&card_dir)?;
+    meta.acceptance_criteria = acceptance_criteria;
+    write_meta(&card_dir, &meta)?;
+
+    println!("created: {}", card_id);
+    Ok(())
 }
 
 fn normalize_namespace(namespace: &str) -> String {
@@ -794,6 +1144,11 @@ async fn main() -> anyhow::Result<()> {
             create_card(&root, &template, &id, None)?;
             Ok(())
         }
+        Command::Create {
+            from_description,
+            id,
+            yes,
+        } => cmd_create_from_description(&root, &from_description, id.as_deref(), yes).await,
         Command::Status { id } => {
             if id.trim().is_empty() {
                 for dir in ["pending", "running", "done", "merged", "failed"] {
@@ -1443,6 +1798,21 @@ fn read_new_log_chunk(path: &Path, position: &mut u64) -> anyhow::Result<Option<
     }
 }
 
+fn find_git_root(start: &Path) -> Option<std::path::PathBuf> {
+    let out = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(start)
+        .output()
+        .ok()?;
+    if out.status.success() {
+        Some(std::path::PathBuf::from(
+            String::from_utf8_lossy(&out.stdout).trim(),
+        ))
+    } else {
+        None
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_dispatcher(
     cards_dir: &Path,
@@ -1506,6 +1876,25 @@ async fn run_dispatcher(
                     if fs::rename(&pending_path, &running_path).is_err() {
                         continue;
                     }
+
+                    // Create git worktree for isolation (best-effort; non-fatal if git not available)
+                    if let Some(git_root) = find_git_root(&running_path) {
+                        let wt_path = running_path.join("worktree");
+                        let branch = format!(
+                            "jobs/{}",
+                            running_path
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("unknown")
+                                .trim_end_matches(".jobcard")
+                        );
+                        if let Err(e) =
+                            jobcard_core::worktree::create_worktree(&git_root, &wt_path, &branch)
+                        {
+                            eprintln!("[dispatcher] worktree create failed for {branch}: {e}");
+                        }
+                    }
+
                     available_slots = available_slots.saturating_sub(1);
 
                     let mut meta = jobcard_core::read_meta(&running_path).ok();
