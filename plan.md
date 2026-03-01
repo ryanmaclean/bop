@@ -40,8 +40,9 @@ Target behavior: Auto-Claude/Gas-Town style task manager with explicit stages:
 Run this exact sequence:
 
 ```zsh
-# Transition note: bop command may still be built as jc in this repo snapshot.
-BOP_BIN="${BOP_BIN:-./target/debug/jc}"
+# Prefer bop; fall back to jc only if a local transition build still uses it.
+BOP_BIN="${BOP_BIN:-./target/debug/bop}"
+[[ -x "$BOP_BIN" ]] || BOP_BIN="./target/debug/jc"
 $BOP_BIN doctor
 $BOP_BIN status
 $BOP_BIN inspect <card-id>
@@ -145,6 +146,30 @@ Users should always see card symbols and state quickly without reading long docs
    - deterministic canary routing
    - automatic rollback on sustained green SLO breach
 4. Prefer fixing reliability gaps over adding features.
+
+## 12) Safe Main Landing While Agents Are Live (JJ-First)
+
+Goal: avoid branch collisions and partial merges while multiple agents are actively writing code.
+
+Operating model:
+1. Every agent works in its own JJ workspace. No direct work on shared `main`.
+2. One integrator workspace performs all landings to `main`.
+3. Git is transport; JJ is coordination.
+
+Fast safe-landing checklist:
+1. In integrator workspace, pull latest and rebase/squash candidate changes.
+2. Verify tree is clean (`git status --short` must be empty before landing).
+3. Run hard gates:
+   - `make check`
+   - `./target/debug/bop policy check --staged`
+4. If either gate fails, do not land. Route card back to `pending/` or `failed/` with reason.
+5. Land smallest safe slice first (especially during renames/refactors).
+6. Push from JJ to Git only after gates are green.
+
+TRIZ rationale:
+- Separate competing changes by workspace (segmentation).
+- Use an integrator as intermediary for conflict control.
+- Land only with immediate gate feedback, not intuition.
 
 ## 11) Definition Of "Good"
 

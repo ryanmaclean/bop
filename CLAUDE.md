@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Skills
 
 Three skills provide orientation for this repo — invoke before working:
-- `jobcard-system` — what jc is, card lifecycle, GTFS disambiguation
+- `jobcard-system` — what `bop` is (legacy alias: `jc`), card lifecycle, GTFS disambiguation
 - `vibekanban` — Quick Look cards, Zellij plugin, glyph system, SwiftUI card anatomy
 - `unicode-glyphs` — playing card encoding, BMP/SMP safety, font recommendations
 
@@ -27,14 +27,31 @@ make check                   # Run test + lint + fmt check together
 
 # Canonical CLI: bop
 RUST_LOG=debug ./target/debug/bop dispatcher --once  # Debug dispatcher
+
+# JJ-first collaboration (recommended with multiple live agents)
+jj status
+jj workspace list
+jj log -r '::@'
 ```
 
 ## Architecture
 
-This is a **Rust Cargo workspace** with two active crates (two stubs exist but are not implemented):
+This is a **Rust Cargo workspace** with two active crates:
 
 - **`crates/jobcard-core`** — shared library: `Meta` struct (job card state), `read_meta`/`write_meta`, `render_prompt` (template substitution with `{{spec}}`, `{{plan}}`, etc.), and the `realtime` module (feed validation types + tests).
-- **`crates/jc`** — CLI binary (`bop` command). Crate directory is `crates/jc/` (rename pending). All commands (`init`, `new`, `status`, `validate`, `dispatcher`, `merge-gate`) are implemented in a single `main.rs`. The dispatcher and merge-gate run as async loops using Tokio.
+- **`crates/jc`** — CLI binary (`bop` command). Crate directory remains `crates/jc/` for compatibility. Dispatcher and merge-gate support `--vcs-engine git_gt|jj`; prefer `jj` for active multi-agent sessions.
+
+### Multi-Agent VCS Rule (JJ First)
+
+When multiple agents are active, use JJ as the collaboration layer and treat Git as publish/transport:
+
+1. Every agent works in an isolated workspace (`jj workspace add ...`), never directly on shared `main`.
+2. Keep one integrator workspace that is the only place allowed to land to `main`.
+3. Land only after gates pass in the integrator workspace:
+   - `make check`
+   - `./target/debug/bop policy check --staged`
+4. Publish to Git only from green JJ changes (`jj git push --all`).
+5. If a change is partially renamed or mid-refactor, do not land it; queue it behind a decision card.
 
 ### Job Card State Machine
 
@@ -56,7 +73,7 @@ Each job is a `<id>.jobcard/` directory bundle containing `meta.json`, `spec.md`
 
 3. **Provider failover** — each `Meta` has a `provider_chain: Vec<String>`. On rate-limit (exit 75), the chain rotates (front→back) and a 300s cooldown is set on that provider in `providers.json`. For QA stage, the dispatcher avoids reusing the same provider that ran `implement`.
 
-4. **Merge gate loop** — polls `done/`, runs each `acceptance_criteria` entry as a shell command, then does `git merge --no-ff <branch>` into `main` inside the card's `worktree/`. Failures go to `failed/` with a reason in `meta.json`.
+4. **Merge gate loop** — polls `done/`, runs each `acceptance_criteria` entry as a shell command, then merges using the selected engine (`git_gt` or `jj`) into `main` inside the card's workspace/worktree. Failures go to `failed/` with a reason in `meta.json`.
 
 5. **Orphan reaping** — the dispatcher periodically checks `running/` for cards whose PID (from xattr or `logs/pid`) is no longer alive, returning them to `pending/` or moving to `failed/` after `max_retries`.
 

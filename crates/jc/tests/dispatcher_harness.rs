@@ -21,7 +21,7 @@ fn build_jc() {
 }
 
 fn jc_bin() -> PathBuf {
-    repo_root().join("target").join("debug").join("jc")
+    repo_root().join("target").join("debug").join("bop")
 }
 
 fn mock_adapter() -> PathBuf {
