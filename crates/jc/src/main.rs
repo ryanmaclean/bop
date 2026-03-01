@@ -9,7 +9,7 @@ use axum::response::{
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use jobcard_core::{write_meta, Meta};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -96,6 +96,10 @@ enum Command {
         /// is moved to failed/ instead of done/. Default 1.0 means never fail.
         #[arg(long, default_value_t = 1.0)]
         validation_fail_threshold: f64,
+
+        /// VCS engine used for workspace preparation and publish.
+        #[arg(long, value_enum, default_value_t = VcsEngine::GitGt)]
+        vcs_engine: VcsEngine,
     },
     MergeGate {
         #[arg(long, default_value_t = 500)]
@@ -103,6 +107,10 @@ enum Command {
 
         #[arg(long)]
         once: bool,
+
+        /// VCS engine used for finalize/publish flow.
+        #[arg(long, value_enum, default_value_t = VcsEngine::GitGt)]
+        vcs_engine: VcsEngine,
     },
     /// Move a card back to pending/ so the dispatcher picks it up again.
     Retry {
@@ -156,10 +164,47 @@ enum Command {
         #[command(subcommand)]
         action: ConfigAction,
     },
+    /// Run policy gates.
+    Policy {
+        #[command(subcommand)]
+        action: PolicyAction,
+    },
+    /// Check local toolchain/environment prerequisites.
+    Doctor,
     /// Generate shell completion script.
     GenerateCompletion {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
+    },
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, ValueEnum, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum VcsEngine {
+    #[value(name = "git_gt")]
+    GitGt,
+    #[value(name = "jj")]
+    Jj,
+}
+
+impl VcsEngine {
+    fn as_str(self) -> &'static str {
+        match self {
+            VcsEngine::GitGt => "git_gt",
+            VcsEngine::Jj => "jj",
+        }
+    }
+}
+
+#[derive(Subcommand, Debug)]
+enum PolicyAction {
+    /// Check policy for staged changes (default) or a specific card directory.
+    Check {
+        /// Card id to check (searches across states).
+        id: Option<String>,
+        /// Check staged changes in the current git index.
+        #[arg(long)]
+        staged: bool,
     },
 }
 
@@ -368,6 +413,13 @@ struct GeneratedCardDraft {
     acceptance_criteria: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+struct WorkspaceInfo {
+    name: String,
+    path: PathBuf,
+    change_ref: Option<String>,
+}
+
 fn validate_provider(name: &str, p: &Provider) -> anyhow::Result<()> {
     if name.trim().is_empty() {
         anyhow::bail!("provider name cannot be empty");
@@ -545,6 +597,14 @@ fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
             acceptance_criteria: vec![],
             worktree_branch: Some("job/template-implement".to_string()),
             template_namespace: Some("implement".to_string()),
+            vcs_engine: None,
+            workspace_name: None,
+            workspace_path: None,
+            change_ref: None,
+            policy_scope: vec![],
+            decision_required: false,
+            decision_path: None,
+            policy_result: None,
             retry_count: Some(0),
             failure_reason: None,
             validation_summary: None,
@@ -614,6 +674,14 @@ fn create_card(
         acceptance_criteria: vec![],
         worktree_branch: Some(format!("job/{}", id)),
         template_namespace: Some(template.to_string()),
+        vcs_engine: None,
+        workspace_name: None,
+        workspace_path: None,
+        change_ref: None,
+        policy_scope: vec![],
+        decision_required: false,
+        decision_path: None,
+        policy_result: None,
         retry_count: Some(0),
         failure_reason: None,
         validation_summary: None,
@@ -1221,6 +1289,135 @@ fn cmd_memory_delete(root: &Path, namespace: &str, key: &str) -> anyhow::Result<
     Ok(())
 }
 
+fn run_policy_script(cwd: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
+    let script = cwd.join("scripts").join("policy_check.zsh");
+    if !script.exists() {
+        anyhow::bail!("policy script missing: {}", script.display());
+    }
+    let output = StdCommand::new("zsh")
+        .arg(script)
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .context("failed to run policy_check.zsh")?;
+    Ok(output)
+}
+
+fn cmd_policy_check(cards_root: &Path, id: Option<&str>, staged: bool) -> anyhow::Result<()> {
+    let repo_root = find_git_root(cards_root).unwrap_or(std::env::current_dir()?);
+    let cards_dir_arg = cards_root.to_string_lossy().to_string();
+
+    let output = if staged || id.is_none() {
+        run_policy_script(
+            &repo_root,
+            &["--staged", "--cards-dir", cards_dir_arg.as_str()],
+        )?
+    } else {
+        let card_id = id.unwrap_or_default().trim();
+        if card_id.is_empty() {
+            anyhow::bail!("card id cannot be empty");
+        }
+        let card_dir = find_card(cards_root, card_id).context("card not found")?;
+        let card_dir_arg = card_dir.to_string_lossy().to_string();
+        run_policy_script(
+            &repo_root,
+            &[
+                "--mode",
+                "card",
+                "--cards-dir",
+                cards_dir_arg.as_str(),
+                "--id",
+                card_id,
+                "--card-dir",
+                card_dir_arg.as_str(),
+            ],
+        )?
+    };
+
+    if !output.stdout.is_empty() {
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+    }
+    if !output.stderr.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+    if !output.status.success() {
+        anyhow::bail!("policy check failed");
+    }
+    Ok(())
+}
+
+fn policy_check_card(cards_root: &Path, card_dir: &Path, card_id: &str) -> anyhow::Result<()> {
+    let repo_root = find_git_root(cards_root).unwrap_or(std::env::current_dir()?);
+    let cards_dir_arg = cards_root.to_string_lossy().to_string();
+    let card_dir_arg = card_dir.to_string_lossy().to_string();
+    let output = run_policy_script(
+        &repo_root,
+        &[
+            "--mode",
+            "card",
+            "--cards-dir",
+            cards_dir_arg.as_str(),
+            "--id",
+            card_id,
+            "--card-dir",
+            card_dir_arg.as_str(),
+        ],
+    )?;
+
+    if !output.stdout.is_empty() {
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+    }
+    if !output.stderr.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+    if !output.status.success() {
+        anyhow::bail!("policy violation");
+    }
+    Ok(())
+}
+
+fn command_available(name: &str) -> bool {
+    StdCommand::new(name)
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn cmd_doctor(cards_root: &Path) -> anyhow::Result<()> {
+    println!("jc doctor");
+    let checks = [
+        ("git", command_available("git")),
+        ("gt", command_available("gt")),
+        ("jj", command_available("jj")),
+        ("gh", command_available("gh")),
+        ("zsh", command_available("zsh")),
+    ];
+
+    let mut failed = 0;
+    for (name, ok) in checks {
+        if ok {
+            println!("ok\t{}", name);
+        } else {
+            println!("missing\t{}", name);
+            failed += 1;
+        }
+    }
+
+    let policy = cards_root.join("policy.toml");
+    if policy.exists() {
+        println!("ok\t{}", policy.display());
+    } else {
+        println!("missing\t{}", policy.display());
+        failed += 1;
+    }
+
+    if failed > 0 {
+        anyhow::bail!("doctor found {} issue(s)", failed);
+    }
+    Ok(())
+}
+
 fn print_status_summary(root: &Path) -> anyhow::Result<()> {
     for dir in ["pending", "running", "done", "merged", "failed"] {
         let p = root.join(dir);
@@ -1329,11 +1526,13 @@ async fn main() -> anyhow::Result<()> {
             no_reap,
             once,
             validation_fail_threshold,
+            vcs_engine,
         } => {
             let effective_max_workers = max_workers.or(cfg.max_concurrent).unwrap_or(1);
             let effective_max_retries = max_retries.unwrap_or(3);
             run_dispatcher(
                 &root,
+                vcs_engine,
                 &adapter,
                 effective_max_workers,
                 poll_ms,
@@ -1345,7 +1544,11 @@ async fn main() -> anyhow::Result<()> {
             )
             .await
         }
-        Command::MergeGate { poll_ms, once } => run_merge_gate(&root, poll_ms, once).await,
+        Command::MergeGate {
+            poll_ms,
+            once,
+            vcs_engine,
+        } => run_merge_gate(&root, poll_ms, once, vcs_engine).await,
         Command::Retry { id } => cmd_retry(&root, &id),
         Command::Kill { id } => cmd_kill(&root, &id).await,
         Command::Logs { id, follow } => cmd_logs(&root, &id, follow).await,
@@ -1384,6 +1587,10 @@ async fn main() -> anyhow::Result<()> {
                 ConfigAction::Set { key, value } => cmd_config_set(&config_path, &key, &value),
             }
         }
+        Command::Policy { action } => match action {
+            PolicyAction::Check { id, staged } => cmd_policy_check(&root, id.as_deref(), staged),
+        },
+        Command::Doctor => cmd_doctor(&root),
         Command::GenerateCompletion { shell } => {
             use clap::CommandFactory;
             clap_complete::generate(shell, &mut Cli::command(), "jc", &mut std::io::stdout());
@@ -2621,7 +2828,6 @@ fn read_new_log_chunk(path: &Path, position: &mut u64) -> anyhow::Result<Option<
     }
 }
 
-
 fn find_git_root(start: &Path) -> Option<std::path::PathBuf> {
     let out = std::process::Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
@@ -2634,6 +2840,164 @@ fn find_git_root(start: &Path) -> Option<std::path::PathBuf> {
         ))
     } else {
         None
+    }
+}
+
+fn sanitize_workspace_component(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push('-');
+        }
+    }
+    let trimmed = out.trim_matches('-');
+    if trimmed.is_empty() {
+        "job".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn next_workspace_name(card_id: &str) -> String {
+    let base = sanitize_workspace_component(card_id);
+    let ts = Utc::now().timestamp_millis();
+    format!("ws-{}-{}", base, ts)
+}
+
+fn git_branch_exists(repo_root: &Path, branch: &str) -> bool {
+    StdCommand::new("git")
+        .args(["show-ref", "--verify", &format!("refs/heads/{}", branch)])
+        .current_dir(repo_root)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn git_head_ref(repo_root: &Path) -> Option<String> {
+    let out = StdCommand::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(repo_root)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn jj_head_ref(workspace_path: &Path) -> Option<String> {
+    let out = StdCommand::new("jj")
+        .args(["log", "-r", "@", "-T", "change_id.short()"])
+        .current_dir(workspace_path)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn prepare_workspace(
+    vcs_engine: VcsEngine,
+    cards_dir: &Path,
+    card_dir: &Path,
+    card_id: &str,
+    meta: &mut Option<Meta>,
+) -> anyhow::Result<Option<WorkspaceInfo>> {
+    let ws_path = card_dir.join("workspace");
+    if ws_path.exists() {
+        let existing_name = meta
+            .as_ref()
+            .and_then(|m| m.workspace_name.clone())
+            .unwrap_or_else(|| "workspace".to_string());
+        let change_ref = match vcs_engine {
+            VcsEngine::GitGt => find_git_root(cards_dir).and_then(|r| git_head_ref(&r)),
+            VcsEngine::Jj => jj_head_ref(&ws_path),
+        };
+        return Ok(Some(WorkspaceInfo {
+            name: existing_name,
+            path: ws_path,
+            change_ref,
+        }));
+    }
+
+    match vcs_engine {
+        VcsEngine::GitGt => {
+            let Some(git_root) = find_git_root(cards_dir) else {
+                return Ok(None);
+            };
+            let branch = meta
+                .as_ref()
+                .and_then(|m| m.worktree_branch.clone())
+                .unwrap_or_else(|| format!("job/{}", card_id));
+            let status = if git_branch_exists(&git_root, &branch) {
+                StdCommand::new("git")
+                    .args([
+                        "worktree",
+                        "add",
+                        ws_path.to_string_lossy().as_ref(),
+                        branch.as_str(),
+                    ])
+                    .current_dir(&git_root)
+                    .status()
+            } else {
+                StdCommand::new("git")
+                    .args([
+                        "worktree",
+                        "add",
+                        "-b",
+                        branch.as_str(),
+                        ws_path.to_string_lossy().as_ref(),
+                    ])
+                    .current_dir(&git_root)
+                    .status()
+            };
+
+            if !matches!(status, Ok(s) if s.success()) {
+                anyhow::bail!("git worktree add failed for card {}", card_id);
+            }
+            let change_ref = git_head_ref(&ws_path).or_else(|| git_head_ref(&git_root));
+            Ok(Some(WorkspaceInfo {
+                name: branch,
+                path: ws_path,
+                change_ref,
+            }))
+        }
+        VcsEngine::Jj => {
+            let repo_root = find_git_root(cards_dir).unwrap_or_else(|| cards_dir.to_path_buf());
+            jobcard_core::worktree::ensure_jj_repo(&repo_root)?;
+            let ws_name = next_workspace_name(card_id);
+            jobcard_core::worktree::create_workspace_with_name(&repo_root, &ws_path, &ws_name)?;
+            let change_ref = jj_head_ref(&ws_path);
+            Ok(Some(WorkspaceInfo {
+                name: ws_name,
+                path: ws_path,
+                change_ref,
+            }))
+        }
+    }
+}
+
+fn persist_workspace_meta(
+    meta: &mut Option<Meta>,
+    card_dir: &Path,
+    vcs_engine: VcsEngine,
+    ws: Option<&WorkspaceInfo>,
+) {
+    if let Some(m) = meta.as_mut() {
+        m.vcs_engine = Some(vcs_engine.as_str().to_string());
+        if let Some(info) = ws {
+            m.workspace_name = Some(info.name.clone());
+            m.workspace_path = Some(info.path.to_string_lossy().to_string());
+            m.change_ref = info.change_ref.clone();
+        } else {
+            m.workspace_name = None;
+            m.workspace_path = None;
+            m.change_ref = None;
+        }
+        let _ = write_meta(card_dir, m);
     }
 }
 
@@ -2672,6 +3036,7 @@ fn zellij_open_card_pane(card_id: &str, card_dir: &Path) {
 #[allow(clippy::too_many_arguments)]
 async fn run_dispatcher(
     cards_dir: &Path,
+    vcs_engine: VcsEngine,
     adapter: &str,
     max_workers: usize,
     poll_ms: u64,
@@ -2735,15 +3100,25 @@ async fn run_dispatcher(
                         continue;
                     }
 
-                    // Create jj workspace for isolation (best-effort; non-fatal if jj not available)
-                    {
-                        let jj_root = find_git_root(cards_dir).unwrap_or_else(|| cards_dir.to_path_buf());
-                        let _ = jobcard_core::worktree::ensure_jj_repo(&jj_root);
-                        let ws_path = running_path.join("workspace");
-                        if let Err(e) = jobcard_core::worktree::create_workspace(&jj_root, &ws_path) {
-                            eprintln!("[dispatcher] jj workspace create failed: {e}");
-                        }
-                    }
+                    let mut meta = jobcard_core::read_meta(&running_path).ok();
+                    let card_id = meta
+                        .as_ref()
+                        .map(|m| m.id.clone())
+                        .unwrap_or_else(|| name.trim_end_matches(".jobcard").to_string());
+                    let ws_info =
+                        match prepare_workspace(vcs_engine, cards_dir, &running_path, &card_id, &mut meta) {
+                            Ok(info) => info,
+                            Err(err) => {
+                                eprintln!("[dispatcher] workspace prepare failed: {err}");
+                                if let Some(ref mut m) = meta {
+                                    m.failure_reason = Some(format!("workspace_prepare_failed: {err}"));
+                                    let _ = write_meta(&running_path, m);
+                                }
+                                let _ = fs::rename(&running_path, failed_dir.join(&name));
+                                continue;
+                            }
+                        };
+                    persist_workspace_meta(&mut meta, &running_path, vcs_engine, ws_info.as_ref());
 
                     // Adaptive zellij pane management
                     if is_zellij_interactive() {
@@ -2756,7 +3131,6 @@ async fn run_dispatcher(
 
                     available_slots = available_slots.saturating_sub(1);
 
-                    let mut meta = jobcard_core::read_meta(&running_path).ok();
                     let stage = meta
                         .as_ref()
                         .map(|m| m.stage.clone())

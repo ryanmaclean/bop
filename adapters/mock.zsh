@@ -41,7 +41,8 @@ fi
 } 2>> "$stderr_log" || true
 
 if [[ "${MOCK_STDOUT_TEXT:-}" != "" ]]; then
-  echo "${MOCK_STDOUT_TEXT}" >> "$stdout_log"
+  # Preserve JSON escapes exactly as provided by tests/callers.
+  print -r -- "${MOCK_STDOUT_TEXT}" >> "$stdout_log"
 fi
 
 exit "${MOCK_EXIT:-0}"

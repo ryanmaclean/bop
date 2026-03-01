@@ -41,10 +41,48 @@ pub struct StageRecord {
     pub blocked_by: Option<String>,
 }
 
+/// A label/tag attached to a card (e.g. {"name":"High Impact","kind":"effort"}).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Label {
+    pub name: String,
+    /// Freeform category: "domain", "effort", "scope", etc.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+/// A single checklist item inside a card.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Subtask {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub done: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Meta {
     pub id: String,
     pub created: DateTime<Utc>,
+
+    /// Human-readable display title (defaults to `id` when absent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+
+    /// One-sentence description shown as subtitle in the card.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Labels / tags shown as pills (Coding, Performance, High Impact, …).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<Label>,
+
+    /// 0–100 overall completion percentage (updated by agent / merge-gate).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<u8>,
+
+    /// Fine-grained subtasks shown as dots in the card preview.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subtasks: Vec<Subtask>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_type: Option<String>,
@@ -70,6 +108,30 @@ pub struct Meta {
     pub template_namespace: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vcs_engine: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_name: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_path: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change_ref: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policy_scope: Vec<String>,
+
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub decision_required: bool,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision_path: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_result: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_count: Option<u32>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -77,6 +139,10 @@ pub struct Meta {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub validation_summary: Option<realtime::ValidationSummary>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl Meta {

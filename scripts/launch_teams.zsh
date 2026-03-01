@@ -41,7 +41,7 @@ for (( i = 1; i <= ${#TEAMS}; i++ )); do
       --name "$team_name" \
       --floating \
       --close-on-exit \
-      -- bash -c "cd $ROOT && echo '=== $team_name ===' && $CMD 2>&1 | tee $log_file"
+      -- zsh -c "cd $ROOT && echo '=== $team_name ===' && $CMD 2>&1 | tee $log_file"
     sleep 0.5
   else
     # Subsequent panes: attach to session
@@ -49,7 +49,7 @@ for (( i = 1; i <= ${#TEAMS}; i++ )); do
       --name "$team_name" \
       --direction down \
       --close-on-exit \
-      -- bash -c "cd $ROOT && echo '=== $team_name ===' && $CMD 2>&1 | tee $log_file"
+      -- zsh -c "cd $ROOT && echo '=== $team_name ===' && $CMD 2>&1 | tee $log_file"
     sleep 0.3
   fi
 done

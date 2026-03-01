@@ -29,12 +29,19 @@ pub fn create_workspace(repo_root: &Path, ws_path: &Path) -> Result<()> {
     let name = ws_path
         .file_name()
         .and_then(|n| n.to_str())
-        .with_context(|| format!(
-            "workspace path has no usable basename: {}",
-            ws_path.display()
-        ))?;
+        .with_context(|| {
+            format!(
+                "workspace path has no usable basename: {}",
+                ws_path.display()
+            )
+        })?;
+    create_workspace_with_name(repo_root, ws_path, name)
+}
+
+/// Create a jj workspace at `ws_path` with an explicit workspace name.
+pub fn create_workspace_with_name(repo_root: &Path, ws_path: &Path, ws_name: &str) -> Result<()> {
     let out = std::process::Command::new("jj")
-        .args(["workspace", "add", "--name", name])
+        .args(["workspace", "add", "--name", ws_name])
         .arg(ws_path)
         .current_dir(repo_root)
         .output()
