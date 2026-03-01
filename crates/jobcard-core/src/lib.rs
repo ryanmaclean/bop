@@ -1,5 +1,8 @@
+pub mod config;
 pub mod realtime;
 pub mod worktree;
+
+pub use config::{load_config, Config};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
