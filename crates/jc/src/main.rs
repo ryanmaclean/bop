@@ -2637,25 +2637,12 @@ fn find_git_root(start: &Path) -> Option<std::path::PathBuf> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum ZellijMode {
-    Interactive, // $ZELLIJ set, stdout is a tty
-    Virtual,     // $ZELLIJ set, piped/headless
-    None,        // not in zellij
-}
-
-fn detect_zellij_mode() -> ZellijMode {
+fn is_zellij_interactive() -> bool {
     if std::env::var("ZELLIJ").is_err() {
-        return ZellijMode::None;
+        return false;
     }
-    // Check if stdout is a tty
     use std::os::unix::io::AsRawFd;
-    let is_tty = unsafe { libc::isatty(std::io::stdout().as_raw_fd()) } != 0;
-    if is_tty {
-        ZellijMode::Interactive
-    } else {
-        ZellijMode::Virtual
-    }
+    unsafe { libc::isatty(std::io::stdout().as_raw_fd()) != 0 }
 }
 
 fn count_running_cards(cards_dir: &Path) -> usize {
@@ -2676,17 +2663,9 @@ fn count_running_cards(cards_dir: &Path) -> usize {
 
 fn zellij_open_card_pane(card_id: &str, card_dir: &Path) {
     let log = card_dir.join("logs").join("stdout.log");
+    let Some(log_str) = log.to_str() else { return };
     let _ = std::process::Command::new("zellij")
-        .args([
-            "action",
-            "new-pane",
-            "--name",
-            card_id,
-            "--",
-            "tail",
-            "-f",
-            log.to_str().unwrap_or(""),
-        ])
+        .args(["action", "new-pane", "--name", card_id, "--", "tail", "-f", log_str])
         .output();
 }
 
@@ -2750,6 +2729,8 @@ async fn run_dispatcher(
                     };
 
                     let running_path = running_dir.join(&name);
+                    // Count before rename so the current card is not included in the tally
+                    let active = count_running_cards(cards_dir);
                     if fs::rename(&pending_path, &running_path).is_err() {
                         continue;
                     }
@@ -2765,9 +2746,7 @@ async fn run_dispatcher(
                     }
 
                     // Adaptive zellij pane management
-                    let zellij = detect_zellij_mode();
-                    let active = count_running_cards(cards_dir);
-                    if zellij == ZellijMode::Interactive {
+                    if is_zellij_interactive() {
                         match active {
                             0..=5 => zellij_open_card_pane(&name, &running_path),
                             6..=20 => { /* team pane already open per layout */ }
