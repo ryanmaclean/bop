@@ -159,6 +159,108 @@ fn ensure_mock_provider_command(cards_dir: &Path, adapter: &str) -> anyhow::Resu
     Ok(())
 }
 
+// ---------- changes.json types ----------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FileChange {
+    path: String,
+    status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DiffStats {
+    files_changed: usize,
+    insertions: usize,
+    deletions: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ChangesManifest {
+    branch: String,
+    files_changed: Vec<FileChange>,
+    stats: DiffStats,
+}
+
+/// Capture git diff summary for a branch and write `changes.json` into the card directory.
+async fn write_changes_json(card_dir: &Path, workdir: &Path, branch: &str) -> anyhow::Result<()> {
+    // Get name-status diff between merge base and HEAD of the branch
+    let name_status = TokioCommand::new("git")
+        .args(["diff", "--name-status", "HEAD~1"])
+        .current_dir(workdir)
+        .output()
+        .await
+        .context("failed to run git diff --name-status")?;
+
+    let ns_text = String::from_utf8_lossy(&name_status.stdout);
+    let mut files: Vec<FileChange> = Vec::new();
+    for line in ns_text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.splitn(2, '\t');
+        let status_code = parts.next().unwrap_or("").trim();
+        let path = parts.next().unwrap_or("").trim();
+        if path.is_empty() {
+            continue;
+        }
+        let status = match status_code.chars().next() {
+            Some('A') => "added",
+            Some('D') => "deleted",
+            Some('M') => "modified",
+            Some('R') => "renamed",
+            Some('C') => "copied",
+            _ => "modified",
+        };
+        files.push(FileChange {
+            path: path.to_string(),
+            status: status.to_string(),
+        });
+    }
+
+    // Get --stat for insertion/deletion counts
+    let stat_output = TokioCommand::new("git")
+        .args(["diff", "--stat", "HEAD~1"])
+        .current_dir(workdir)
+        .output()
+        .await
+        .context("failed to run git diff --stat")?;
+
+    let stat_text = String::from_utf8_lossy(&stat_output.stdout);
+    let mut insertions: usize = 0;
+    let mut deletions: usize = 0;
+    // The last line of --stat output looks like:
+    //  N files changed, X insertions(+), Y deletions(-)
+    if let Some(summary_line) = stat_text.lines().last() {
+        for part in summary_line.split(',') {
+            let part = part.trim();
+            if part.contains("insertion") {
+                if let Some(n) = part.split_whitespace().next() {
+                    insertions = n.parse().unwrap_or(0);
+                }
+            } else if part.contains("deletion") {
+                if let Some(n) = part.split_whitespace().next() {
+                    deletions = n.parse().unwrap_or(0);
+                }
+            }
+        }
+    }
+
+    let manifest = ChangesManifest {
+        branch: branch.to_string(),
+        files_changed: files.clone(),
+        stats: DiffStats {
+            files_changed: files.len(),
+            insertions,
+            deletions,
+        },
+    };
+
+    let json = serde_json::to_string_pretty(&manifest)?;
+    fs::write(card_dir.join("changes.json"), json)?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Provider {
     command: String,
@@ -1048,6 +1150,8 @@ async fn run_merge_gate(cards_dir: &Path, poll_ms: u64, once: bool) -> anyhow::R
                     // Step 4: Merge the card branch into main from the git root.
                     match jobcard_core::worktree::merge_card_branch(&git_root, &branch) {
                         Ok(true) => {
+                            // Capture changes before cleaning up.
+                            let _ = write_changes_json(&card_dir, &git_root, &branch).await;
                             // Merge succeeded — clean up the worktree, then move to merged/.
                             let _ = jobcard_core::worktree::remove_worktree(&git_root, &wt_path);
                             let _ = write_meta(&card_dir, &meta);
@@ -1090,6 +1194,13 @@ async fn run_merge_gate(cards_dir: &Path, poll_ms: u64, once: bool) -> anyhow::R
                         }
                     }
                 }
+
+                // No worktree — attempt to capture changes from the card dir itself.
+                let fallback_branch = meta
+                    .worktree_branch
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string());
+                let _ = write_changes_json(&card_dir, &card_dir, &fallback_branch).await;
 
                 let _ = write_meta(&card_dir, &meta);
                 let _ = fs::rename(&card_dir, merged_dir.join(&name));
