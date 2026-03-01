@@ -27,6 +27,13 @@ pub enum StageStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VcsEngine {
+    GitGt,
+    Jj,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StageRecord {
     pub status: StageStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -108,7 +115,7 @@ pub struct Meta {
     pub template_namespace: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vcs_engine: Option<String>,
+    pub vcs_engine: Option<VcsEngine>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_name: Option<String>,

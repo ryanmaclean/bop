@@ -1,6 +1,6 @@
 {
   "id": "template-refactor",
-  "title": "Refactor {{component_name}}",
+  "title": "Refactor dispatcher main loop",
   "description": "Refactor the target component for clarity, performance, or maintainability without changing external behaviour. All existing tests must continue to pass.",
   "labels": [
     { "name": "Coding",      "kind": "domain"  },

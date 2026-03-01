@@ -1,6 +1,6 @@
 {
   "id": "template-qa-only",
-  "title": "QA review: {{target}}",
+  "title": "QA review: merge-gate pipeline",
   "description": "Run the full acceptance-criteria suite and produce a qa_report.md. Flag regressions, flaky tests, and coverage gaps. Do not modify production code.",
   "labels": [
     { "name": "QA",          "kind": "domain" },

@@ -1,6 +1,6 @@
 {
   "id": "template-implement",
-  "title": "Implement {{feature_name}}",
+  "title": "Implement GTFS real-time feed parser",
   "description": "Implement the feature as specified in spec.md, following the plan in plan.json. Write tests, pass acceptance criteria, and keep changes scoped to the card's worktree.",
   "labels": [
     { "name": "Coding",      "kind": "domain" },
