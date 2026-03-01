@@ -1,0 +1,24 @@
+{
+  "id": "test-qa-job",
+  "created": "2026-03-01T07:21:00Z",
+  "stage": "qa",
+  "provider_chain": [
+    "mock"
+  ],
+  "stages": {
+    "qa": {
+      "status": "done",
+      "agent": "adapters/mock.sh",
+      "provider": "mock",
+      "duration_s": 0,
+      "started": "2026-03-01T07:27:47.283496Z"
+    }
+  },
+  "acceptance_criteria": [
+    "cd /Users/studio/gtfs && make test",
+    "cd /Users/studio/gtfs && cargo clippy -- -D warnings"
+  ],
+  "worktree_branch": "job/test-qa-job",
+  "retry_count": 0,
+  "failure_reason": "acceptance_criteria_failed"
+}

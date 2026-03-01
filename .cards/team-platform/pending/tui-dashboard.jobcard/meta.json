@@ -1,0 +1,29 @@
+{
+  "id": "tui-dashboard",
+  "created": "2026-03-01T18:18:35.250324Z",
+  "agent_type": "codex",
+  "stage": "implement",
+  "priority": 3,
+  "provider_chain": [
+    "mock",
+    "codex"
+  ],
+  "stages": {
+    "implement": {
+      "status": "pending",
+      "agent": "/Users/studio/gtfs/adapters/codex.sh",
+      "provider": "mock",
+      "duration_s": 778,
+      "started": "2026-03-01T18:48:53.521976Z"
+    }
+  },
+  "acceptance_criteria": [
+    "`jc dashboard` opens a full-terminal TUI that auto-updates when job state changes",
+    "Table shows: job ID, state (color-coded), provider, elapsed time, last log line",
+    "Press 'r' on a selected job to retry, 'k' to kill, 'l' to open log view, 'q' to quit",
+    "Log view shows streaming job stdout/stderr with scroll support",
+    "TUI falls back gracefully to `jc status` output if terminal is too small or non-interactive"
+  ],
+  "worktree_branch": "job/tui-dashboard",
+  "retry_count": 1
+}

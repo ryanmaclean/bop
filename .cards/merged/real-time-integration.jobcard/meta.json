@@ -1,0 +1,23 @@
+{
+  "id": "real-time-integration",
+  "created": "2026-03-01T07:50:00Z",
+  "stage": "implement",
+  "provider_chain": [
+    "claude"
+  ],
+  "stages": {
+    "implement": {
+      "status": "done",
+      "agent": "adapters/claude.sh",
+      "provider": "claude",
+      "duration_s": 249,
+      "started": "2026-03-01T07:49:17.079940Z"
+    }
+  },
+  "acceptance_criteria": [
+    "cd /Users/studio/gtfs && make test",
+    "cd /Users/studio/gtfs && cargo clippy -- -D warnings"
+  ],
+  "worktree_branch": "job/real-time-integration",
+  "retry_count": 0
+}

@@ -1,0 +1,29 @@
+{
+  "id": "web-ui",
+  "created": "2026-03-01T18:18:35.251794Z",
+  "agent_type": "codex",
+  "stage": "implement",
+  "priority": 3,
+  "provider_chain": [
+    "mock",
+    "codex"
+  ],
+  "stages": {
+    "implement": {
+      "status": "pending",
+      "agent": "/Users/studio/gtfs/adapters/codex.sh",
+      "provider": "codex",
+      "duration_s": 398,
+      "started": "2026-03-01T19:01:51.714508Z"
+    }
+  },
+  "acceptance_criteria": [
+    "`jc serve --ui` serves a web dashboard at http://localhost:8080/ui",
+    "Dashboard shows live job status with auto-refresh via WebSocket or SSE",
+    "Clicking a job shows its full details: spec, logs, output, audit trail",
+    "Providers page shows all configured providers with status and cooldowns",
+    "UI is functional without JavaScript enabled (server-side rendered fallback)"
+  ],
+  "worktree_branch": "job/web-ui",
+  "retry_count": 1
+}

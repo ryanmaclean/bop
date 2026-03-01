@@ -1,0 +1,19 @@
+{
+  "id": "example-feature",
+  "created": "2026-03-01T08:10:00Z",
+  "stage": "implement",
+  "provider_chain": [
+    "mock"
+  ],
+  "stages": {
+    "implement": {
+      "status": "done",
+      "agent": "adapters/mock.sh",
+      "provider": "mock",
+      "duration_s": 0,
+      "started": "2026-03-01T08:09:16.441470Z"
+    }
+  },
+  "worktree_branch": "job/example-feature",
+  "retry_count": 0
+}

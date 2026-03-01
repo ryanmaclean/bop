@@ -1,0 +1,13 @@
+{
+  "id": "template-qa-only",
+  "created": "2026-02-28T00:00:00Z",
+  "agent_type": null,
+  "stage": "qa",
+  "priority": null,
+  "provider_chain": ["mock2", "mock"],
+  "stages": {},
+  "acceptance_criteria": ["make test", "cargo clippy -- -D warnings"],
+  "worktree_branch": "job/template-qa-only",
+  "retry_count": 0,
+  "failure_reason": null
+}

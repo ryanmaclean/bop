@@ -1,0 +1,13 @@
+{
+  "id": "template-implement",
+  "created": "2026-02-28T00:00:00Z",
+  "agent_type": null,
+  "stage": "implement",
+  "priority": null,
+  "provider_chain": ["claude", "codex", "goose"],
+  "stages": {},
+  "acceptance_criteria": [],
+  "worktree_branch": "job/template-implement",
+  "retry_count": 0,
+  "failure_reason": null
+}

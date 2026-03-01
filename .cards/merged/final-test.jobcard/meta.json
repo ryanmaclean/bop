@@ -1,0 +1,23 @@
+{
+  "id": "final-test",
+  "created": "2026-03-01T07:35:00Z",
+  "stage": "implement",
+  "provider_chain": [
+    "mock"
+  ],
+  "stages": {
+    "implement": {
+      "status": "done",
+      "agent": "adapters/mock.sh",
+      "provider": "mock",
+      "duration_s": 0,
+      "started": "2026-03-01T07:33:15.451864Z"
+    }
+  },
+  "acceptance_criteria": [
+    "cd /Users/studio/gtfs && make test",
+    "cd /Users/studio/gtfs && cargo clippy -- -D warnings"
+  ],
+  "worktree_branch": "job/final-test",
+  "retry_count": 0
+}
