@@ -5,7 +5,8 @@
 allow_new_top_level_files = [
   "README.md",
   "Cargo.lock",
-  "deny.toml"
+  "deny.toml",
+  "plan.md"
 ]
 
 # Hard size caps.

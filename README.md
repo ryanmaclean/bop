@@ -2,6 +2,8 @@
 
 A pluggable job system for parallel AI coding agents that uses APFS/Btrfs filesystem primitives as the control plane. Jobs are macOS directory bundles (UTI-registered "cards") navigable in Finder with Quick Look previews. The filesystem IS the state machine, the job queue, and the audit log.
 
+Main operating plan for all agents: [`plan.md`](plan.md)
+
 ## 🚀 Quick Start
 
 ```bash

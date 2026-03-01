@@ -1,0 +1,141 @@
+# Main Plan: Simple, Bomb-Proof Card Factory
+
+This is the canonical operating plan for `main`.
+If you are a new agent, start here before writing code.
+
+## 1) Mission
+
+Build a low-latency, low-overhead software factory where:
+- filesystem cards are the source of truth,
+- `jc` is the only writer of state transitions,
+- UIs (Finder/Quick Look/vibekanban/zellij) are read and action surfaces,
+- reliability and cost control beat feature sprawl.
+
+Target behavior: Auto-Claude/Gas-Town style task manager with explicit stages:
+`spec -> plan -> implement -> qa -> merged|failed`.
+
+## 2) Non-Negotiables
+
+- Keep architecture simple: no new control-plane database for v1.
+- Keep one binary (`jc`) as the canonical command.
+- Every transition is a folder move by `jc`, never by UI direct write.
+- Every change must pass both:
+  - `make check`
+  - `jc policy check --staged` (or `scripts/policy_check.zsh --staged --cards-dir .cards`)
+- No hidden magic: behavior must be visible in files.
+
+## 3) 60-Second Start For Any Agent
+
+Run this exact sequence:
+
+```zsh
+./target/debug/jc doctor
+./target/debug/jc status
+./target/debug/jc inspect <card-id>
+make check
+./target/debug/jc policy check --staged
+```
+
+If no card is assigned, pick one from `.cards/pending/` and inspect it first.
+
+## 4) Card Symbol Protocol (Mandatory)
+
+Cards must carry a `glyph` in `meta.json` so priority/team are obvious instantly.
+
+Team by suit:
+- `spade` = CLI/runtime
+- `heart` = architecture/decisions
+- `diamond` = QA/reliability
+- `club` = platform/integration
+
+Priority by rank:
+- `A` = P1
+- `K/Q` = P2
+- `J/N` = P3
+- `10..2` = P4
+- joker = incident/emergency
+
+ASCII fallback for unicode-weak terminals:
+- `S-A`, `H-A`, `D-K`, `C-7`, `JOKER`
+
+Rule: if glyph is missing, add it before implementation work starts.
+
+## 5) Universal Shortcut (Low-Lift, Works For Any Agent)
+
+Agent working loop:
+
+1. Inspect card and constraints (`meta.json`, `spec.md`, `decision.md` if required).
+2. Work only inside declared scope.
+3. Run gates (`make check`, policy check).
+4. Let dispatcher/merge-gate move card state.
+
+No agent should invent a new workflow when this loop already works.
+
+## 6) Skill Strategy (How We Skill-Up Every Agent)
+
+Use one shared repo skill contract so any model behaves like a task manager.
+
+Required repo skills to add/maintain:
+- `ace-of-hearts`: architecture/P1 mode, forces decision record quality.
+- `implement-card`: scoped implementation with minimal churn.
+- `qa-gatekeeper`: acceptance + policy + failure reason hygiene.
+- `release-operator`: blue/green, canary, rollback and promotion gates.
+
+Each skill must enforce:
+- read card first,
+- respect `policy_scope`,
+- update only required files,
+- pass local gates before done.
+
+## 7) Codex CLI Integration (Keep It Thin)
+
+Use `adapters/codex.zsh` as the execution bridge.
+Do not couple control plane to Codex internals.
+Adapter contract remains:
+
+`adapter.sh <workdir> <prompt_file> <stdout_log> <stderr_log>`
+
+Exit `75` means rate-limit and must trigger retry/failover logic.
+
+## 8) MCP Policy (Optional, Not Required For Core)
+
+MCPs are optional accelerators, not dependencies.
+
+Use MCP only when needed for external systems:
+- GitHub PR metadata/actions,
+- observability and incident integrations,
+- optional dashboards.
+
+Do not make card lifecycle depend on MCP availability.
+If MCP is down, filesystem workflow must still function.
+
+## 9) User Surface Clarity
+
+Keep user mental model obvious:
+- Finder + Quick Look: primary visual board for card state.
+- vibekanban-cli: board view over `.cards` with no alternate state store.
+- zellij: operator console for dispatcher/merge-gate visibility.
+
+Users should always see card symbols and state quickly without reading long docs.
+
+## 10) Immediate Direction (Simplicity First)
+
+1. Enforce glyph presence/format in policy check.
+2. Add a tiny "agent start" script that prints:
+   - card id
+   - glyph meaning
+   - scope
+   - exact gate commands
+3. Keep rollout automation simple:
+   - blue/green roots
+   - deterministic canary routing
+   - automatic rollback on sustained green SLO breach
+4. Prefer fixing reliability gaps over adding features.
+
+## 11) Definition Of "Good"
+
+The system is good when:
+- a new agent can start in under 2 minutes,
+- card intent/priority is obvious from glyph + files,
+- policy catches out-of-scope churn before merge,
+- operational workflow keeps running without heroics.
