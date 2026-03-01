@@ -1,0 +1,34 @@
+{
+  "id": "template-qa-only",
+  "title": "QA review: {{target}}",
+  "description": "Run the full acceptance-criteria suite and produce a qa_report.md. Flag regressions, flaky tests, and coverage gaps. Do not modify production code.",
+  "labels": [
+    { "name": "QA",          "kind": "domain" },
+    { "name": "Reliability", "kind": "scope"  }
+  ],
+  "progress": 0,
+  "subtasks": [
+    { "id": "run-criteria", "title": "Run each acceptance criterion",  "done": false },
+    { "id": "coverage",     "title": "Check test coverage delta",      "done": false },
+    { "id": "report",       "title": "Write output/qa_report.md",      "done": false },
+    { "id": "flaky",        "title": "Flag any flaky or slow tests",   "done": false }
+  ],
+  "created": "2026-02-28T00:00:00Z",
+  "agent_type": null,
+  "stage": "qa",
+  "priority": 1,
+  "provider_chain": ["claude", "goose"],
+  "stages": {
+    "spec": { "status": "done",    "agent": "claude" },
+    "plan": { "status": "done",    "agent": "claude" },
+    "qa":   { "status": "pending", "agent": null     }
+  },
+  "acceptance_criteria": [
+    "cargo test -- --test-threads=1",
+    "cargo clippy -- -D warnings",
+    "cargo deny check licenses"
+  ],
+  "worktree_branch": "job/template-qa-only",
+  "retry_count": 0,
+  "failure_reason": null
+}

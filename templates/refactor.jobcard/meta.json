@@ -1,0 +1,36 @@
+{
+  "id": "template-refactor",
+  "title": "Refactor {{component_name}}",
+  "description": "Refactor the target component for clarity, performance, or maintainability without changing external behaviour. All existing tests must continue to pass.",
+  "labels": [
+    { "name": "Coding",      "kind": "domain"  },
+    { "name": "Performance", "kind": "domain"  },
+    { "name": "High Impact", "kind": "effort"  }
+  ],
+  "progress": 0,
+  "subtasks": [
+    { "id": "baseline",   "title": "Run tests to establish baseline",          "done": false },
+    { "id": "identify",   "title": "Identify hotspots / code smells",          "done": false },
+    { "id": "refactor",   "title": "Apply targeted refactor, no new features", "done": false },
+    { "id": "tests-pass", "title": "Confirm all tests still pass",             "done": false },
+    { "id": "benchmark",  "title": "Note before/after metrics in output/",     "done": false }
+  ],
+  "created": "2026-02-28T00:00:00Z",
+  "agent_type": null,
+  "stage": "implement",
+  "priority": 3,
+  "provider_chain": ["claude", "codex"],
+  "stages": {
+    "spec":      { "status": "done",    "agent": "claude" },
+    "plan":      { "status": "done",    "agent": "claude" },
+    "implement": { "status": "pending", "agent": null     },
+    "qa":        { "status": "blocked", "agent": "claude", "blocked_by": "implement" }
+  },
+  "acceptance_criteria": [
+    "cargo test",
+    "cargo clippy -- -D warnings"
+  ],
+  "worktree_branch": "job/template-refactor",
+  "retry_count": 0,
+  "failure_reason": null
+}
