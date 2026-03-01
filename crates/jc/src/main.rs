@@ -161,6 +161,46 @@ enum Command {
         #[command(subcommand)]
         action: WorktreeAction,
     },
+    /// Manage AI providers (list, add, remove, status).
+    Providers {
+        #[command(subcommand)]
+        cmd: ProvidersCommand,
+    },
+    /// Read and write global/project config settings.
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ConfigAction {
+    /// Print the current value of a config key.
+    Get { key: String },
+    /// Set a config key to a value (writes to the config file).
+    Set { key: String, value: String },
+}
+
+#[derive(Subcommand, Debug)]
+enum ProvidersCommand {
+    /// List all configured providers.
+    List,
+    /// Add a new provider.
+    Add {
+        name: String,
+        #[arg(long)]
+        adapter: String,
+        #[arg(long)]
+        model: Option<String>,
+    },
+    /// Remove a provider.
+    Remove {
+        name: String,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Show per-provider job statistics.
+    Status,
 }
 
 #[derive(Subcommand, Debug)]
@@ -216,6 +256,7 @@ enum MemoryOutput {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 struct MemoryOutputOps {
     #[serde(default)]
     set: BTreeMap<String, MemoryOutputValue>,
@@ -313,6 +354,8 @@ struct Provider {
     rate_limit_exit: i32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     cooldown_until_epoch_s: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -335,6 +378,16 @@ struct GeneratedCardDraft {
     acceptance_criteria: Vec<String>,
 }
 
+fn validate_provider(name: &str, p: &Provider) -> anyhow::Result<()> {
+    if name.trim().is_empty() {
+        anyhow::bail!("provider name cannot be empty");
+    }
+    if p.command.trim().is_empty() {
+        anyhow::bail!("provider '{}': command/adapter cannot be empty", name);
+    }
+    Ok(())
+}
+
 fn providers_path(cards_dir: &Path) -> PathBuf {
     cards_dir.join("providers.json")
 }
@@ -345,10 +398,17 @@ fn read_providers(cards_dir: &Path) -> anyhow::Result<ProvidersFile> {
         return Ok(ProvidersFile::default());
     }
     let bytes = fs::read(p)?;
-    Ok(serde_json::from_slice(&bytes)?)
+    let pf: ProvidersFile = serde_json::from_slice(&bytes)?;
+    for (name, provider) in &pf.providers {
+        validate_provider(name, provider)?;
+    }
+    Ok(pf)
 }
 
 fn write_providers(cards_dir: &Path, pf: &ProvidersFile) -> anyhow::Result<()> {
+    for (name, provider) in &pf.providers {
+        validate_provider(name, provider)?;
+    }
     let bytes = serde_json::to_vec_pretty(pf)?;
     fs::write(providers_path(cards_dir), bytes)?;
     Ok(())
@@ -370,6 +430,7 @@ fn seed_providers(cards_dir: &Path) -> anyhow::Result<()> {
             command: "adapters/mock.sh".to_string(),
             rate_limit_exit: 75,
             cooldown_until_epoch_s: None,
+            model: None,
         },
     );
     pf.providers.insert(
@@ -378,6 +439,7 @@ fn seed_providers(cards_dir: &Path) -> anyhow::Result<()> {
             command: "adapters/mock.sh".to_string(),
             rate_limit_exit: 75,
             cooldown_until_epoch_s: None,
+            model: None,
         },
     );
     write_providers(cards_dir, &pf)?;
@@ -1292,6 +1354,23 @@ async fn main() -> anyhow::Result<()> {
             WorktreeAction::Create { id } => cmd_worktree_create(&root, &id),
             WorktreeAction::Clean { dry_run } => cmd_worktree_clean(&root, dry_run),
         },
+        Command::Providers { cmd } => match cmd {
+            ProvidersCommand::List => cmd_providers_list(&root),
+            ProvidersCommand::Add {
+                name,
+                adapter,
+                model,
+            } => cmd_providers_add(&root, &name, &adapter, model.as_deref()),
+            ProvidersCommand::Remove { name, force } => cmd_providers_remove(&root, &name, force),
+            ProvidersCommand::Status => cmd_providers_status(&root),
+        },
+        Command::Config { action } => {
+            let config_path = resolve_config_path();
+            match action {
+                ConfigAction::Get { key } => cmd_config_get(&config_path, &key),
+                ConfigAction::Set { key, value } => cmd_config_set(&config_path, &key, &value),
+            }
+        }
     }
 }
 
@@ -4182,4 +4261,128 @@ fn cmd_worktree_create(_root: &Path, _id: &str) -> anyhow::Result<()> {
 
 fn cmd_worktree_clean(_root: &Path, _dry_run: bool) -> anyhow::Result<()> {
     todo!()
+}
+
+// ---------------------------------------------------------------------------
+// Providers subcommand stubs (implementation by providers-cli agent)
+// ---------------------------------------------------------------------------
+
+fn cmd_providers_list(_root: &Path) -> anyhow::Result<()> {
+    todo!("providers list not yet implemented")
+}
+
+fn cmd_providers_add(
+    _root: &Path,
+    _name: &str,
+    _adapter: &str,
+    _model: Option<&str>,
+) -> anyhow::Result<()> {
+    todo!("providers add not yet implemented")
+}
+
+fn cmd_providers_remove(_root: &Path, _name: &str, _force: bool) -> anyhow::Result<()> {
+    todo!("providers remove not yet implemented")
+}
+
+fn cmd_providers_status(_root: &Path) -> anyhow::Result<()> {
+    todo!("providers status not yet implemented")
+}
+
+// ---------------------------------------------------------------------------
+// Config subcommands
+// ---------------------------------------------------------------------------
+
+/// Return the config path: JOBCARD_CONFIG env var if set, else project config path.
+fn resolve_config_path() -> PathBuf {
+    if let Ok(p) = std::env::var("JOBCARD_CONFIG") {
+        return PathBuf::from(p);
+    }
+    jobcard_core::config::project_config_path()
+}
+
+fn cmd_config_get(config_path: &Path, key: &str) -> anyhow::Result<()> {
+    let cfg = if config_path.exists() {
+        jobcard_core::config::read_config_file(config_path)?
+    } else {
+        jobcard_core::Config::default()
+    };
+
+    match key {
+        "default_provider_chain" => match cfg.default_provider_chain {
+            Some(chain) => println!("{}", chain.join(",")),
+            None => println!("(unset)"),
+        },
+        "max_concurrent" => match cfg.max_concurrent {
+            Some(v) => println!("{}", v),
+            None => println!("(unset)"),
+        },
+        "cooldown_seconds" => match cfg.cooldown_seconds {
+            Some(v) => println!("{}", v),
+            None => println!("(unset)"),
+        },
+        "log_retention_days" => match cfg.log_retention_days {
+            Some(v) => println!("{}", v),
+            None => println!("(unset)"),
+        },
+        "default_template" => match cfg.default_template {
+            Some(v) => println!("{}", v),
+            None => println!("(unset)"),
+        },
+        _ => anyhow::bail!(
+            "unknown config key '{}'. Valid keys: default_provider_chain, \
+            max_concurrent, cooldown_seconds, log_retention_days, default_template",
+            key
+        ),
+    }
+    Ok(())
+}
+
+fn cmd_config_set(config_path: &Path, key: &str, value: &str) -> anyhow::Result<()> {
+    let mut cfg = if config_path.exists() {
+        jobcard_core::config::read_config_file(config_path)?
+    } else {
+        jobcard_core::Config::default()
+    };
+
+    match key {
+        "default_provider_chain" => {
+            cfg.default_provider_chain =
+                Some(value.split(',').map(|s| s.trim().to_string()).collect());
+        }
+        "max_concurrent" => {
+            cfg.max_concurrent = Some(value.parse::<usize>().with_context(|| {
+                format!(
+                    "max_concurrent must be a positive integer, got: {}",
+                    value
+                )
+            })?);
+        }
+        "cooldown_seconds" => {
+            cfg.cooldown_seconds = Some(value.parse::<u64>().with_context(|| {
+                format!(
+                    "cooldown_seconds must be a non-negative integer, got: {}",
+                    value
+                )
+            })?);
+        }
+        "log_retention_days" => {
+            cfg.log_retention_days = Some(value.parse::<u64>().with_context(|| {
+                format!(
+                    "log_retention_days must be a non-negative integer, got: {}",
+                    value
+                )
+            })?);
+        }
+        "default_template" => {
+            cfg.default_template = Some(value.to_string());
+        }
+        _ => anyhow::bail!(
+            "unknown config key '{}'. Valid keys: default_provider_chain, \
+            max_concurrent, cooldown_seconds, log_retention_days, default_template",
+            key
+        ),
+    }
+
+    jobcard_core::config::write_config_file(config_path, &cfg)?;
+    Ok(())
 }
