@@ -1,6 +1,6 @@
 use anyhow::Context;
 use chrono::Utc;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use jobcard_core::{write_meta, Meta};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -82,6 +82,11 @@ enum Command {
     /// Show meta, spec, and a log summary for a card.
     Inspect {
         id: String,
+    },
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        shell: clap_complete::Shell,
     },
 }
 
@@ -543,6 +548,10 @@ async fn main() -> anyhow::Result<()> {
         Command::Kill { id } => cmd_kill(&root, &id).await,
         Command::Logs { id, follow } => cmd_logs(&root, &id, follow).await,
         Command::Inspect { id } => cmd_inspect(&root, &id),
+        Command::Completions { shell } => {
+            clap_complete::generate(shell, &mut Cli::command(), "jc", &mut std::io::stdout());
+            Ok(())
+        }
     }
 }
 
