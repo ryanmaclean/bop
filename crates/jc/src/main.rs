@@ -120,6 +120,10 @@ enum Command {
     Kill {
         id: String,
     },
+    /// Approve a card that has decision_required set, unblocking it for dispatch.
+    Approve {
+        id: String,
+    },
     /// Stream stdout and stderr logs for a card.
     Logs {
         id: String,
@@ -1676,6 +1680,7 @@ async fn main() -> anyhow::Result<()> {
         } => run_merge_gate(&root, poll_ms, once, vcs_engine).await,
         Command::Retry { id } => cmd_retry(&root, &id),
         Command::Kill { id } => cmd_kill(&root, &id).await,
+        Command::Approve { id } => cmd_approve(&root, &id),
         Command::Logs { id, follow } => cmd_logs(&root, &id, follow).await,
         Command::Inspect { id } => cmd_inspect(&root, &id),
         Command::Memory { cmd } => match cmd {
@@ -3333,6 +3338,9 @@ async fn run_dispatcher(
                     };
 
                     let _ = fs::rename(&running_path, &target);
+                    if exit_code == 0 && !validation_triggered_fail {
+                        spawn_child_cards(cards_dir, &target);
+                    }
                 }
             }
         }
@@ -3344,6 +3352,77 @@ async fn run_dispatcher(
     }
 
     Ok(())
+}
+
+// ── child-card-pipeline ───────────────────────────────────────────────────────
+
+fn spawn_child_cards(cards_dir: &Path, done_card_dir: &Path) {
+    let yaml_path = done_card_dir.join("output/cards.yaml");
+    if !yaml_path.exists() {
+        return;
+    }
+
+    let Ok(text) = fs::read_to_string(&yaml_path) else {
+        return;
+    };
+    let Ok(entries) = serde_yaml::from_str::<Vec<serde_yaml::Value>>(&text) else {
+        return;
+    };
+
+    let pending_dir = cards_dir.join("pending");
+    let _ = fs::create_dir_all(&pending_dir);
+
+    for entry in entries {
+        let Some(id) = entry["id"].as_str() else {
+            continue;
+        };
+
+        let child_dir = pending_dir.join(format!("{}.jobcard", id));
+        if child_dir.exists() {
+            continue; // don't overwrite
+        }
+        let _ = fs::create_dir_all(child_dir.join("logs"));
+        let _ = fs::create_dir_all(child_dir.join("output"));
+
+        let meta = serde_json::json!({
+            "id": id,
+            "title": entry["title"].as_str().unwrap_or(id),
+            "description": entry["description"].as_str().unwrap_or(""),
+            "stage": entry["stage"].as_str().unwrap_or("spec"),
+            "priority": entry["priority"].as_i64().unwrap_or(3),
+            "created": chrono::Utc::now().to_rfc3339(),
+            "provider_chain": entry["provider_chain"].as_sequence()
+                .map(|s| s.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+                .unwrap_or_else(|| vec!["claude"]),
+            "stages": {
+                "spec": {"status": "pending", "agent": null},
+                "plan": {"status": "blocked", "agent": null},
+                "implement": {"status": "blocked", "agent": null},
+                "qa": {"status": "blocked", "agent": null}
+            },
+            "acceptance_criteria": entry["acceptance_criteria"].as_sequence()
+                .map(|s| s.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+                .unwrap_or_default(),
+            "retry_count": 0
+        });
+        let _ = fs::write(
+            child_dir.join("meta.json"),
+            serde_json::to_vec_pretty(&meta).unwrap(),
+        );
+
+        if let Some(desc) = entry["description"].as_str() {
+            let _ = fs::write(
+                child_dir.join("spec.md"),
+                format!(
+                    "# {}\n\n{}\n",
+                    entry["title"].as_str().unwrap_or(id),
+                    desc
+                ),
+            );
+        }
+
+        eprintln!("[child-cards] created {}", id);
+    }
 }
 
 async fn run_card(
@@ -3974,6 +4053,37 @@ async fn kill_card(root: &Path, id: &str) -> anyhow::Result<String> {
         .with_context(|| format!("failed to move card to failed/: {}", id))?;
 
     Ok(format!("killed pid {} and moved '{}' to failed/", pid, id))
+}
+
+// ── approve ───────────────────────────────────────────────────────────────────
+
+fn cmd_approve(root: &Path, id: &str) -> anyhow::Result<()> {
+    approve_card(root, id)?;
+    Ok(())
+}
+
+fn approve_card(root: &Path, id: &str) -> anyhow::Result<()> {
+    let card = find_card(root, id).with_context(|| format!("card not found: {}", id))?;
+    let state = card
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown");
+
+    let mut meta = jobcard_core::read_meta(&card)?;
+    meta.decision_required = false;
+
+    if state == "pending" {
+        if let Some(record) = meta.stages.get_mut(&meta.stage) {
+            if record.status == jobcard_core::StageStatus::Blocked {
+                record.status = jobcard_core::StageStatus::Pending;
+            }
+        }
+    }
+
+    write_meta(&card, &meta)?;
+    println!("Approved {}", id);
+    Ok(())
 }
 
 // ── logs ─────────────────────────────────────────────────────────────────────
