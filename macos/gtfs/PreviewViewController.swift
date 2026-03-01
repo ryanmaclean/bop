@@ -15,10 +15,12 @@ private struct JobCardMeta: Codable {
     let progress: Int?
     let subtasks: [MetaSubtask]?
     let stages: [String: MetaStageRecord]?
+    let glyph: String?
     let acceptanceCriteria: [String]?
 
     enum CodingKeys: String, CodingKey {
         case id, title, description, stage, priority, created, labels, progress, subtasks, stages
+        case glyph
         case acceptanceCriteria = "acceptance_criteria"
     }
 }
@@ -243,7 +245,13 @@ struct JobCardPreview: View {
         VStack(alignment: .leading, spacing: 0) {
 
             // Header
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                // Playing-card glyph — unique visual token for this card
+                if let g = m.glyph {
+                    Text(g)
+                        .font(.system(size: 42))
+                        .frame(width: 52, height: 52)
+                }
                 VStack(alignment: .leading, spacing: 5) {
                     Text(displayTitle)
                         .font(.system(size: 15, weight: .bold))

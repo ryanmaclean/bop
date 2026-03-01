@@ -71,6 +71,15 @@ pub struct Meta {
     pub id: String,
     pub created: DateTime<Utc>,
 
+    /// Unicode playing-card glyph (U+1F0A0–U+1F0FF) used as the card's
+    /// unique visual token across all surfaces (QL preview, zellij pane
+    /// title, `jc list` output, vibekanban board).
+    /// Suit encodes team: ♠=CLI ♥=Arch ♦=Quality ♣=Platform.
+    /// Rank encodes priority: Ace=P1, King/Queen=P2, Jack/Knight=P3, 2-10=P4.
+    /// Jokers (🃏🂿🃟) = wildcard/emergency. Trump cards = cross-team escalation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glyph: Option<String>,
+
     /// Human-readable display title (defaults to `id` when absent).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
