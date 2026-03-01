@@ -1,0 +1,25 @@
+[package]
+name = "jc"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+walkdir.workspace = true
+jobcard-core = { path = "../jobcard-core" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "net"] }
+serde.workspace = true
+notify = "8.2.0"
+axum = "0.7"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors"] }
+async-stream = "0.3"
+utoipa = { version = "5", features = ["chrono"] }
+
+[dev-dependencies]
+tempfile = "3"
+reqwest = { version = "0.12", features = ["blocking", "json"] }

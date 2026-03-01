@@ -1,0 +1,46 @@
+{
+  "project_root": "/Users/studio/gtfs",
+  "project_type": "single",
+  "services": {
+    "main": {
+      "name": "main",
+      "path": "/Users/studio/gtfs",
+      "language": "Rust",
+      "framework": null,
+      "type": "unknown",
+      "package_manager": "cargo",
+      "dependency_locations": [
+        {
+          "type": "cargo_target",
+          "path": "target",
+          "exists": true
+        }
+      ],
+      "environment": {
+        "variables": {
+          "LINEAR_API_KEY": {
+            "value": "<REDACTED>",
+            "source": "../.env",
+            "type": "string",
+            "sensitive": true,
+            "required": false
+          }
+        },
+        "required_count": 0,
+        "optional_count": 0,
+        "detected_count": 1
+      }
+    }
+  },
+  "infrastructure": {},
+  "conventions": {},
+  "dependency_locations": [
+    {
+      "type": "cargo_target",
+      "path": "target",
+      "exists": true,
+      "service": "main",
+      "package_manager": "cargo"
+    }
+  ]
+}

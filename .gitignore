@@ -1,0 +1,15 @@
+# Rust build artifacts
+/target/
+
+# Card runtime state (logs, worktrees — ephemeral)
+.cards/*/running/
+.cards/*/done/
+.cards/*/failed/
+.cards/*/merged/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+/tmp/jobcard-*.log
