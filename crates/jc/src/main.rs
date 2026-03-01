@@ -1,30 +1,15 @@
 use anyhow::Context;
-use async_stream::stream;
-use axum::extract::{Path as AxumPath, Query, State};
-use axum::http::StatusCode;
-use axum::response::{
-    sse::{Event, Sse},
-    Html, IntoResponse,
-};
-use axum::routing::{get, post};
-use axum::{Json, Router};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use clap::{Parser, Subcommand, ValueEnum};
 use jobcard_core::{write_meta, Meta, VcsEngine as CoreVcsEngine};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::convert::Infallible;
-use std::fmt::Write as _;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 use std::time::Duration;
-use tokio::net::TcpListener;
 use tokio::process::Command as TokioCommand;
-use tower_http::cors::CorsLayer;
-use utoipa::{OpenApi, ToSchema};
 use walkdir::WalkDir;
 
 #[derive(Parser, Debug)]
@@ -38,8 +23,6 @@ struct Cli {
 }
 
 const DEFAULT_MEMORY_TTL_SECONDS: i64 = 60 * 60 * 24 * 30;
-const UI_SSE_POLL_MS: u64 = 1000;
-const UI_MAX_FILE_PREVIEW_BYTES: usize = 64 * 1024;
 
 #[derive(Subcommand, Debug)]
 enum Command {
@@ -47,18 +30,6 @@ enum Command {
     New {
         template: String,
         id: String,
-    },
-    /// Create a new job draft from a natural-language description.
-    Create {
-        /// Plain-language task description used to generate the card draft.
-        #[arg(long = "from-description")]
-        from_description: String,
-        /// Optional explicit id for the generated card.
-        #[arg(long)]
-        id: Option<String>,
-        /// Skip confirmation prompt and write draft immediately.
-        #[arg(long)]
-        yes: bool,
     },
     Status {
         #[arg(default_value = "")]
@@ -135,39 +106,6 @@ enum Command {
     Inspect {
         id: String,
     },
-    /// Manage per-template persistent memory.
-    Memory {
-        #[command(subcommand)]
-        cmd: MemoryCommand,
-    },
-    /// Start the REST API server for CI/CD integration.
-    Serve {
-        /// Port to listen on.
-        #[arg(long, default_value_t = 8080)]
-        port: u16,
-        /// Bind host or IP (default localhost). WARNING: non-localhost exposes
-        /// unauthenticated job control endpoints.
-        #[arg(long, default_value = "127.0.0.1")]
-        bind: String,
-        /// Serve the browser dashboard at /ui.
-        #[arg(long)]
-        ui: bool,
-    },
-    /// Manage git worktrees associated with job cards.
-    Worktree {
-        #[command(subcommand)]
-        action: WorktreeAction,
-    },
-    /// Manage AI providers (list, add, remove, status).
-    Providers {
-        #[command(subcommand)]
-        cmd: ProvidersCommand,
-    },
-    /// Read and write global/project config settings.
-    Config {
-        #[command(subcommand)]
-        action: ConfigAction,
-    },
     /// Run policy gates.
     Policy {
         #[command(subcommand)]
@@ -180,6 +118,33 @@ enum Command {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+    /// Async planning-poker estimation using playing-card glyphs.
+    Poker {
+        #[command(subcommand)]
+        action: PokerAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum PokerAction {
+    /// Open a new estimation round for a card.
+    Open { id: String },
+    /// Submit your estimate (interactive picker if glyph omitted).
+    Submit {
+        id: String,
+        /// Playing-card glyph, e.g. 🂻 (Jack of Hearts = effort 13pt).
+        /// Omit for interactive picker.
+        glyph: Option<String>,
+        /// Your name/handle (defaults to $USER).
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Reveal all estimates, print spread, detect outliers.
+    Reveal { id: String },
+    /// Show who has submitted (names only, not glyphs).
+    Status { id: String },
+    /// Commit the agreed glyph to meta.json and close the round.
+    Consensus { id: String, glyph: String },
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, ValueEnum, PartialEq, Eq)]
@@ -210,67 +175,6 @@ enum PolicyAction {
         #[arg(long)]
         staged: bool,
     },
-}
-
-#[derive(Subcommand, Debug)]
-enum ConfigAction {
-    /// Print the current value of a config key.
-    Get { key: String },
-    /// Set a config key to a value (writes to the config file).
-    Set { key: String, value: String },
-}
-
-#[derive(Subcommand, Debug)]
-enum ProvidersCommand {
-    /// List all configured providers.
-    List,
-    /// Add a new provider.
-    Add {
-        name: String,
-        #[arg(long)]
-        adapter: String,
-        #[arg(long)]
-        model: Option<String>,
-    },
-    /// Remove a provider.
-    Remove {
-        name: String,
-        #[arg(long)]
-        force: bool,
-    },
-    /// Show per-provider job statistics.
-    Status,
-}
-
-#[derive(Subcommand, Debug)]
-enum WorktreeAction {
-    /// List all job card worktrees and flag orphans.
-    List,
-    /// Create a git worktree for a pending or running job card.
-    Create { id: String },
-    /// Remove worktrees for done/merged cards or orphaned git worktrees.
-    Clean {
-        #[arg(long)]
-        dry_run: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum MemoryCommand {
-    /// List all memory entries in a namespace.
-    List { namespace: String },
-    /// Get a single memory entry value by key.
-    Get { namespace: String, key: String },
-    /// Set a memory entry with a TTL.
-    Set {
-        namespace: String,
-        key: String,
-        value: String,
-        #[arg(long, default_value_t = DEFAULT_MEMORY_TTL_SECONDS)]
-        ttl_seconds: i64,
-    },
-    /// Delete a memory entry by key.
-    Delete { namespace: String, key: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -403,18 +307,6 @@ struct ProvidersFile {
     default_provider: Option<String>,
     #[serde(default)]
     providers: std::collections::BTreeMap<String, Provider>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct GeneratedCardDraft {
-    #[serde(default, alias = "template")]
-    suggested_template: String,
-    #[serde(default)]
-    id: Option<String>,
-    #[serde(default, alias = "spec")]
-    spec_md: String,
-    #[serde(default)]
-    acceptance_criteria: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -716,6 +608,8 @@ fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
             labels: vec![],
             progress: None,
             subtasks: vec![],
+            poker_round: None,
+            estimates: Default::default(),
         };
         write_meta(&implement, &meta)?;
 
@@ -799,6 +693,8 @@ fn create_card(
         labels: vec![],
         progress: None,
         subtasks: vec![],
+        poker_round: None,
+        estimates: Default::default(),
     });
 
     meta.id = id.to_string();
@@ -822,329 +718,6 @@ fn create_card(
     }
 
     Ok(card_dir)
-}
-
-fn list_templates(cards_dir: &Path) -> anyhow::Result<Vec<String>> {
-    let templates_dir = cards_dir.join("templates");
-    let entries = fs::read_dir(&templates_dir).with_context(|| {
-        format!(
-            "failed to read templates directory: {}",
-            templates_dir.display()
-        )
-    })?;
-
-    let mut templates = Vec::new();
-    for ent in entries.flatten() {
-        let path = ent.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        if let Some(stripped) = name.strip_suffix(".jobcard") {
-            if !stripped.trim().is_empty() {
-                templates.push(stripped.to_string());
-            }
-        }
-    }
-    templates.sort();
-    if templates.is_empty() {
-        anyhow::bail!("no templates found under {}", templates_dir.display());
-    }
-    Ok(templates)
-}
-
-fn select_default_provider(cards_dir: &Path) -> anyhow::Result<(String, Provider)> {
-    let pf = read_providers(cards_dir)?;
-    if pf.providers.is_empty() {
-        anyhow::bail!(
-            "no providers configured in {}",
-            providers_path(cards_dir).display()
-        );
-    }
-
-    if let Some(name) = pf
-        .default_provider
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        let provider = pf
-            .providers
-            .get(name)
-            .cloned()
-            .with_context(|| format!("default provider '{}' not found", name))?;
-        return Ok((name.to_string(), provider));
-    }
-
-    if let Some(provider) = pf.providers.get("mock").cloned() {
-        return Ok(("mock".to_string(), provider));
-    }
-
-    let (name, provider) = pf
-        .providers
-        .iter()
-        .next()
-        .map(|(name, provider)| (name.clone(), provider.clone()))
-        .context("no providers configured")?;
-    Ok((name, provider))
-}
-
-fn build_generation_prompt(description: &str, templates: &[String]) -> String {
-    let available = templates.join(", ");
-    format!(
-        "You generate JobCard drafts.\n\
-Return ONLY JSON and no markdown.\n\
-Required keys: suggested_template, id, spec_md, acceptance_criteria.\n\
-- suggested_template: choose one of: {available}\n\
-- id: kebab-case short id\n\
-- spec_md: complete markdown spec\n\
-- acceptance_criteria: array of concrete acceptance criteria strings\n\
-Task description:\n\
-{description}\n"
-    )
-}
-
-async fn run_provider_prompt(adapter: &str, prompt: &str) -> anyhow::Result<(i32, String, String)> {
-    let nonce = Utc::now()
-        .timestamp_nanos_opt()
-        .unwrap_or_else(|| Utc::now().timestamp_millis().saturating_mul(1_000_000));
-    let temp_dir =
-        std::env::temp_dir().join(format!("jc-create-draft-{}-{}", std::process::id(), nonce));
-    fs::create_dir_all(&temp_dir)?;
-
-    let prompt_file = temp_dir.join("prompt.md");
-    let stdout_log = temp_dir.join("stdout.log");
-    let stderr_log = temp_dir.join("stderr.log");
-    let memory_out = temp_dir.join("memory-out.json");
-
-    fs::write(&prompt_file, prompt)?;
-
-    let mut cmd = if adapter.ends_with(".zsh") {
-        let mut c = TokioCommand::new("zsh");
-        let adapter_path = if std::path::Path::new(adapter).is_absolute() {
-            adapter.to_string()
-        } else {
-            format!("{}/{}", std::env::current_dir()?.display(), adapter)
-        };
-        c.arg(adapter_path);
-        c
-    } else {
-        TokioCommand::new(adapter)
-    };
-
-    let status = cmd
-        .arg(&temp_dir)
-        .arg(&prompt_file)
-        .arg(&stdout_log)
-        .arg(&stderr_log)
-        .arg(&memory_out)
-        .env("JOBCARD_MEMORY_OUT", &memory_out)
-        .status()
-        .await
-        .with_context(|| format!("failed to spawn adapter: {}", adapter))?;
-
-    let code = status.code().unwrap_or(1);
-    let stdout = fs::read_to_string(&stdout_log).unwrap_or_default();
-    let stderr = fs::read_to_string(&stderr_log).unwrap_or_default();
-    let _ = fs::remove_dir_all(&temp_dir);
-
-    Ok((code, stdout, stderr))
-}
-
-fn parse_generated_draft(stdout: &str) -> anyhow::Result<GeneratedCardDraft> {
-    let trimmed = stdout.trim();
-    if let Ok(draft) = serde_json::from_str::<GeneratedCardDraft>(trimmed) {
-        return Ok(draft);
-    }
-
-    for (idx, ch) in stdout.char_indices() {
-        if ch != '{' {
-            continue;
-        }
-        let slice = &stdout[idx..];
-        let mut de = serde_json::Deserializer::from_str(slice);
-        let Ok(value) = serde_json::Value::deserialize(&mut de) else {
-            continue;
-        };
-        let Ok(draft) = serde_json::from_value::<GeneratedCardDraft>(value) else {
-            continue;
-        };
-        return Ok(draft);
-    }
-
-    anyhow::bail!("provider output did not contain parseable draft JSON");
-}
-
-fn sanitize_card_id_candidate(raw: &str) -> String {
-    let mut out = String::new();
-    let mut prev_dash = false;
-
-    for ch in raw.trim().chars() {
-        if ch.is_ascii_alphanumeric() {
-            out.push(ch.to_ascii_lowercase());
-            prev_dash = false;
-        } else if !prev_dash {
-            out.push('-');
-            prev_dash = true;
-        }
-    }
-
-    while out.starts_with('-') {
-        out.remove(0);
-    }
-    while out.ends_with('-') {
-        out.pop();
-    }
-
-    if out.is_empty() {
-        "job".to_string()
-    } else {
-        out
-    }
-}
-
-fn card_exists_anywhere(cards_dir: &Path, id: &str) -> bool {
-    for dir in ["pending", "running", "done", "merged", "failed"] {
-        if cards_dir.join(dir).join(format!("{}.jobcard", id)).exists() {
-            return true;
-        }
-    }
-    false
-}
-
-fn ensure_unique_card_id(cards_dir: &Path, base_id: &str) -> String {
-    let base = sanitize_card_id_candidate(base_id);
-    if !card_exists_anywhere(cards_dir, &base) {
-        return base;
-    }
-
-    let mut i = 2_u64;
-    loop {
-        let candidate = format!("{}-{}", base, i);
-        if !card_exists_anywhere(cards_dir, &candidate) {
-            return candidate;
-        }
-        i = i.saturating_add(1);
-    }
-}
-
-fn choose_template(templates: &[String], suggested: &str) -> String {
-    let trimmed = suggested.trim();
-    if templates.iter().any(|t| t == trimmed) {
-        return trimmed.to_string();
-    }
-
-    if templates.iter().any(|t| t == "implement") {
-        return "implement".to_string();
-    }
-
-    templates[0].clone()
-}
-
-fn read_confirmation() -> anyhow::Result<bool> {
-    print!("Write this draft to pending/? [y/N]: ");
-    std::io::stdout().flush()?;
-    let mut line = String::new();
-    let n = std::io::stdin().read_line(&mut line)?;
-    if n == 0 {
-        return Ok(false);
-    }
-    let answer = line.trim().to_ascii_lowercase();
-    Ok(answer == "y" || answer == "yes")
-}
-
-async fn cmd_create_from_description(
-    cards_dir: &Path,
-    description: &str,
-    id_override: Option<&str>,
-    auto_confirm: bool,
-) -> anyhow::Result<()> {
-    let description = description.trim();
-    if description.is_empty() {
-        anyhow::bail!("description cannot be empty");
-    }
-
-    ensure_cards_layout(cards_dir)?;
-    seed_default_templates(cards_dir)?;
-    seed_providers(cards_dir)?;
-
-    let templates = list_templates(cards_dir)?;
-    let (provider_name, provider) = select_default_provider(cards_dir)?;
-    let prompt = build_generation_prompt(description, &templates);
-    let (code, stdout, stderr) = run_provider_prompt(&provider.command, &prompt).await?;
-    if code != 0 {
-        anyhow::bail!(
-            "provider '{}' failed with exit code {}: {}",
-            provider_name,
-            code,
-            stderr.trim()
-        );
-    }
-
-    let draft = parse_generated_draft(&stdout)
-        .with_context(|| format!("provider '{}' returned invalid draft output", provider_name))?;
-
-    let template = choose_template(&templates, &draft.suggested_template);
-
-    let spec = if draft.spec_md.trim().is_empty() {
-        description.to_string()
-    } else {
-        draft.spec_md.trim().to_string()
-    };
-
-    let mut acceptance_criteria: Vec<String> = draft
-        .acceptance_criteria
-        .into_iter()
-        .map(|item| item.trim().to_string())
-        .filter(|item| !item.is_empty())
-        .collect();
-    if acceptance_criteria.is_empty() {
-        acceptance_criteria.push(
-            "Implementation matches the requested description and passes validation.".to_string(),
-        );
-    }
-
-    let id_source = id_override
-        .filter(|s| !s.trim().is_empty())
-        .map(str::trim)
-        .or_else(|| draft.id.as_deref().map(str::trim))
-        .filter(|s| !s.is_empty())
-        .unwrap_or(description);
-    let card_id = ensure_unique_card_id(cards_dir, id_source);
-
-    println!("Generated job card draft:");
-    println!("provider: {}", provider_name);
-    println!("template: {}", template);
-    println!("id: {}", card_id);
-    println!();
-    println!("=== spec.md ===");
-    println!("{}", spec);
-    println!();
-    println!("=== acceptance_criteria ===");
-    for criterion in &acceptance_criteria {
-        println!("- {}", criterion);
-    }
-    println!();
-
-    let confirmed = if auto_confirm {
-        true
-    } else {
-        read_confirmation()?
-    };
-    if !confirmed {
-        println!("aborted: draft was not written");
-        return Ok(());
-    }
-
-    let card_dir = create_card(cards_dir, &template, &card_id, Some(&spec))?;
-    let mut meta = jobcard_core::read_meta(&card_dir)?;
-    meta.acceptance_criteria = acceptance_criteria;
-    write_meta(&card_dir, &meta)?;
-
-    println!("created: {}", card_id);
-    Ok(())
 }
 
 fn normalize_namespace(namespace: &str) -> String {
@@ -1332,77 +905,6 @@ fn append_log_line(path: &Path, line: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cmd_memory_list(root: &Path, namespace: &str) -> anyhow::Result<()> {
-    let namespace = normalize_namespace(namespace);
-    let store = read_memory_store(root, &namespace)?;
-    if store.entries.is_empty() {
-        println!("(empty)");
-        return Ok(());
-    }
-
-    for (key, entry) in store.entries {
-        let expires = entry
-            .expires_at
-            .map(|t| t.to_rfc3339())
-            .unwrap_or_else(|| "never".to_string());
-        println!("{}\t{}\t{}", key, entry.value, expires);
-    }
-
-    Ok(())
-}
-
-fn cmd_memory_get(root: &Path, namespace: &str, key: &str) -> anyhow::Result<()> {
-    let namespace = normalize_namespace(namespace);
-    let key = key.trim();
-    if key.is_empty() {
-        anyhow::bail!("key cannot be empty");
-    }
-
-    let store = read_memory_store(root, &namespace)?;
-    let entry = store
-        .entries
-        .get(key)
-        .with_context(|| format!("memory key not found: {}", key))?;
-    println!("{}", entry.value);
-    Ok(())
-}
-
-fn cmd_memory_set(
-    root: &Path,
-    namespace: &str,
-    key: &str,
-    value: &str,
-    ttl_seconds: i64,
-) -> anyhow::Result<()> {
-    if ttl_seconds <= 0 {
-        anyhow::bail!("ttl_seconds must be > 0");
-    }
-
-    let namespace = normalize_namespace(namespace);
-    let key = key.trim();
-    if key.is_empty() {
-        anyhow::bail!("key cannot be empty");
-    }
-
-    let mut store = read_memory_store(root, &namespace)?;
-    set_memory_entry(&mut store, key, value, ttl_seconds, Utc::now());
-    write_memory_store(root, &namespace, &store)?;
-    Ok(())
-}
-
-fn cmd_memory_delete(root: &Path, namespace: &str, key: &str) -> anyhow::Result<()> {
-    let namespace = normalize_namespace(namespace);
-    let key = key.trim();
-    if key.is_empty() {
-        anyhow::bail!("key cannot be empty");
-    }
-
-    let mut store = read_memory_store(root, &namespace)?;
-    store.entries.remove(key);
-    write_memory_store(root, &namespace, &store)?;
-    Ok(())
-}
-
 fn run_policy_script(cwd: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
     let script_candidates = [
         cwd.join("scripts").join("policy_check.zsh"),
@@ -1558,6 +1060,13 @@ fn print_status_summary(root: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn resolve_config_path() -> PathBuf {
+    if let Ok(p) = std::env::var("JOBCARD_CONFIG") {
+        return PathBuf::from(p);
+    }
+    jobcard_core::config::project_config_path()
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -1596,11 +1105,6 @@ async fn main() -> anyhow::Result<()> {
             create_card(&root, &template, &id, None)?;
             Ok(())
         }
-        Command::Create {
-            from_description,
-            id,
-            yes,
-        } => cmd_create_from_description(&root, &from_description, id.as_deref(), yes).await,
         Command::Status { id } => {
             if id.trim().is_empty() {
                 return print_status_summary(&root);
@@ -1683,40 +1187,6 @@ async fn main() -> anyhow::Result<()> {
         Command::Approve { id } => cmd_approve(&root, &id),
         Command::Logs { id, follow } => cmd_logs(&root, &id, follow).await,
         Command::Inspect { id } => cmd_inspect(&root, &id),
-        Command::Memory { cmd } => match cmd {
-            MemoryCommand::List { namespace } => cmd_memory_list(&root, &namespace),
-            MemoryCommand::Get { namespace, key } => cmd_memory_get(&root, &namespace, &key),
-            MemoryCommand::Set {
-                namespace,
-                key,
-                value,
-                ttl_seconds,
-            } => cmd_memory_set(&root, &namespace, &key, &value, ttl_seconds),
-            MemoryCommand::Delete { namespace, key } => cmd_memory_delete(&root, &namespace, &key),
-        },
-        Command::Serve { port, bind, ui } => cmd_serve(&root, &bind, port, ui).await,
-        Command::Worktree { action } => match action {
-            WorktreeAction::List => cmd_worktree_list(&root),
-            WorktreeAction::Create { id } => cmd_worktree_create(&root, &id),
-            WorktreeAction::Clean { dry_run } => cmd_worktree_clean(&root, dry_run),
-        },
-        Command::Providers { cmd } => match cmd {
-            ProvidersCommand::List => cmd_providers_list(&root),
-            ProvidersCommand::Add {
-                name,
-                adapter,
-                model,
-            } => cmd_providers_add(&root, &name, &adapter, model.as_deref()),
-            ProvidersCommand::Remove { name, force } => cmd_providers_remove(&root, &name, force),
-            ProvidersCommand::Status => cmd_providers_status(&root),
-        },
-        Command::Config { action } => {
-            let config_path = resolve_config_path();
-            match action {
-                ConfigAction::Get { key } => cmd_config_get(&config_path, &key),
-                ConfigAction::Set { key, value } => cmd_config_set(&config_path, &key, &value),
-            }
-        }
         Command::Policy { action } => match action {
             PolicyAction::Check { id, staged } => cmd_policy_check(&root, id.as_deref(), staged),
         },
@@ -1726,1236 +1196,196 @@ async fn main() -> anyhow::Result<()> {
             clap_complete::generate(shell, &mut Cli::command(), "bop", &mut std::io::stdout());
             Ok(())
         }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct ApiState {
-    cards_dir: PathBuf,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-struct ApiErrorBody {
-    error: String,
-}
-
-type ApiErrorResponse = (StatusCode, Json<ApiErrorBody>);
-type ApiResult<T> = Result<T, ApiErrorResponse>;
-
-#[derive(Debug, Serialize, ToSchema)]
-struct JobSummaryResponse {
-    id: String,
-    state: String,
-    stage: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    provider: Option<String>,
-    created_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    started_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    finished_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    retry_count: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    failure_reason: Option<String>,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-struct JobDetailsResponse {
-    job: JobSummaryResponse,
-    #[schema(value_type = Object)]
-    meta: serde_json::Value,
-    spec: String,
-}
-
-#[derive(Debug, Deserialize, ToSchema)]
-struct CreateJobRequest {
-    template: String,
-    id: String,
-    #[serde(default)]
-    spec: Option<String>,
-    #[serde(default)]
-    acceptance_criteria: Vec<String>,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-struct JobOutputResponse {
-    id: String,
-    state: String,
-    /// Map of relative file path → UTF-8 content (output/ files and logs/).
-    files: BTreeMap<String, String>,
-}
-
-#[derive(OpenApi)]
-#[openapi(
-    paths(
-        api_list_jobs,
-        api_get_job,
-        api_create_job,
-        api_get_job_output,
-        api_retry_job,
-        api_kill_job,
-        api_stream_logs,
-        api_openapi
-    ),
-    components(schemas(
-        ApiErrorBody,
-        JobSummaryResponse,
-        JobDetailsResponse,
-        JobOutputResponse,
-        CreateJobRequest
-    )),
-    tags(
-        (name = "jobs", description = "JobCard job management API"),
-        (name = "meta", description = "API metadata")
-    )
-)]
-struct ApiDoc;
-
-#[utoipa::path(
-    get,
-    path = "/jobs",
-    responses(
-        (status = 200, description = "List all jobs", body = [JobSummaryResponse]),
-        (status = 500, description = "Internal server error", body = ApiErrorBody)
-    ),
-    tag = "jobs"
-)]
-async fn api_list_jobs(State(state): State<ApiState>) -> ApiResult<Json<Vec<JobSummaryResponse>>> {
-    Ok(Json(list_jobs(&state.cards_dir)))
-}
-
-#[utoipa::path(
-    get,
-    path = "/jobs/{id}",
-    params(
-        ("id" = String, Path, description = "Job id")
-    ),
-    responses(
-        (status = 200, description = "Inspect a single job", body = JobDetailsResponse),
-        (status = 404, description = "Job not found", body = ApiErrorBody),
-        (status = 500, description = "Internal server error", body = ApiErrorBody)
-    ),
-    tag = "jobs"
-)]
-async fn api_get_job(
-    State(state): State<ApiState>,
-    AxumPath(id): AxumPath<String>,
-) -> ApiResult<Json<JobDetailsResponse>> {
-    let details = read_job_details(&state.cards_dir, &id).map_err(map_lookup_error)?;
-    Ok(Json(details))
-}
-
-#[utoipa::path(
-    post,
-    path = "/jobs",
-    request_body = CreateJobRequest,
-    responses(
-        (status = 201, description = "Created a new job", body = JobDetailsResponse),
-        (status = 400, description = "Invalid request", body = ApiErrorBody),
-        (status = 404, description = "Template not found", body = ApiErrorBody),
-        (status = 409, description = "Job already exists", body = ApiErrorBody),
-        (status = 500, description = "Internal server error", body = ApiErrorBody)
-    ),
-    tag = "jobs"
-)]
-async fn api_create_job(
-    State(state): State<ApiState>,
-    Json(payload): Json<CreateJobRequest>,
-) -> ApiResult<(StatusCode, Json<JobDetailsResponse>)> {
-    let card_dir = create_card(
-        &state.cards_dir,
-        &payload.template,
-        &payload.id,
-        payload.spec.as_deref(),
-    )
-    .map_err(map_create_error)?;
-
-    if !payload.acceptance_criteria.is_empty() {
-        if let Ok(mut meta) = jobcard_core::read_meta(&card_dir) {
-            meta.acceptance_criteria = payload.acceptance_criteria;
-            let _ = write_meta(&card_dir, &meta);
-        }
-    }
-
-    let details = read_job_details(&state.cards_dir, &payload.id).map_err(map_lookup_error)?;
-    Ok((StatusCode::CREATED, Json(details)))
-}
-
-#[utoipa::path(
-    post,
-    path = "/jobs/{id}/retry",
-    params(
-        ("id" = String, Path, description = "Job id")
-    ),
-    responses(
-        (status = 200, description = "Moved job back to pending", body = JobDetailsResponse),
-        (status = 404, description = "Job not found", body = ApiErrorBody),
-        (status = 409, description = "Job cannot be retried in current state", body = ApiErrorBody),
-        (status = 500, description = "Internal server error", body = ApiErrorBody)
-    ),
-    tag = "jobs"
-)]
-async fn api_retry_job(
-    State(state): State<ApiState>,
-    AxumPath(id): AxumPath<String>,
-) -> ApiResult<Json<JobDetailsResponse>> {
-    cmd_retry(&state.cards_dir, &id).map_err(map_retry_error)?;
-    let details = read_job_details(&state.cards_dir, &id).map_err(map_lookup_error)?;
-    Ok(Json(details))
-}
-
-#[utoipa::path(
-    delete,
-    path = "/jobs/{id}",
-    params(
-        ("id" = String, Path, description = "Job id")
-    ),
-    responses(
-        (status = 200, description = "Killed a running job and moved it to failed", body = JobDetailsResponse),
-        (status = 404, description = "Job not found", body = ApiErrorBody),
-        (status = 409, description = "Job is not running", body = ApiErrorBody),
-        (status = 500, description = "Internal server error", body = ApiErrorBody)
-    ),
-    tag = "jobs"
-)]
-async fn api_kill_job(
-    State(state): State<ApiState>,
-    AxumPath(id): AxumPath<String>,
-) -> ApiResult<Json<JobDetailsResponse>> {
-    cmd_kill(&state.cards_dir, &id)
-        .await
-        .map_err(map_kill_error)?;
-    let details = read_job_details(&state.cards_dir, &id).map_err(map_lookup_error)?;
-    Ok(Json(details))
-}
-
-#[utoipa::path(
-    get,
-    path = "/jobs/{id}/logs",
-    params(
-        ("id" = String, Path, description = "Job id")
-    ),
-    responses(
-        (status = 200, description = "Server-Sent Events stream of stdout/stderr logs", content_type = "text/event-stream"),
-        (status = 404, description = "Job not found", body = ApiErrorBody)
-    ),
-    tag = "jobs"
-)]
-async fn api_stream_logs(
-    State(state): State<ApiState>,
-    AxumPath(id): AxumPath<String>,
-) -> ApiResult<impl IntoResponse> {
-    if find_card(&state.cards_dir, &id).is_none() {
-        return Err(api_error(
-            StatusCode::NOT_FOUND,
-            format!("card not found: {}", id),
-        ));
-    }
-
-    let cards_dir = state.cards_dir.clone();
-    let stream_id = id.clone();
-    let stream = stream! {
-        let mut stdout_pos: u64 = 0;
-        let mut stderr_pos: u64 = 0;
-        let mut post_exit_idle_rounds: u8 = 0;
-
-        loop {
-            let Some(card_dir) = find_card(&cards_dir, &stream_id) else {
-                yield Ok::<Event, Infallible>(Event::default().event("end").data("card not found"));
-                break;
-            };
-
-            let stdout_path = card_dir.join("logs").join("stdout.log");
-            let stderr_path = card_dir.join("logs").join("stderr.log");
-
-            let mut emitted = false;
-
-            if let Ok(Some(chunk)) = read_new_log_chunk(&stdout_path, &mut stdout_pos) {
-                emitted = true;
-                yield Ok(Event::default().event("stdout").data(chunk));
+        Command::Poker { action } => match action {
+            PokerAction::Open { id } => cmd_poker_open(&root, &id),
+            PokerAction::Submit { id, glyph, name } => {
+                cmd_poker_submit(&root, &id, glyph.as_deref(), name.as_deref())
             }
-
-            if let Ok(Some(chunk)) = read_new_log_chunk(&stderr_path, &mut stderr_pos) {
-                emitted = true;
-                yield Ok(Event::default().event("stderr").data(chunk));
-            }
-
-            let is_running = card_dir
-                .parent()
-                .and_then(|p| p.file_name())
-                .and_then(|s| s.to_str())
-                == Some("running");
-
-            if is_running || emitted {
-                post_exit_idle_rounds = 0;
-            } else {
-                post_exit_idle_rounds = post_exit_idle_rounds.saturating_add(1);
-                if post_exit_idle_rounds >= 2 {
-                    yield Ok(Event::default().event("end").data("complete"));
-                    break;
-                }
-            }
-
-            tokio::time::sleep(Duration::from_millis(250)).await;
-        }
-    };
-
-    Ok(Sse::new(stream).keep_alive(
-        axum::response::sse::KeepAlive::new()
-            .interval(Duration::from_secs(10))
-            .text("keep-alive"),
-    ))
-}
-
-#[utoipa::path(
-    get,
-    path = "/jobs/{id}/output",
-    params(("id" = String, Path, description = "Job id")),
-    responses(
-        (status = 200, description = "Output files and logs", body = JobOutputResponse),
-        (status = 404, description = "Job not found", body = ApiErrorBody),
-        (status = 500, description = "Internal error", body = ApiErrorBody)
-    ),
-    tag = "jobs"
-)]
-async fn api_get_job_output(
-    State(state): State<ApiState>,
-    AxumPath(id): AxumPath<String>,
-) -> ApiResult<Json<JobOutputResponse>> {
-    let card_dir = find_card(&state.cards_dir, &id)
-        .with_context(|| format!("card not found: {}", id))
-        .map_err(map_lookup_error)?;
-
-    let job_state = card_dir
-        .parent()
-        .and_then(|p| p.file_name())
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown")
-        .to_string();
-
-    let mut files: BTreeMap<String, String> = BTreeMap::new();
-
-    let output_dir = card_dir.join("output");
-    if output_dir.exists() {
-        for entry in fs::read_dir(&output_dir).into_iter().flatten().flatten() {
-            let path = entry.path();
-            if path.is_file() {
-                if let (Some(name), Ok(content)) = (
-                    path.file_name()
-                        .and_then(|s| s.to_str())
-                        .map(str::to_string),
-                    fs::read_to_string(&path),
-                ) {
-                    files.insert(name, content);
-                }
-            }
-        }
-    }
-
-    for log_name in ["stdout.log", "stderr.log", "validation.log"] {
-        let log_path = card_dir.join("logs").join(log_name);
-        if log_path.exists() {
-            if let Ok(content) = fs::read_to_string(&log_path) {
-                files.insert(format!("logs/{}", log_name), content);
-            }
-        }
-    }
-
-    Ok(Json(JobOutputResponse {
-        id,
-        state: job_state,
-        files,
-    }))
-}
-
-#[utoipa::path(
-    get,
-    path = "/openapi.json",
-    responses(
-        (status = 200, description = "Generated OpenAPI specification")
-    ),
-    tag = "meta"
-)]
-async fn api_openapi() -> Json<utoipa::openapi::OpenApi> {
-    Json(ApiDoc::openapi())
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct UiEventsQuery {
-    #[serde(default)]
-    once: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct UiJobsEventPayload {
-    generated_at: String,
-    jobs: Vec<JobSummaryResponse>,
-}
-
-async fn ui_dashboard(State(state): State<ApiState>) -> Html<String> {
-    let jobs = list_jobs(&state.cards_dir);
-    let generated_at = Utc::now().to_rfc3339();
-    let pending_count = jobs.iter().filter(|job| job.state == "pending").count();
-    let running_count = jobs.iter().filter(|job| job.state == "running").count();
-    let done_count = jobs.iter().filter(|job| job.state == "done").count();
-    let failed_count = jobs.iter().filter(|job| job.state == "failed").count();
-    let merged_count = jobs.iter().filter(|job| job.state == "merged").count();
-    let rows = render_ui_job_rows(&jobs);
-
-    let body = format!(
-        r#"<section class="page-header">
-<h1>Job Dashboard</h1>
-<p class="muted">Last update: <span id="updated-at">{generated_at}</span> · <span id="live-status">live stream connecting...</span></p>
-<div class="chip-row">
-<span class="chip">pending {pending_count}</span>
-<span class="chip">running {running_count}</span>
-<span class="chip">done {done_count}</span>
-<span class="chip">failed {failed_count}</span>
-<span class="chip">merged {merged_count}</span>
-</div>
-</section>
-<noscript><p class="notice">JavaScript is disabled. The page still works server-side; refresh manually for updates.</p></noscript>
-<table>
-<thead>
-<tr>
-<th>Job</th>
-<th>State</th>
-<th>Stage</th>
-<th>Provider</th>
-<th>Created</th>
-<th>Retries</th>
-<th>Failure</th>
-</tr>
-</thead>
-<tbody id="jobs-body">
-{rows}
-</tbody>
-</table>"#,
-    );
-
-    let script = r#"<script>
-(() => {
-  const body = document.getElementById("jobs-body");
-  const updatedAt = document.getElementById("updated-at");
-  const liveStatus = document.getElementById("live-status");
-
-  function stateClass(state) {
-    if (state === "running") return "state-running";
-    if (state === "pending") return "state-pending";
-    if (state === "done") return "state-done";
-    if (state === "merged") return "state-merged";
-    if (state === "failed") return "state-failed";
-    return "state-unknown";
-  }
-
-  function toText(value) {
-    if (value === null || value === undefined || value === "") return "-";
-    return String(value);
-  }
-
-  function appendCell(row, valueOrNode) {
-    const cell = document.createElement("td");
-    if (valueOrNode instanceof Node) {
-      cell.appendChild(valueOrNode);
-    } else {
-      cell.textContent = toText(valueOrNode);
-    }
-    row.appendChild(cell);
-    return cell;
-  }
-
-  function renderRows(jobs) {
-    body.replaceChildren();
-    if (!Array.isArray(jobs) || jobs.length === 0) {
-      const row = document.createElement("tr");
-      const cell = document.createElement("td");
-      cell.colSpan = 7;
-      cell.className = "empty";
-      cell.textContent = "No jobs found.";
-      row.appendChild(cell);
-      body.appendChild(row);
-      return;
-    }
-
-    for (const job of jobs) {
-      const row = document.createElement("tr");
-      const link = document.createElement("a");
-      link.href = `/ui/jobs/${encodeURIComponent(job.id)}`;
-      link.textContent = toText(job.id);
-      appendCell(row, link);
-
-      const badge = document.createElement("span");
-      badge.className = `state-badge ${stateClass(job.state)}`;
-      badge.textContent = toText(job.state);
-      appendCell(row, badge);
-
-      appendCell(row, job.stage);
-      appendCell(row, job.provider || "-");
-      appendCell(row, job.created_at);
-      appendCell(row, job.retry_count ?? "-");
-      appendCell(row, job.failure_reason || "-");
-      body.appendChild(row);
-    }
-  }
-
-  const stream = new EventSource("/ui/events");
-  stream.addEventListener("jobs", (event) => {
-    const payload = JSON.parse(event.data);
-    renderRows(payload.jobs || []);
-    updatedAt.textContent = payload.generated_at || "";
-    const total = Array.isArray(payload.jobs) ? payload.jobs.length : 0;
-    liveStatus.textContent = `live (${total} jobs)`;
-  });
-  stream.onerror = () => {
-    liveStatus.textContent = "stream reconnecting...";
-  };
-})();
-</script>"#;
-
-    Html(render_ui_shell(
-        "jc Web UI",
-        &body,
-        r#"<noscript><meta http-equiv="refresh" content="5"></noscript>"#,
-        script,
-    ))
-}
-
-async fn ui_stream_jobs(
-    State(state): State<ApiState>,
-    Query(query): Query<UiEventsQuery>,
-) -> impl IntoResponse {
-    let cards_dir = state.cards_dir.clone();
-    let stream_once = query.once;
-    let stream = stream! {
-        loop {
-            let payload = UiJobsEventPayload {
-                generated_at: Utc::now().to_rfc3339(),
-                jobs: list_jobs(&cards_dir),
-            };
-            match serde_json::to_string(&payload) {
-                Ok(data) => yield Ok::<Event, Infallible>(Event::default().event("jobs").data(data)),
-                Err(err) => yield Ok::<Event, Infallible>(Event::default().event("error").data(err.to_string())),
-            }
-
-            if stream_once {
-                break;
-            }
-
-            tokio::time::sleep(Duration::from_millis(UI_SSE_POLL_MS)).await;
-        }
-    };
-
-    Sse::new(stream).keep_alive(
-        axum::response::sse::KeepAlive::new()
-            .interval(Duration::from_secs(10))
-            .text("keep-alive"),
-    )
-}
-
-async fn ui_job_details(
-    State(state): State<ApiState>,
-    AxumPath(id): AxumPath<String>,
-) -> ApiResult<Html<String>> {
-    let card_dir = find_card(&state.cards_dir, &id)
-        .with_context(|| format!("card not found: {}", id))
-        .map_err(map_lookup_error)?;
-    let details = read_job_details(&state.cards_dir, &id).map_err(map_lookup_error)?;
-    let meta = jobcard_core::read_meta(&card_dir).map_err(map_lookup_error)?;
-    let logs = collect_text_files(&card_dir.join("logs"), "logs");
-    let output_files = collect_text_files(&card_dir.join("output"), "output");
-    let audit_lines = build_audit_trail(&meta, &details.job.state);
-    let meta_json =
-        serde_json::to_string_pretty(&details.meta).unwrap_or_else(|_| "{}".to_string());
-
-    let body = format!(
-        r#"<section class="page-header">
-<h1>Job: {id}</h1>
-<p class="muted">state: <span class="state-badge {state_class}">{state}</span> · stage: {stage} · provider: {provider}</p>
-</section>
-<section>
-<h2>Spec</h2>
-<pre>{spec}</pre>
-</section>
-<section>
-<h2>Logs</h2>
-{logs_section}
-</section>
-<section>
-<h2>Output</h2>
-{output_section}
-</section>
-<section>
-<h2>Audit Trail</h2>
-<pre>{audit}</pre>
-<details>
-<summary>raw meta.json</summary>
-<pre>{meta_json}</pre>
-</details>
-</section>"#,
-        id = escape_html(&details.job.id),
-        state = escape_html(&details.job.state),
-        stage = escape_html(&details.job.stage),
-        provider = escape_html(details.job.provider.as_deref().unwrap_or("-")),
-        state_class = ui_state_class(&details.job.state),
-        spec = escape_html(&details.spec),
-        logs_section = render_ui_file_sections(&logs, "No logs found."),
-        output_section = render_ui_file_sections(&output_files, "No output files found."),
-        audit = escape_html(&audit_lines.join("\n")),
-        meta_json = escape_html(&meta_json),
-    );
-
-    Ok(Html(render_ui_shell("jc Job Details", &body, "", "")))
-}
-
-async fn ui_providers(State(state): State<ApiState>) -> Html<String> {
-    let providers = read_providers(&state.cards_dir).unwrap_or_default();
-    let mut rows = String::new();
-    let now_epoch = Utc::now().timestamp();
-
-    for (name, provider) in &providers.providers {
-        let (status, cooldown_until) = provider_status(provider.cooldown_until_epoch_s, now_epoch);
-        let _ = write!(
-            rows,
-            "<tr><td>{}</td><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td></tr>",
-            escape_html(name),
-            escape_html(&provider.command),
-            provider.rate_limit_exit,
-            escape_html(&status),
-            escape_html(&cooldown_until)
-        );
-    }
-
-    if rows.is_empty() {
-        rows.push_str(r#"<tr><td colspan="5" class="empty">No providers configured.</td></tr>"#);
-    }
-
-    let default_provider = providers
-        .default_provider
-        .unwrap_or_else(|| "-".to_string());
-    let body = format!(
-        r#"<section class="page-header">
-<h1>Providers</h1>
-<p class="muted">default provider: <code>{}</code></p>
-</section>
-<table>
-<thead>
-<tr>
-<th>Name</th>
-<th>Command</th>
-<th>Rate Limit Exit</th>
-<th>Status</th>
-<th>Cooldown Until (UTC)</th>
-</tr>
-</thead>
-<tbody>
-{}
-</tbody>
-</table>"#,
-        escape_html(&default_provider),
-        rows
-    );
-
-    Html(render_ui_shell("jc Providers", &body, "", ""))
-}
-
-fn render_ui_shell(title: &str, body: &str, head_extra: &str, script_extra: &str) -> String {
-    format!(
-        r#"<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title}</title>
-{head_extra}
-<style>
-:root {{
-  --bg: #f2f4f7;
-  --surface: #ffffff;
-  --ink: #0f172a;
-  --muted: #5b6573;
-  --line: #d7dde5;
-  --accent: #0f766e;
-  --warn: #b45309;
-  --ok: #166534;
-  --bad: #991b1b;
-}}
-* {{ box-sizing: border-box; }}
-body {{
-  margin: 0;
-  background: linear-gradient(160deg, #f9fbfd 0%, #eef2f6 100%);
-  color: var(--ink);
-  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-}}
-main {{
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 1rem;
-}}
-nav {{
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
-}}
-nav .inner {{
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 0.75rem 1rem;
-  display: flex;
-  gap: 1rem;
-  align-items: center;
-}}
-nav a {{
-  color: var(--accent);
-  text-decoration: none;
-  font-weight: 600;
-}}
-section {{
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 1rem;
-  margin-bottom: 1rem;
-}}
-.page-header {{
-  background: linear-gradient(135deg, #ffffff 0%, #eef7f5 100%);
-}}
-.chip-row {{
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
-}}
-.chip {{
-  padding: 0.2rem 0.6rem;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: #f8fafc;
-  font-size: 0.9rem;
-}}
-.muted {{
-  color: var(--muted);
-  margin: 0;
-}}
-.notice {{
-  margin: 0.5rem 0 0;
-  color: var(--warn);
-}}
-table {{
-  width: 100%;
-  border-collapse: collapse;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  overflow: hidden;
-}}
-th, td {{
-  border-bottom: 1px solid var(--line);
-  padding: 0.6rem;
-  text-align: left;
-  vertical-align: top;
-  font-size: 0.95rem;
-}}
-th {{
-  background: #f5f9fc;
-}}
-tr:last-child td {{
-  border-bottom: 0;
-}}
-.empty {{
-  color: var(--muted);
-  text-align: center;
-  padding: 1rem;
-}}
-pre {{
-  margin: 0;
-  padding: 0.75rem;
-  background: #0b1020;
-  color: #e2e8f0;
-  border-radius: 8px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-}}
-details {{
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 0.5rem;
-  margin-bottom: 0.5rem;
-}}
-details > summary {{
-  cursor: pointer;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-}}
-.state-badge {{
-  display: inline-block;
-  padding: 0.15rem 0.45rem;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  font-size: 0.85rem;
-  font-weight: 600;
-}}
-.state-running {{ color: #075985; background: #e0f2fe; border-color: #7dd3fc; }}
-.state-pending {{ color: #92400e; background: #fef3c7; border-color: #fcd34d; }}
-.state-done {{ color: var(--ok); background: #dcfce7; border-color: #86efac; }}
-.state-merged {{ color: #6d28d9; background: #ede9fe; border-color: #c4b5fd; }}
-.state-failed {{ color: var(--bad); background: #fee2e2; border-color: #fca5a5; }}
-.state-unknown {{ color: #334155; background: #e2e8f0; border-color: #cbd5e1; }}
-@media (max-width: 800px) {{
-  th, td {{ font-size: 0.85rem; padding: 0.45rem; }}
-  nav .inner {{ flex-wrap: wrap; }}
-}}
-</style>
-</head>
-<body>
-<nav>
-  <div class="inner">
-    <a href="/ui">Dashboard</a>
-    <a href="/ui/providers">Providers</a>
-    <a href="/openapi.json">OpenAPI</a>
-  </div>
-</nav>
-<main>
-{body}
-</main>
-{script_extra}
-</body>
-</html>"#,
-        title = escape_html(title),
-        body = body,
-        head_extra = head_extra,
-        script_extra = script_extra,
-    )
-}
-
-fn render_ui_job_rows(jobs: &[JobSummaryResponse]) -> String {
-    let mut rows = String::new();
-    for job in jobs {
-        let id = escape_html(&job.id);
-        let id_href = percent_encode_path_segment(&job.id);
-        let provider = escape_html(job.provider.as_deref().unwrap_or("-"));
-        let failure_reason = escape_html(job.failure_reason.as_deref().unwrap_or("-"));
-        let retry_count = job
-            .retry_count
-            .map(|count| count.to_string())
-            .unwrap_or_else(|| "-".to_string());
-        let _ = write!(
-            rows,
-            "<tr>\
-<td><a href=\"/ui/jobs/{id_href}\">{id}</a></td>\
-<td><span class=\"state-badge {state_class}\">{state}</span></td>\
-<td>{stage}</td>\
-<td>{provider}</td>\
-<td>{created}</td>\
-<td>{retry_count}</td>\
-<td>{failure_reason}</td>\
-</tr>",
-            state_class = ui_state_class(&job.state),
-            state = escape_html(&job.state),
-            stage = escape_html(&job.stage),
-            created = escape_html(&job.created_at),
-            retry_count = escape_html(&retry_count),
-        );
-    }
-
-    if rows.is_empty() {
-        rows.push_str(r#"<tr><td colspan="7" class="empty">No jobs found.</td></tr>"#);
-    }
-    rows
-}
-
-fn render_ui_file_sections(files: &BTreeMap<String, String>, empty_message: &str) -> String {
-    if files.is_empty() {
-        return format!(r#"<p class="muted">{}</p>"#, escape_html(empty_message));
-    }
-
-    let mut out = String::new();
-    for (name, content) in files {
-        let _ = write!(
-            out,
-            "<details><summary>{}</summary><pre>{}</pre></details>",
-            escape_html(name),
-            escape_html(content)
-        );
-    }
-    out
-}
-
-fn collect_text_files(dir: &Path, prefix: &str) -> BTreeMap<String, String> {
-    let mut files = BTreeMap::new();
-    if !dir.exists() {
-        return files;
-    }
-
-    for entry in WalkDir::new(dir).min_depth(1).into_iter().flatten() {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-
-        let path = entry.path();
-        let rel = match path.strip_prefix(dir) {
-            Ok(rel) => rel,
-            Err(_) => continue,
-        };
-        let key = format!("{}/{}", prefix, rel.to_string_lossy());
-        let bytes = match fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(_) => continue,
-        };
-
-        let (shown, truncated) = if bytes.len() > UI_MAX_FILE_PREVIEW_BYTES {
-            (&bytes[..UI_MAX_FILE_PREVIEW_BYTES], true)
-        } else {
-            (&bytes[..], false)
-        };
-        let mut content = String::from_utf8_lossy(shown).to_string();
-        if truncated {
-            let _ = write!(
-                content,
-                "\n\n[truncated: showing first {} bytes of {}]",
-                UI_MAX_FILE_PREVIEW_BYTES,
-                bytes.len()
-            );
-        }
-        files.insert(key, content);
-    }
-    files
-}
-
-fn build_audit_trail(meta: &Meta, state: &str) -> Vec<String> {
-    let mut lines = Vec::new();
-    lines.push(format!("created: {}", meta.created.to_rfc3339()));
-    lines.push(format!("current_state: {}", state));
-    lines.push(format!("current_stage: {}", meta.stage));
-
-    for (stage, record) in &meta.stages {
-        let started = record
-            .started
-            .as_ref()
-            .map(DateTime::<Utc>::to_rfc3339)
-            .unwrap_or_else(|| "-".to_string());
-        let duration = record
-            .duration_s
-            .map(|seconds| format!("{}s", seconds))
-            .unwrap_or_else(|| "-".to_string());
-        lines.push(format!(
-            "stage={} status={} provider={} agent={} started={} duration={}",
-            stage,
-            stage_status_label(&record.status),
-            record.provider.as_deref().unwrap_or("-"),
-            record.agent.as_deref().unwrap_or("-"),
-            started,
-            duration
-        ));
-    }
-
-    if let Some(retry_count) = meta.retry_count {
-        lines.push(format!("retry_count: {}", retry_count));
-    }
-    if let Some(reason) = &meta.failure_reason {
-        lines.push(format!("failure_reason: {}", reason));
-    }
-    if let Some(summary) = &meta.validation_summary {
-        lines.push(format!(
-            "validation: badge={} valid={}/{} invalid={} alerts={} critical={} health={:?}",
-            summary.badge(),
-            summary.valid,
-            summary.total,
-            summary.invalid,
-            summary.alert_count,
-            summary.critical_alerts,
-            summary.health
-        ));
-    }
-    if !meta.acceptance_criteria.is_empty() {
-        lines.push("acceptance_criteria:".to_string());
-        for criterion in &meta.acceptance_criteria {
-            lines.push(format!("  - {}", criterion));
-        }
-    }
-
-    lines
-}
-
-fn stage_status_label(status: &jobcard_core::StageStatus) -> &'static str {
-    match status {
-        jobcard_core::StageStatus::Pending => "pending",
-        jobcard_core::StageStatus::Running => "running",
-        jobcard_core::StageStatus::Done => "done",
-        jobcard_core::StageStatus::Blocked => "blocked",
-        jobcard_core::StageStatus::Failed => "failed",
+            PokerAction::Reveal { id } => cmd_poker_reveal(&root, &id),
+            PokerAction::Status { id } => cmd_poker_status(&root, &id),
+            PokerAction::Consensus { id, glyph } => cmd_poker_consensus(&root, &id, &glyph),
+        },
     }
 }
 
-fn provider_status(cooldown_until_epoch_s: Option<i64>, now_epoch: i64) -> (String, String) {
-    match cooldown_until_epoch_s {
-        Some(until) if until > now_epoch => {
-            let remaining = until.saturating_sub(now_epoch);
-            (
-                format!("cooldown ({}s)", remaining),
-                format_epoch_utc(until),
-            )
-        }
-        Some(until) => ("ready".to_string(), format_epoch_utc(until)),
-        None => ("ready".to_string(), "-".to_string()),
+// ── poker ─────────────────────────────────────────────────────────────────────
+
+fn glyph_rank(g: &str) -> (&'static str, u32) {
+    let cp = g.chars().next().map(|c| c as u32).unwrap_or(0);
+    match cp & 0xF {
+        1 => ("Ace", 1),
+        2 => ("2", 2),
+        3 => ("3", 3),
+        4 => ("4", 4),
+        5 => ("5", 5),
+        6 => ("6", 6),
+        7 => ("7", 7),
+        8 => ("8", 8),
+        9 => ("9", 9),
+        10 => ("10", 10),
+        11 => ("Jack", 13),
+        12 => ("Knight", 20),
+        13 => ("Queen", 21),
+        14 => ("King", 40),
+        _ => ("Joker", 0),
     }
 }
 
-fn format_epoch_utc(epoch_s: i64) -> String {
-    DateTime::<Utc>::from_timestamp(epoch_s, 0)
-        .map(|dt| dt.to_rfc3339())
-        .unwrap_or_else(|| epoch_s.to_string())
-}
-
-fn ui_state_class(state: &str) -> &'static str {
-    match state {
-        "running" => "state-running",
-        "pending" => "state-pending",
-        "done" => "state-done",
-        "merged" => "state-merged",
-        "failed" => "state-failed",
-        _ => "state-unknown",
+fn glyph_suit(g: &str) -> &'static str {
+    let cp = g.chars().next().map(|c| c as u32).unwrap_or(0);
+    match (cp >> 4) & 0xF {
+        0xA => "♠ complexity",
+        0xB => "♥ effort",
+        0xC => "♦ risk",
+        0xD => "♣ value",
+        _ => "? unknown",
     }
 }
 
-fn escape_html(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for ch in value.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(ch),
-        }
-    }
-    out
+fn is_joker(g: &str) -> bool {
+    let cp = g.chars().next().map(|c| c as u32).unwrap_or(0);
+    matches!(cp, 0x1F0BF | 0x1F0CF | 0x1F0DF | 0x1F093)
 }
 
-fn percent_encode_path_segment(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-            out.push(char::from(byte));
-        } else {
-            let _ = write!(out, "%{:02X}", byte);
-        }
+fn cmd_poker_open(root: &Path, id: &str) -> anyhow::Result<()> {
+    let card = find_card(root, id).with_context(|| format!("card not found: {}", id))?;
+    let mut meta = jobcard_core::read_meta(&card)?;
+    if meta.poker_round.as_deref() == Some("open") {
+        println!("Round already open for {}", id);
+        return Ok(());
     }
-    out
-}
-
-async fn cmd_serve(root: &Path, bind: &str, port: u16, ui: bool) -> anyhow::Result<()> {
-    ensure_cards_layout(root)?;
-    seed_default_templates(root)?;
-    seed_providers(root)?;
-
-    if !is_loopback_bind(bind) {
-        eprintln!(
-            "WARNING: --bind {} exposes unauthenticated job control endpoints to remote clients.",
-            bind
-        );
-    }
-
-    let addr = resolve_bind_addr(bind, port)?;
-    let state = ApiState {
-        cards_dir: root.to_path_buf(),
-    };
-
-    let mut app = Router::new()
-        .route("/jobs", get(api_list_jobs).post(api_create_job))
-        .route("/jobs/:id", get(api_get_job).delete(api_kill_job))
-        .route("/jobs/:id/retry", post(api_retry_job))
-        .route("/jobs/:id/output", get(api_get_job_output))
-        .route("/jobs/:id/logs", get(api_stream_logs))
-        .route("/openapi.json", get(api_openapi));
-
-    if ui {
-        app = app
-            .route("/ui", get(ui_dashboard))
-            .route("/ui/events", get(ui_stream_jobs))
-            .route("/ui/jobs/:id", get(ui_job_details))
-            .route("/ui/providers", get(ui_providers));
-    }
-
-    let app = app.layer(CorsLayer::permissive()).with_state(state);
-
-    let listener = TcpListener::bind(addr).await?;
-    println!("REST API listening on http://{}:{}/", bind, port);
-    if ui {
-        println!("Web UI listening on http://{}:{}/ui", bind, port);
-    }
-    axum::serve(listener, app).await?;
+    meta.poker_round = Some("open".into());
+    meta.estimates.clear();
+    write_meta(&card, &meta)?;
+    println!("🂠  Poker round opened for {id}. Submit with: bop poker submit {id}");
     Ok(())
 }
 
-fn resolve_bind_addr(bind: &str, port: u16) -> anyhow::Result<SocketAddr> {
-    let mut addrs = (bind, port)
-        .to_socket_addrs()
-        .with_context(|| format!("failed to resolve bind address {}:{}", bind, port))?;
-    addrs
-        .next()
-        .with_context(|| format!("no bind address resolved for {}:{}", bind, port))
-}
-
-fn is_loopback_bind(bind: &str) -> bool {
-    if bind.eq_ignore_ascii_case("localhost") {
-        return true;
+fn cmd_poker_submit(
+    root: &Path,
+    id: &str,
+    glyph: Option<&str>,
+    name: Option<&str>,
+) -> anyhow::Result<()> {
+    let card = find_card(root, id).with_context(|| format!("card not found: {}", id))?;
+    let mut meta = jobcard_core::read_meta(&card)?;
+    if meta.poker_round.as_deref() != Some("open") {
+        anyhow::bail!("no open round for {id}. Run: bop poker open {id}");
     }
-    bind.parse::<std::net::IpAddr>()
-        .map(|ip| ip.is_loopback())
-        .unwrap_or(false)
-}
+    let participant = name
+        .map(str::to_owned)
+        .or_else(|| std::env::var("USER").ok())
+        .unwrap_or_else(|| "anonymous".into());
 
-fn api_error(status: StatusCode, error: impl Into<String>) -> ApiErrorResponse {
-    (
-        status,
-        Json(ApiErrorBody {
-            error: error.into(),
-        }),
-    )
-}
-
-fn map_lookup_error(err: anyhow::Error) -> ApiErrorResponse {
-    let msg = err.to_string();
-    if msg.contains("card not found") {
-        api_error(StatusCode::NOT_FOUND, msg)
+    let chosen = if let Some(g) = glyph {
+        g.to_owned()
     } else {
-        api_error(StatusCode::INTERNAL_SERVER_ERROR, msg)
-    }
-}
-
-fn map_create_error(err: anyhow::Error) -> ApiErrorResponse {
-    let msg = err.to_string();
-    if msg.contains("card already exists") {
-        api_error(StatusCode::CONFLICT, msg)
-    } else if msg.contains("template not found") {
-        api_error(StatusCode::NOT_FOUND, msg)
-    } else if msg.contains("cannot be empty") || msg.contains("path separators") {
-        api_error(StatusCode::BAD_REQUEST, msg)
-    } else {
-        api_error(StatusCode::INTERNAL_SERVER_ERROR, msg)
-    }
-}
-
-fn map_retry_error(err: anyhow::Error) -> ApiErrorResponse {
-    let msg = err.to_string();
-    if msg.contains("card not found") {
-        api_error(StatusCode::NOT_FOUND, msg)
-    } else if msg.contains("already pending") || msg.contains("currently running") {
-        api_error(StatusCode::CONFLICT, msg)
-    } else {
-        api_error(StatusCode::BAD_REQUEST, msg)
-    }
-}
-
-fn map_kill_error(err: anyhow::Error) -> ApiErrorResponse {
-    let msg = err.to_string();
-    if msg.contains("card not found") || msg.contains("no PID found") {
-        api_error(StatusCode::NOT_FOUND, msg)
-    } else if msg.contains("is not running") {
-        api_error(StatusCode::CONFLICT, msg)
-    } else {
-        api_error(StatusCode::INTERNAL_SERVER_ERROR, msg)
-    }
-}
-
-fn list_jobs(root: &Path) -> Vec<JobSummaryResponse> {
-    let mut jobs = Vec::new();
-    for state in ["pending", "running", "done", "merged", "failed"] {
-        let state_dir = root.join(state);
-        let entries = match fs::read_dir(state_dir) {
-            Ok(entries) => entries,
-            Err(_) => continue,
-        };
-        for entry in entries.flatten() {
-            let card_dir = entry.path();
-            if !card_dir.is_dir() {
-                continue;
-            }
-            if card_dir.extension().and_then(|s| s.to_str()) != Some("jobcard") {
-                continue;
-            }
-            let Ok(meta) = jobcard_core::read_meta(&card_dir) else {
-                continue;
-            };
-            jobs.push(job_summary_from_meta(state, &meta));
-        }
-    }
-    jobs.sort_by(|a, b| {
-        b.created_at
-            .cmp(&a.created_at)
-            .then_with(|| a.id.cmp(&b.id))
-    });
-    jobs
-}
-
-fn read_job_details(root: &Path, id: &str) -> anyhow::Result<JobDetailsResponse> {
-    let card_dir = find_card(root, id).with_context(|| format!("card not found: {}", id))?;
-    let state = card_dir
-        .parent()
-        .and_then(|p| p.file_name())
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown")
-        .to_string();
-    let meta = jobcard_core::read_meta(&card_dir)?;
-    let meta_json = serde_json::to_value(&meta)?;
-    let spec = fs::read_to_string(card_dir.join("spec.md")).unwrap_or_default();
-
-    Ok(JobDetailsResponse {
-        job: job_summary_from_meta(&state, &meta),
-        meta: meta_json,
-        spec,
-    })
-}
-
-fn job_summary_from_meta(state: &str, meta: &Meta) -> JobSummaryResponse {
-    let stage_record = meta.stages.get(&meta.stage);
-    let started_dt = stage_record.and_then(|rec| rec.started.as_ref().cloned());
-    let duration_secs = stage_record.and_then(|rec| rec.duration_s);
-    let finished_at = match (started_dt, duration_secs) {
-        (Some(started), Some(duration)) => i64::try_from(duration)
-            .ok()
-            .map(|secs| (started + ChronoDuration::seconds(secs)).to_rfc3339()),
-        _ => None,
+        // Simple fallback: prompt for glyph when no TTY picker available
+        eprint!("Enter glyph (e.g. 🂻): ");
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line)?;
+        line.trim().to_owned()
     };
 
-    JobSummaryResponse {
-        id: meta.id.clone(),
-        state: state.to_string(),
-        stage: meta.stage.clone(),
-        provider: stage_record
-            .and_then(|rec| rec.provider.clone())
-            .or_else(|| meta.provider_chain.first().cloned()),
-        created_at: meta.created.to_rfc3339(),
-        started_at: started_dt.map(|dt| dt.to_rfc3339()),
-        finished_at,
-        retry_count: meta.retry_count,
-        failure_reason: meta.failure_reason.clone(),
+    if chosen.is_empty() {
+        anyhow::bail!("no glyph provided");
     }
+    meta.estimates.insert(participant.clone(), chosen);
+    write_meta(&card, &meta)?;
+    println!("🂠  {participant} submitted (face-down until reveal)");
+    Ok(())
 }
 
-fn read_new_log_chunk(path: &Path, position: &mut u64) -> anyhow::Result<Option<String>> {
-    if !path.exists() {
-        return Ok(None);
+fn cmd_poker_reveal(root: &Path, id: &str) -> anyhow::Result<()> {
+    let card = find_card(root, id).with_context(|| format!("card not found: {}", id))?;
+    let mut meta = jobcard_core::read_meta(&card)?;
+    if meta.poker_round.as_deref() != Some("open") {
+        anyhow::bail!("no open round for {id}");
+    }
+    meta.poker_round = Some("revealed".into());
+    write_meta(&card, &meta)?;
+
+    println!("\n  Estimates for {id}:\n");
+    let mut joker_players: Vec<String> = vec![];
+    let mut points: Vec<u32> = vec![];
+
+    for (participant, glyph) in &meta.estimates {
+        if is_joker(glyph) {
+            joker_players.push(participant.clone());
+            println!("  {participant:<12} {glyph}  Joker — needs breakdown");
+        } else {
+            let (rank_label, pts) = glyph_rank(glyph);
+            let suit = glyph_suit(glyph);
+            println!("  {participant:<12} {glyph}  {rank_label} of {suit} — {pts}pt");
+            points.push(pts);
+        }
     }
 
-    let mut file = fs::File::open(path)?;
-    let len = file.metadata()?.len();
-    if *position > len {
-        *position = 0;
+    if !joker_players.is_empty() {
+        println!(
+            "\n  ⊘ {} played 🃏 — break down the card first",
+            joker_players.join(", ")
+        );
+        return Ok(());
     }
 
-    file.seek(SeekFrom::Start(*position))?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)?;
-    *position += buf.len() as u64;
-
-    if buf.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(String::from_utf8_lossy(&buf).to_string()))
+    if points.len() > 1 {
+        let mut sorted = points.clone();
+        sorted.sort_unstable();
+        let median = sorted[sorted.len() / 2];
+        let spread = sorted.last().unwrap_or(&0) - sorted.first().unwrap_or(&0);
+        println!("\n  Spread: {spread}pt  Median: {median}pt");
+        for (participant, glyph) in &meta.estimates {
+            let (rank_label, pts) = glyph_rank(glyph);
+            if median > 0 && (pts < median / 2 || pts > median * 2) {
+                println!("  ⚡ outlier: {participant} ({glyph} {rank_label}  {pts}pt vs median {median}pt)");
+            }
+        }
     }
+    println!("\n  Run: bop poker consensus {id} <glyph>");
+    Ok(())
+}
+
+fn cmd_poker_status(root: &Path, id: &str) -> anyhow::Result<()> {
+    let card = find_card(root, id).with_context(|| format!("card not found: {}", id))?;
+    let meta = jobcard_core::read_meta(&card)?;
+    match meta.poker_round.as_deref() {
+        Some("open") => {
+            println!("Round: open  ({} submitted)", meta.estimates.len());
+            for name in meta.estimates.keys() {
+                println!("  🂠 {name}");
+            }
+        }
+        Some("revealed") => {
+            println!("Round: revealed");
+            for (name, glyph) in &meta.estimates {
+                println!("  {glyph} {name}");
+            }
+        }
+        _ => println!("No active round for {id}"),
+    }
+    Ok(())
+}
+
+fn cmd_poker_consensus(root: &Path, id: &str, glyph: &str) -> anyhow::Result<()> {
+    let card = find_card(root, id).with_context(|| format!("card not found: {}", id))?;
+    let mut meta = jobcard_core::read_meta(&card)?;
+    if meta.poker_round.is_none() {
+        anyhow::bail!("no active round for {id}");
+    }
+    if is_joker(glyph) {
+        println!("⊘ {glyph} is a Joker — cannot commit. Break down the card first.");
+        return Ok(());
+    }
+    let (rank_label, pts) = glyph_rank(glyph);
+    let suit = glyph_suit(glyph);
+    meta.glyph = Some(glyph.to_owned());
+    meta.poker_round = None;
+    meta.estimates.clear();
+    write_meta(&card, &meta)?;
+    println!("∴ Consensus: {glyph} — {rank_label} of {suit} — {pts}pt");
+    println!("  Committed to {id}/meta.json");
+    Ok(())
 }
 
 fn find_git_root(start: &Path) -> Option<std::path::PathBuf> {
@@ -3135,8 +1565,8 @@ fn is_zellij_interactive() -> bool {
     if std::env::var("ZELLIJ").is_err() {
         return false;
     }
-    use std::os::unix::io::AsRawFd;
-    unsafe { libc::isatty(std::io::stdout().as_raw_fd()) != 0 }
+    use std::io::IsTerminal;
+    std::io::stdout().is_terminal()
 }
 
 fn count_running_cards(cards_dir: &Path) -> usize {
@@ -3671,6 +2101,19 @@ fn set_provider_cooldown(cards_dir: &Path, provider: &str, cooldown_s: i64) -> a
     }
     write_providers(cards_dir, &pf)?;
     Ok(())
+}
+
+fn remove_worktree(path: &Path, git_root: Option<&Path>) -> anyhow::Result<()> {
+    if let Some(root) = git_root {
+        let status = StdCommand::new("git")
+            .args(["worktree", "remove", "--force", path.to_str().unwrap_or("")])
+            .current_dir(root)
+            .status();
+        if matches!(status, Ok(s) if s.success()) {
+            return Ok(());
+        }
+    }
+    fs::remove_dir_all(path).with_context(|| format!("failed to remove {}", path.display()))
 }
 
 async fn run_merge_gate(
@@ -4354,535 +2797,4 @@ fn load_feed_config(card_dir: &Path) -> jobcard_core::realtime::FeedConfig {
             value_ranges: std::collections::HashMap::new(),
         },
     }
-}
-
-/// Returns (path, branch) for every linked worktree known to git (excluding the main worktree).
-/// Returns empty vec if git is unavailable or not in a git repo.
-fn git_worktree_paths(from_dir: &Path) -> Vec<(PathBuf, String)> {
-    let Ok(out) = StdCommand::new("git")
-        .args(["worktree", "list", "--porcelain"])
-        .current_dir(from_dir)
-        .output()
-    else {
-        return vec![];
-    };
-    if !out.status.success() {
-        return vec![];
-    }
-
-    let text = String::from_utf8_lossy(&out.stdout);
-    let mut result = Vec::new();
-    let mut current_path: Option<PathBuf> = None;
-    let mut current_branch = String::new();
-    let mut block_index: usize = 0;
-
-    for line in text.lines() {
-        if line.starts_with("worktree ") {
-            if let Some(p) = current_path.take() {
-                if block_index > 1 {
-                    result.push((p, std::mem::take(&mut current_branch)));
-                }
-            }
-            current_path = line.strip_prefix("worktree ").map(PathBuf::from);
-            current_branch = String::new();
-            block_index += 1;
-        } else if let Some(rest) = line.strip_prefix("branch refs/heads/") {
-            current_branch = rest.to_string();
-        } else if line.is_empty() {
-            if let Some(p) = current_path.take() {
-                if block_index > 1 {
-                    result.push((p, std::mem::take(&mut current_branch)));
-                }
-            }
-        }
-    }
-    if let Some(p) = current_path {
-        if block_index > 1 {
-            result.push((p, current_branch));
-        }
-    }
-    result
-}
-
-fn cmd_worktree_list(root: &Path) -> anyhow::Result<()> {
-    let states = ["pending", "running", "done", "merged", "failed"];
-    let mut card_worktrees: Vec<(PathBuf, String, String, String)> = Vec::new();
-
-    for &state in &states {
-        let dir = root.join(state);
-        if !dir.exists() {
-            continue;
-        }
-        for ent in fs::read_dir(&dir)?.flatten() {
-            let card_dir = ent.path();
-            if !card_dir.is_dir() {
-                continue;
-            }
-            if card_dir.extension().and_then(|s| s.to_str()).unwrap_or("") != "jobcard" {
-                continue;
-            }
-            let wt_path = card_dir.join("workspace");
-            if !wt_path.exists() {
-                continue;
-            }
-            let meta = jobcard_core::read_meta(&card_dir).ok();
-            let id = meta.as_ref().map(|m| m.id.clone()).unwrap_or_else(|| {
-                card_dir
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("?")
-                    .to_string()
-            });
-            let branch = meta
-                .as_ref()
-                .and_then(|m| m.worktree_branch.clone())
-                .unwrap_or_else(|| "?".to_string());
-            card_worktrees.push((wt_path, id, branch, state.to_string()));
-        }
-    }
-
-    println!("{:<20} {:<30} {:<10} PATH", "ID", "BRANCH", "STATUS");
-    for (path, id, branch, state) in &card_worktrees {
-        println!("{:<20} {:<30} {:<10} {}", id, branch, state, path.display());
-    }
-
-    let git_wt_list = git_worktree_paths(root);
-    let known_paths: std::collections::HashSet<PathBuf> = card_worktrees
-        .iter()
-        .map(|(p, _, _, _)| p.clone())
-        .collect();
-
-    for (gp, _branch) in git_wt_list {
-        if !known_paths.contains(&gp) {
-            println!(
-                "{:<20} {:<30} {:<10} {}",
-                "[orphaned]",
-                "?",
-                "orphaned",
-                gp.display()
-            );
-        }
-    }
-
-    Ok(())
-}
-
-fn cmd_worktree_create(root: &Path, id: &str) -> anyhow::Result<()> {
-    let card = ["pending", "running"]
-        .iter()
-        .find_map(|&state| {
-            let p = root.join(state).join(format!("{}.jobcard", id));
-            if p.exists() {
-                Some(p)
-            } else {
-                None
-            }
-        })
-        .with_context(|| format!("card \'{}\' not found in pending/ or running/", id))?;
-
-    let mut meta = jobcard_core::read_meta(&card)?;
-    let _branch = meta
-        .worktree_branch
-        .as_deref()
-        .unwrap_or(&format!("job/{}", id))
-        .to_string();
-
-    let ws_path = card.join("workspace");
-    if ws_path.exists() {
-        anyhow::bail!("workspace already exists for card \'{}\'", id);
-    }
-
-    let jj_root = find_git_root(root).unwrap_or_else(|| root.to_path_buf());
-    jobcard_core::worktree::ensure_jj_repo(&jj_root)?;
-    let ws_name = next_workspace_name(id);
-    if let Err(e) = jobcard_core::worktree::create_workspace_with_name(&jj_root, &ws_path, &ws_name)
-    {
-        anyhow::bail!("jj workspace create failed: {}", e);
-    }
-    meta.vcs_engine = Some(CoreVcsEngine::Jj);
-    meta.workspace_name = Some(ws_name);
-    meta.workspace_path = Some(ws_path.to_string_lossy().to_string());
-    meta.change_ref = jj_head_ref(&ws_path);
-    let _ = write_meta(&card, &meta);
-
-    println!("created workspace for \'{}\' at {}", id, ws_path.display());
-    Ok(())
-}
-
-/// Remove a directory: first try `git worktree remove --force`, fall back to `fs::remove_dir_all`.
-fn remove_worktree(path: &Path, git_root: Option<&Path>) -> anyhow::Result<()> {
-    if let Some(root) = git_root {
-        let status = StdCommand::new("git")
-            .args(["worktree", "remove", "--force", path.to_str().unwrap_or("")])
-            .current_dir(root)
-            .status();
-        if matches!(status, Ok(s) if s.success()) {
-            return Ok(());
-        }
-    }
-    fs::remove_dir_all(path).with_context(|| format!("failed to remove {}", path.display()))
-}
-
-fn cmd_worktree_clean(root: &Path, dry_run: bool) -> anyhow::Result<()> {
-    let stale_states = ["done", "merged"];
-    let mut to_remove: Vec<PathBuf> = Vec::new();
-
-    for &state in &stale_states {
-        let dir = root.join(state);
-        if !dir.exists() {
-            continue;
-        }
-        for ent in fs::read_dir(&dir)?.flatten() {
-            let card_dir = ent.path();
-            if !card_dir.is_dir() {
-                continue;
-            }
-            if card_dir.extension().and_then(|s| s.to_str()).unwrap_or("") != "jobcard" {
-                continue;
-            }
-            let wt = card_dir.join("workspace");
-            if wt.exists() {
-                to_remove.push(wt);
-            }
-        }
-    }
-
-    let git_root: Option<PathBuf> = StdCommand::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(root.parent().unwrap_or(root))
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| PathBuf::from(s.trim()));
-
-    if let Some(ref gr) = git_root {
-        let active_wt_paths: std::collections::HashSet<PathBuf> = ["pending", "running"]
-            .iter()
-            .flat_map(|&state| {
-                let dir = root.join(state);
-                fs::read_dir(dir)
-                    .into_iter()
-                    .flatten()
-                    .flatten()
-                    .filter_map(|e| {
-                        let p = e.path();
-                        if p.extension().and_then(|s| s.to_str()).unwrap_or("") == "jobcard" {
-                            Some(p.join("workspace"))
-                        } else {
-                            None
-                        }
-                    })
-            })
-            .collect();
-
-        for (wt_path, _branch) in git_worktree_paths(gr) {
-            if !active_wt_paths.contains(&wt_path) && !to_remove.contains(&wt_path) {
-                to_remove.push(wt_path);
-            }
-        }
-    }
-
-    if to_remove.is_empty() {
-        println!("nothing to clean");
-        return Ok(());
-    }
-
-    for path in &to_remove {
-        if dry_run {
-            println!("would remove: {}", path.display());
-        } else {
-            println!("removing: {}", path.display());
-            remove_worktree(path, git_root.as_deref())?;
-        }
-    }
-
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Providers subcommand implementations
-// ---------------------------------------------------------------------------
-
-fn cmd_providers_list(root: &Path) -> anyhow::Result<()> {
-    let pf = read_providers(root)?;
-    let now = chrono::Utc::now().timestamp();
-    if pf.providers.is_empty() {
-        println!("No providers configured. Run: jc providers add <name> --adapter <script>");
-        return Ok(());
-    }
-    println!("{:<20} {:<30} {:<20} COOLDOWN", "NAME", "ADAPTER", "MODEL");
-    for (name, p) in &pf.providers {
-        let model = p.model.as_deref().unwrap_or("-");
-        let cooldown = match p.cooldown_until_epoch_s {
-            Some(until) if until > now => format!("cooldown: {}s", until - now),
-            _ => "none".to_string(),
-        };
-        println!("{:<20} {:<30} {:<20} {}", name, p.command, model, cooldown);
-    }
-    Ok(())
-}
-
-fn cmd_providers_add(
-    root: &Path,
-    name: &str,
-    adapter: &str,
-    model: Option<&str>,
-) -> anyhow::Result<()> {
-    if name.trim().is_empty() {
-        anyhow::bail!("provider name cannot be empty");
-    }
-    if adapter.trim().is_empty() {
-        anyhow::bail!("--adapter cannot be empty");
-    }
-
-    let mut pf = read_providers(root)?;
-
-    if pf.providers.contains_key(name) {
-        anyhow::bail!(
-            "provider '{}' already exists. Use 'providers remove' first.",
-            name
-        );
-    }
-
-    let provider = Provider {
-        command: adapter.to_string(),
-        rate_limit_exit: 75,
-        cooldown_until_epoch_s: None,
-        model: model.map(str::to_string),
-    };
-    validate_provider(name, &provider)?;
-
-    pf.providers.insert(name.to_string(), provider);
-    write_providers(root, &pf)?;
-    println!("Added provider '{}'.", name);
-    Ok(())
-}
-
-struct ProviderStats {
-    total: usize,
-    success: usize,
-    failed: usize,
-}
-
-fn count_active_jobs_for_provider(cards_dir: &Path, provider_name: &str) -> usize {
-    let running_dir = cards_dir.join("running");
-    let Ok(entries) = std::fs::read_dir(&running_dir) else {
-        return 0;
-    };
-    let mut count = 0;
-    for ent in entries.flatten() {
-        let card_dir = ent.path();
-        if !card_dir.is_dir() {
-            continue;
-        }
-        if card_dir.extension().and_then(|s| s.to_str()).unwrap_or("") != "jobcard" {
-            continue;
-        }
-        if let Ok(meta) = jobcard_core::read_meta(&card_dir) {
-            for record in meta.stages.values() {
-                if record.provider.as_deref() == Some(provider_name) {
-                    count += 1;
-                    break;
-                }
-            }
-        }
-    }
-    count
-}
-
-fn compute_provider_stats(cards_dir: &Path) -> std::collections::BTreeMap<String, ProviderStats> {
-    let mut stats: std::collections::BTreeMap<String, ProviderStats> = Default::default();
-    let state_dirs = ["pending", "running", "done", "merged", "failed"];
-    for state in state_dirs {
-        let dir = cards_dir.join(state);
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for ent in entries.flatten() {
-            let card_dir = ent.path();
-            if !card_dir.is_dir() {
-                continue;
-            }
-            if card_dir.extension().and_then(|s| s.to_str()).unwrap_or("") != "jobcard" {
-                continue;
-            }
-            let Ok(meta) = jobcard_core::read_meta(&card_dir) else {
-                continue;
-            };
-            for record in meta.stages.values() {
-                let Some(prov) = &record.provider else {
-                    continue;
-                };
-                let entry = stats.entry(prov.clone()).or_insert(ProviderStats {
-                    total: 0,
-                    success: 0,
-                    failed: 0,
-                });
-                entry.total += 1;
-                match record.status {
-                    jobcard_core::StageStatus::Done => entry.success += 1,
-                    jobcard_core::StageStatus::Failed => entry.failed += 1,
-                    _ => {}
-                }
-            }
-        }
-    }
-    stats
-}
-
-fn cmd_providers_remove(root: &Path, name: &str, force: bool) -> anyhow::Result<()> {
-    let mut pf = read_providers(root)?;
-    if !pf.providers.contains_key(name) {
-        anyhow::bail!("provider '{}' not found", name);
-    }
-
-    let active = count_active_jobs_for_provider(root, name);
-    if active > 0 && !force {
-        anyhow::bail!(
-            "provider '{}' has {} active job(s) in running/. \
-             Use --force to remove anyway.",
-            name,
-            active
-        );
-    }
-
-    pf.providers.remove(name);
-    // Clear default_provider if it was pointing to the removed provider
-    if pf.default_provider.as_deref() == Some(name) {
-        pf.default_provider = None;
-    }
-    write_providers(root, &pf)?;
-    if active > 0 {
-        eprintln!("Warning: removed '{}' with {} active job(s).", name, active);
-    }
-    println!("Removed provider '{}'.", name);
-    Ok(())
-}
-
-fn cmd_providers_status(root: &Path) -> anyhow::Result<()> {
-    let pf = read_providers(root)?;
-    let stats = compute_provider_stats(root);
-    let now = chrono::Utc::now().timestamp();
-
-    if pf.providers.is_empty() {
-        println!("No providers configured.");
-        return Ok(());
-    }
-
-    println!(
-        "{:<20} {:>6} {:>8} {:>8} COOLDOWN",
-        "PROVIDER", "TOTAL", "SUCCESS", "FAILED"
-    );
-    for (name, p) in &pf.providers {
-        let s = stats.get(name);
-        let total = s.map(|s| s.total).unwrap_or(0);
-        let success = s.map(|s| s.success).unwrap_or(0);
-        let failed = s.map(|s| s.failed).unwrap_or(0);
-        let cooldown = match p.cooldown_until_epoch_s {
-            Some(until) if until > now => format!("{}s", until - now),
-            _ => "none".to_string(),
-        };
-        println!(
-            "{:<20} {:>6} {:>8} {:>8} {}",
-            name, total, success, failed, cooldown
-        );
-    }
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Config subcommands
-// ---------------------------------------------------------------------------
-
-/// Return the config path: JOBCARD_CONFIG env var if set, else project config path.
-fn resolve_config_path() -> PathBuf {
-    if let Ok(p) = std::env::var("JOBCARD_CONFIG") {
-        return PathBuf::from(p);
-    }
-    jobcard_core::config::project_config_path()
-}
-
-fn cmd_config_get(config_path: &Path, key: &str) -> anyhow::Result<()> {
-    let cfg = if config_path.exists() {
-        jobcard_core::config::read_config_file(config_path)?
-    } else {
-        jobcard_core::Config::default()
-    };
-
-    match key {
-        "default_provider_chain" => match cfg.default_provider_chain {
-            Some(chain) => println!("{}", chain.join(",")),
-            None => println!("(unset)"),
-        },
-        "max_concurrent" => match cfg.max_concurrent {
-            Some(v) => println!("{}", v),
-            None => println!("(unset)"),
-        },
-        "cooldown_seconds" => match cfg.cooldown_seconds {
-            Some(v) => println!("{}", v),
-            None => println!("(unset)"),
-        },
-        "log_retention_days" => match cfg.log_retention_days {
-            Some(v) => println!("{}", v),
-            None => println!("(unset)"),
-        },
-        "default_template" => match cfg.default_template {
-            Some(v) => println!("{}", v),
-            None => println!("(unset)"),
-        },
-        _ => anyhow::bail!(
-            "unknown config key '{}'. Valid keys: default_provider_chain, \
-            max_concurrent, cooldown_seconds, log_retention_days, default_template",
-            key
-        ),
-    }
-    Ok(())
-}
-
-fn cmd_config_set(config_path: &Path, key: &str, value: &str) -> anyhow::Result<()> {
-    let mut cfg = if config_path.exists() {
-        jobcard_core::config::read_config_file(config_path)?
-    } else {
-        jobcard_core::Config::default()
-    };
-
-    match key {
-        "default_provider_chain" => {
-            cfg.default_provider_chain =
-                Some(value.split(',').map(|s| s.trim().to_string()).collect());
-        }
-        "max_concurrent" => {
-            cfg.max_concurrent = Some(value.parse::<usize>().with_context(|| {
-                format!("max_concurrent must be a positive integer, got: {}", value)
-            })?);
-        }
-        "cooldown_seconds" => {
-            cfg.cooldown_seconds = Some(value.parse::<u64>().with_context(|| {
-                format!(
-                    "cooldown_seconds must be a non-negative integer, got: {}",
-                    value
-                )
-            })?);
-        }
-        "log_retention_days" => {
-            cfg.log_retention_days = Some(value.parse::<u64>().with_context(|| {
-                format!(
-                    "log_retention_days must be a non-negative integer, got: {}",
-                    value
-                )
-            })?);
-        }
-        "default_template" => {
-            cfg.default_template = Some(value.to_string());
-        }
-        _ => anyhow::bail!(
-            "unknown config key '{}'. Valid keys: default_provider_chain, \
-            max_concurrent, cooldown_seconds, log_retention_days, default_template",
-            key
-        ),
-    }
-
-    jobcard_core::config::write_config_file(config_path, &cfg)?;
-    Ok(())
 }

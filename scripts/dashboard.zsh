@@ -1,8 +1,7 @@
 #!/usr/bin/env zsh
 # Live status dashboard for all 5 job teams
 setopt NULL_GLOB   # unmatched globs expand to nothing instead of erroring
-ROOT=/Users/studio/gtfs
-
+ROOT=${0:A:h:h}
 TEAMS=(
   "team-cli:claude"
   "team-arch:claude"

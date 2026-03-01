@@ -1,8 +1,7 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
-ROOT="/Users/studio/gtfs"
-SOURCE_DIR="${ROOT}/.cards"
+ROOT=${0:A:h:h}SOURCE_DIR="${ROOT}/.cards"
 BLUE_DIR="${ROOT}/.cards-blue"
 GREEN_DIR="${ROOT}/.cards-green"
 GREEN_PCT=${GREEN_PCT:-20}

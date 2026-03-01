@@ -1,7 +1,7 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
-ROOT="/Users/studio/gtfs"
+ROOT=${0:A:h:h}
 BOP="${ROOT}/target/debug/bop"
 BLUE_DIR="${ROOT}/.cards-blue"
 GREEN_DIR="${ROOT}/.cards-green"

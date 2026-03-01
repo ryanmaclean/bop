@@ -6,7 +6,7 @@ Each team gets its own .cards/team-N/ dir + providers.json + dispatcher.
 
 import json, os, shutil, subprocess, pathlib, datetime
 
-ROOT = pathlib.Path("/Users/studio/gtfs")
+ROOT = pathlib.Path(str(pathlib.Path(__file__).parent.parent))
 ROADMAP = ROOT / ".auto-claude/roadmap/roadmap.json"
 JC = ROOT / "target/debug/jc"
 ADAPTERS = ROOT / "adapters"

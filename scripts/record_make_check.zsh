@@ -1,8 +1,7 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
-ROOT="/Users/studio/gtfs"
-LOG_FILE="${ROOT}/.cards/promotion/make_check_runs.log"
+ROOT=${0:A:h:h}LOG_FILE="${ROOT}/.cards/promotion/make_check_runs.log"
 mkdir -p "$(dirname "$LOG_FILE")"
 
 status="pass"

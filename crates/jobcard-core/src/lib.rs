@@ -155,6 +155,15 @@ pub struct Meta {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub validation_summary: Option<realtime::ValidationSummary>,
+
+    // ── planning poker ────────────────────────────────────────────────────────
+    /// "open" | "revealed" | None (no active round)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poker_round: Option<String>,
+
+    /// participant name → playing-card glyph (e.g. "alice" → "🂻")
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub estimates: BTreeMap<String, String>,
 }
 
 fn is_false(value: &bool) -> bool {

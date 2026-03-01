@@ -1,8 +1,7 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
-ROOT="/Users/studio/gtfs"
-WINDOW_MINUTES=$((48 * 60))
+ROOT=${0:A:h:h}WINDOW_MINUTES=$((48 * 60))
 CHECK_HISTORY_FILE="${ROOT}/.cards/promotion/make_check_runs.log"
 INCIDENTS_DIR="${ROOT}/.cards/incidents/critical"
 

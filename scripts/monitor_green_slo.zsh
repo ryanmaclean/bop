@@ -1,8 +1,7 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
-ROOT="/Users/studio/gtfs"
-GREEN_DIR="${ROOT}/.cards-green"
+ROOT=${0:A:h:h}GREEN_DIR="${ROOT}/.cards-green"
 OVERRIDE_FILE="${ROOT}/.cards/route.override"
 
 WINDOW_MINUTES=${WINDOW_MINUTES:-30}

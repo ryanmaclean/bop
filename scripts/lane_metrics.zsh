@@ -1,8 +1,7 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
-ROOT="/Users/studio/gtfs"
-WINDOW_MINUTES=1440
+ROOT=${0:A:h:h}WINDOW_MINUTES=1440
 OUTPUT="table"
 
 while (( $# > 0 )); do

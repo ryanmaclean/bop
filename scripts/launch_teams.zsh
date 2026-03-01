@@ -2,7 +2,7 @@
 # Launch 5 team dispatchers in a zellij session, one pane each.
 set -euo pipefail
 
-ROOT=/Users/studio/gtfs
+ROOT=${0:A:h:h}
 BOP=$ROOT/target/debug/bop
 
 TEAMS=(
