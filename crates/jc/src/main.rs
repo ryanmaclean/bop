@@ -608,6 +608,11 @@ fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
             retry_count: Some(0),
             failure_reason: None,
             validation_summary: None,
+            title: None,
+            description: None,
+            labels: vec![],
+            progress: None,
+            subtasks: vec![],
         };
         write_meta(&implement, &meta)?;
 
@@ -685,6 +690,11 @@ fn create_card(
         retry_count: Some(0),
         failure_reason: None,
         validation_summary: None,
+        title: None,
+        description: None,
+        labels: vec![],
+        progress: None,
+        subtasks: vec![],
     });
 
     meta.id = id.to_string();
@@ -1290,10 +1300,25 @@ fn cmd_memory_delete(root: &Path, namespace: &str, key: &str) -> anyhow::Result<
 }
 
 fn run_policy_script(cwd: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
-    let script = cwd.join("scripts").join("policy_check.zsh");
-    if !script.exists() {
-        anyhow::bail!("policy script missing: {}", script.display());
-    }
+    let script_candidates = [
+        cwd.join("scripts").join("policy_check.zsh"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.join("scripts").join("policy_check.zsh"))
+            .unwrap_or_else(|| PathBuf::from("scripts/policy_check.zsh")),
+    ];
+    let script = script_candidates
+        .iter()
+        .find(|p| p.exists())
+        .cloned()
+        .with_context(|| {
+            format!(
+                "policy script missing (checked: {}, {})",
+                script_candidates[0].display(),
+                script_candidates[1].display()
+            )
+        })?;
     let output = StdCommand::new("zsh")
         .arg(script)
         .args(args)
@@ -3029,7 +3054,9 @@ fn zellij_open_card_pane(card_id: &str, card_dir: &Path) {
     let log = card_dir.join("logs").join("stdout.log");
     let Some(log_str) = log.to_str() else { return };
     let _ = std::process::Command::new("zellij")
-        .args(["action", "new-pane", "--name", card_id, "--", "tail", "-f", log_str])
+        .args([
+            "action", "new-pane", "--name", card_id, "--", "tail", "-f", log_str,
+        ])
         .output();
 }
 
@@ -3105,19 +3132,24 @@ async fn run_dispatcher(
                         .as_ref()
                         .map(|m| m.id.clone())
                         .unwrap_or_else(|| name.trim_end_matches(".jobcard").to_string());
-                    let ws_info =
-                        match prepare_workspace(vcs_engine, cards_dir, &running_path, &card_id, &mut meta) {
-                            Ok(info) => info,
-                            Err(err) => {
-                                eprintln!("[dispatcher] workspace prepare failed: {err}");
-                                if let Some(ref mut m) = meta {
-                                    m.failure_reason = Some(format!("workspace_prepare_failed: {err}"));
-                                    let _ = write_meta(&running_path, m);
-                                }
-                                let _ = fs::rename(&running_path, failed_dir.join(&name));
-                                continue;
+                    let ws_info = match prepare_workspace(
+                        vcs_engine,
+                        cards_dir,
+                        &running_path,
+                        &card_id,
+                        &mut meta,
+                    ) {
+                        Ok(info) => info,
+                        Err(err) => {
+                            eprintln!("[dispatcher] workspace prepare failed: {err}");
+                            if let Some(ref mut m) = meta {
+                                m.failure_reason = Some(format!("workspace_prepare_failed: {err}"));
+                                let _ = write_meta(&running_path, m);
                             }
-                        };
+                            let _ = fs::rename(&running_path, failed_dir.join(&name));
+                            continue;
+                        }
+                    };
                     persist_workspace_meta(&mut meta, &running_path, vcs_engine, ws_info.as_ref());
 
                     // Adaptive zellij pane management
@@ -3261,8 +3293,35 @@ async fn run_card(
     }
 
     let workdir = {
-        let ws = card_dir.join("workspace");
-        if ws.exists() { ws } else { card_dir.to_path_buf() }
+        if let Some(ref m) = meta {
+            if let Some(ref p) = m.workspace_path {
+                let candidate = PathBuf::from(p);
+                if candidate.exists() {
+                    candidate
+                } else {
+                    let ws = card_dir.join("workspace");
+                    if ws.exists() {
+                        ws
+                    } else {
+                        card_dir.to_path_buf()
+                    }
+                }
+            } else {
+                let ws = card_dir.join("workspace");
+                if ws.exists() {
+                    ws
+                } else {
+                    card_dir.to_path_buf()
+                }
+            }
+        } else {
+            let ws = card_dir.join("workspace");
+            if ws.exists() {
+                ws
+            } else {
+                card_dir.to_path_buf()
+            }
+        }
     };
 
     let stage = meta
@@ -3439,7 +3498,12 @@ fn set_provider_cooldown(cards_dir: &Path, provider: &str, cooldown_s: i64) -> a
     Ok(())
 }
 
-async fn run_merge_gate(cards_dir: &Path, poll_ms: u64, once: bool) -> anyhow::Result<()> {
+async fn run_merge_gate(
+    cards_dir: &Path,
+    poll_ms: u64,
+    once: bool,
+    vcs_engine: VcsEngine,
+) -> anyhow::Result<()> {
     ensure_cards_layout(cards_dir)?;
 
     let done_dir = cards_dir.join("done");
@@ -3474,8 +3538,26 @@ async fn run_merge_gate(cards_dir: &Path, poll_ms: u64, once: bool) -> anyhow::R
                 fs::create_dir_all(card_dir.join("output"))?;
 
                 let workdir = {
-                    let ws = card_dir.join("workspace");
-                    if ws.exists() { ws } else { card_dir.clone() }
+                    if let Some(ref p) = meta.workspace_path {
+                        let candidate = PathBuf::from(p);
+                        if candidate.exists() {
+                            candidate
+                        } else {
+                            let ws = card_dir.join("workspace");
+                            if ws.exists() {
+                                ws
+                            } else {
+                                card_dir.clone()
+                            }
+                        }
+                    } else {
+                        let ws = card_dir.join("workspace");
+                        if ws.exists() {
+                            ws
+                        } else {
+                            card_dir.clone()
+                        }
+                    }
                 };
 
                 let qa_log = card_dir.join("logs").join("qa.log");
@@ -3527,53 +3609,150 @@ async fn run_merge_gate(cards_dir: &Path, poll_ms: u64, once: bool) -> anyhow::R
                     continue;
                 }
 
-                let ws_path = card_dir.join("workspace");
+                if let Err(err) = policy_check_card(cards_dir, &card_dir, &meta.id) {
+                    meta.failure_reason = Some("policy_violation".to_string());
+                    meta.policy_result = Some(format!("failed: {err}"));
+                    let _ = fs::write(
+                        card_dir.join("output").join("qa_report.md"),
+                        format!("policy violation: {err}\n"),
+                    );
+                    let _ = write_meta(&card_dir, &meta);
+                    let _ = fs::rename(&card_dir, failed_dir.join(&name));
+                    continue;
+                }
+                meta.policy_result = Some("pass".to_string());
+
+                let ws_path = if let Some(ref p) = meta.workspace_path {
+                    PathBuf::from(p)
+                } else {
+                    card_dir.join("workspace")
+                };
+
                 if ws_path.exists() {
-                    // Step 1: Squash agent changes from workspace into parent change.
-                    if let Err(e) = jobcard_core::worktree::squash_workspace(&ws_path) {
+                    let mut vcs_err: Option<String> = None;
+                    match vcs_engine {
+                        VcsEngine::GitGt => {
+                            let Some(git_root) = find_git_root(cards_dir) else {
+                                meta.failure_reason = Some("git_root_not_found".to_string());
+                                meta.policy_result = Some("failed".to_string());
+                                let _ = write_meta(&card_dir, &meta);
+                                let _ = fs::rename(&card_dir, failed_dir.join(&name));
+                                continue;
+                            };
+
+                            let add_status = StdCommand::new("git")
+                                .args(["add", "-A"])
+                                .current_dir(&ws_path)
+                                .status();
+                            if !matches!(add_status, Ok(s) if s.success()) {
+                                vcs_err = Some("git add -A failed".to_string());
+                            }
+
+                            if vcs_err.is_none() {
+                                let diff_cached = StdCommand::new("git")
+                                    .args(["diff", "--cached", "--quiet"])
+                                    .current_dir(&ws_path)
+                                    .status();
+                                let has_staged =
+                                    matches!(diff_cached, Ok(s) if s.code() == Some(1));
+                                if has_staged {
+                                    let msg = format!("jobcard: {}", meta.id);
+                                    let commit_status = StdCommand::new("git")
+                                        .args(["commit", "-m", &msg])
+                                        .current_dir(&ws_path)
+                                        .status();
+                                    if !matches!(commit_status, Ok(s) if s.success()) {
+                                        vcs_err = Some("git commit failed".to_string());
+                                    }
+                                }
+                            }
+
+                            if vcs_err.is_none() {
+                                let restack = StdCommand::new("gt")
+                                    .args(["stack", "restack", "--no-interactive"])
+                                    .current_dir(&ws_path)
+                                    .status();
+                                if !matches!(restack, Ok(s) if s.success()) {
+                                    vcs_err = Some("gt stack restack failed".to_string());
+                                }
+                            }
+
+                            if vcs_err.is_none() {
+                                let submit = StdCommand::new("gt")
+                                    .args([
+                                        "submit",
+                                        "--stack",
+                                        "--no-interactive",
+                                        "--no-edit",
+                                        "--draft",
+                                    ])
+                                    .current_dir(&ws_path)
+                                    .status();
+                                if !matches!(submit, Ok(s) if s.success()) {
+                                    vcs_err = Some("gt submit failed".to_string());
+                                }
+                            }
+
+                            let _ = remove_worktree(&ws_path, Some(&git_root));
+                        }
+                        VcsEngine::Jj => {
+                            let repo_root =
+                                find_git_root(cards_dir).unwrap_or_else(|| cards_dir.to_path_buf());
+                            if let Err(e) = jobcard_core::worktree::squash_workspace(&ws_path) {
+                                vcs_err = Some(format!("jj squash failed: {e}"));
+                            }
+                            if vcs_err.is_none() {
+                                let ws_name = meta
+                                    .workspace_name
+                                    .clone()
+                                    .unwrap_or_else(|| "workspace".to_string());
+                                if let Err(e) =
+                                    jobcard_core::worktree::forget_workspace(&repo_root, &ws_name)
+                                {
+                                    vcs_err = Some(format!("jj workspace forget failed: {e}"));
+                                }
+                            }
+                            if vcs_err.is_none() {
+                                if let Err(e) =
+                                    jobcard_core::worktree::push_stack(&repo_root, "origin")
+                                {
+                                    vcs_err = Some(format!("jj git push failed: {e}"));
+                                }
+                            }
+                            if vcs_err.is_none() {
+                                let pr_result = StdCommand::new("gh")
+                                    .args(["pr", "create", "--fill", "--draft"])
+                                    .current_dir(&repo_root)
+                                    .output();
+                                match pr_result {
+                                    Ok(out) if out.status.success() => {}
+                                    Ok(out) => {
+                                        vcs_err = Some(format!(
+                                            "gh pr create failed: {}",
+                                            String::from_utf8_lossy(&out.stderr).trim()
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        vcs_err = Some(format!("gh pr create failed: {e}"));
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(err) = vcs_err {
                         let _ = fs::OpenOptions::new()
                             .create(true)
                             .append(true)
                             .open(&qa_log)
-                            .and_then(|mut f| {
-                                f.write_all(format!("jj squash failed: {e}\n").as_bytes())
-                            });
-                        meta.failure_reason = Some("jj_squash_failed".to_string());
+                            .and_then(|mut f| f.write_all(format!("{err}\n").as_bytes()));
+                        meta.failure_reason = Some("vcs_publish_failed".to_string());
+                        meta.policy_result = Some("failed".to_string());
                         let _ = write_meta(&card_dir, &meta);
-                        // Best-effort cleanup: forget the workspace even on squash failure to avoid
-                        // orphaned workspace registrations in jj.
-                        let jj_root = find_git_root(cards_dir).unwrap_or_else(|| cards_dir.to_path_buf());
-                        let _ = jobcard_core::worktree::forget_workspace(&jj_root, "workspace");
                         let _ = fs::rename(&card_dir, failed_dir.join(&name));
                         continue;
                     }
-
-                    // Step 2: Forget the workspace (clean up; data is in parent change).
-                    let jj_root = find_git_root(cards_dir).unwrap_or_else(|| cards_dir.to_path_buf());
-                    let _ = jobcard_core::worktree::forget_workspace(&jj_root, "workspace");
-
-                    // Step 3: Push stack to remote (best-effort; non-fatal if no remote).
-                    if let Err(e) = jobcard_core::worktree::push_stack(&jj_root, "origin") {
-                        eprintln!("[merge-gate] jj git push failed (no remote?): {e}");
-                    }
-
-                    // Step 4: Create stacked PR (best-effort; requires gh + GitHub remote).
-                    let pr_result = std::process::Command::new("gh")
-                        .args(["pr", "create", "--fill", "--draft"])
-                        .current_dir(&jj_root)
-                        .output();
-                    if let Ok(out) = pr_result {
-                        if !out.status.success() {
-                            eprintln!("[merge-gate] gh pr create failed (no remote?): {}",
-                                String::from_utf8_lossy(&out.stderr));
-                        }
-                    }
-
-                    let _ = write_meta(&card_dir, &meta);
-                    let _ = fs::rename(&card_dir, merged_dir.join(&name));
-                    continue;
                 }
-                // No workspace: move directly to merged (no VCS work).
 
                 let _ = write_meta(&card_dir, &meta);
                 let _ = fs::rename(&card_dir, merged_dir.join(&name));
@@ -4091,7 +4270,7 @@ fn cmd_worktree_create(root: &Path, id: &str) -> anyhow::Result<()> {
         })
         .with_context(|| format!("card \'{}\' not found in pending/ or running/", id))?;
 
-    let meta = jobcard_core::read_meta(&card)?;
+    let mut meta = jobcard_core::read_meta(&card)?;
     let _branch = meta
         .worktree_branch
         .as_deref()
@@ -4104,16 +4283,19 @@ fn cmd_worktree_create(root: &Path, id: &str) -> anyhow::Result<()> {
     }
 
     let jj_root = find_git_root(root).unwrap_or_else(|| root.to_path_buf());
-    let _ = jobcard_core::worktree::ensure_jj_repo(&jj_root);
-    if let Err(e) = jobcard_core::worktree::create_workspace(&jj_root, &ws_path) {
+    jobcard_core::worktree::ensure_jj_repo(&jj_root)?;
+    let ws_name = next_workspace_name(id);
+    if let Err(e) = jobcard_core::worktree::create_workspace_with_name(&jj_root, &ws_path, &ws_name)
+    {
         anyhow::bail!("jj workspace create failed: {}", e);
     }
+    meta.vcs_engine = Some(VcsEngine::Jj.as_str().to_string());
+    meta.workspace_name = Some(ws_name);
+    meta.workspace_path = Some(ws_path.to_string_lossy().to_string());
+    meta.change_ref = jj_head_ref(&ws_path);
+    let _ = write_meta(&card, &meta);
 
-    println!(
-        "created workspace for \'{}\' at {}",
-        id,
-        ws_path.display()
-    );
+    println!("created workspace for \'{}\' at {}", id, ws_path.display());
     Ok(())
 }
 

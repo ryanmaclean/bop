@@ -64,9 +64,11 @@ pub fn squash_workspace(ws_path: &Path) -> Result<()> {
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         // jj exits non-zero when there are no changes to squash — this is OK.
-        // Verified against jj 0.x: the actual message is "Nothing changed after diffing".
-        // "nothing to squash" and "No diff" do NOT appear in real jj output; removed.
-        if stderr.contains("Nothing changed") {
+        // Also accept immutable-root scenarios in fresh repos where there is no
+        // parent change to squash into yet.
+        if stderr.contains("Nothing changed")
+            || (stderr.contains("root commit") && stderr.contains("immutable"))
+        {
             return Ok(());
         }
         anyhow::bail!("jj squash failed: {}", stderr);
@@ -137,7 +139,10 @@ mod tests {
     use super::*;
 
     fn jj_available() -> bool {
-        std::process::Command::new("jj").arg("--version").output().is_ok()
+        std::process::Command::new("jj")
+            .arg("--version")
+            .output()
+            .is_ok()
     }
 
     fn make_jj_repo() -> tempfile::TempDir {
@@ -145,19 +150,27 @@ mod tests {
         std::process::Command::new("jj")
             .args(["git", "init", "--colocate"])
             .current_dir(dir.path())
-            .output().unwrap();
+            .output()
+            .unwrap();
         std::process::Command::new("jj")
             .args(["config", "set", "--repo", "user.name", "Test"])
-            .current_dir(dir.path()).output().unwrap();
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
         std::process::Command::new("jj")
             .args(["config", "set", "--repo", "user.email", "test@test.local"])
-            .current_dir(dir.path()).output().unwrap();
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
         dir
     }
 
     #[test]
     fn test_ensure_jj_repo_idempotent() {
-        if !jj_available() { eprintln!("jj not installed, skipping"); return; }
+        if !jj_available() {
+            eprintln!("jj not installed, skipping");
+            return;
+        }
         let dir = tempfile::tempdir().unwrap();
         ensure_jj_repo(dir.path()).unwrap();
         ensure_jj_repo(dir.path()).unwrap();
@@ -166,7 +179,10 @@ mod tests {
 
     #[test]
     fn test_create_workspace() {
-        if !jj_available() { eprintln!("jj not installed, skipping"); return; }
+        if !jj_available() {
+            eprintln!("jj not installed, skipping");
+            return;
+        }
         let repo = make_jj_repo();
         let ws = repo.path().join("my-workspace");
         create_workspace(repo.path(), &ws).unwrap();
@@ -175,7 +191,10 @@ mod tests {
 
     #[test]
     fn test_create_and_forget_workspace() {
-        if !jj_available() { eprintln!("jj not installed, skipping"); return; }
+        if !jj_available() {
+            eprintln!("jj not installed, skipping");
+            return;
+        }
         let repo = make_jj_repo();
         let ws = repo.path().join("card-workspace");
         create_workspace(repo.path(), &ws).unwrap();
@@ -184,7 +203,10 @@ mod tests {
 
     #[test]
     fn test_squash_workspace_changes() {
-        if !jj_available() { eprintln!("jj not installed, skipping"); return; }
+        if !jj_available() {
+            eprintln!("jj not installed, skipping");
+            return;
+        }
         let repo = make_jj_repo();
         let ws = repo.path().join("squash-ws");
         create_workspace(repo.path(), &ws).unwrap();

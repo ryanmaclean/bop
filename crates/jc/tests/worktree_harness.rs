@@ -24,6 +24,10 @@ fn jc_bin() -> PathBuf {
     repo_root().join("target").join("debug").join("jc")
 }
 
+fn jj_available() -> bool {
+    Command::new("jj").arg("--version").output().is_ok()
+}
+
 /// Write a minimal meta.json into a card directory.
 fn write_meta(card_dir: &Path, id: &str, branch: &str) {
     let meta = format!(
@@ -48,17 +52,17 @@ fn worktree_list_shows_cards_with_worktrees() {
         .unwrap();
     assert!(s.success());
 
-    // Card in running/ with a worktree/ dir
+    // Card in running/ with a workspace/ dir
     let running_card = cards.join("running").join("run-job.jobcard");
-    fs::create_dir_all(running_card.join("worktree")).unwrap();
+    fs::create_dir_all(running_card.join("workspace")).unwrap();
     write_meta(&running_card, "run-job", "job/run-job");
 
-    // Card in done/ with a worktree/ dir
+    // Card in done/ with a workspace/ dir
     let done_card = cards.join("done").join("done-job.jobcard");
-    fs::create_dir_all(done_card.join("worktree")).unwrap();
+    fs::create_dir_all(done_card.join("workspace")).unwrap();
     write_meta(&done_card, "done-job", "job/done-job");
 
-    // Card in pending/ WITHOUT a worktree/ dir (should not appear)
+    // Card in pending/ WITHOUT a workspace/ dir (should not appear)
     let pending_card = cards.join("pending").join("no-wt.jobcard");
     fs::create_dir_all(&pending_card).unwrap();
     write_meta(&pending_card, "no-wt", "job/no-wt");
@@ -86,7 +90,7 @@ fn worktree_list_shows_cards_with_worktrees() {
     );
     assert!(
         !stdout.contains("no-wt"),
-        "should NOT show no-wt (no worktree/):\n{}",
+        "should NOT show no-wt (no workspace/):\n{}",
         stdout
     );
     assert!(
@@ -178,7 +182,11 @@ fn worktree_list_flags_orphaned_git_worktrees() {
 }
 
 #[test]
-fn worktree_create_makes_git_worktree_for_pending_card() {
+fn worktree_create_makes_workspace_for_pending_card() {
+    if !jj_available() {
+        eprintln!("jj not installed, skipping");
+        return;
+    }
     build_jc();
 
     let td = tempfile::tempdir().unwrap();
@@ -237,22 +245,9 @@ fn worktree_create_makes_git_worktree_for_pending_card() {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    // worktree/ directory must exist inside the card
-    let wt = card_dir.join("worktree");
-    assert!(wt.exists(), "worktree/ dir should exist after create");
-
-    // git should know about the new worktree
-    let git_out = Command::new("git")
-        .args(["worktree", "list"])
-        .current_dir(td.path())
-        .output()
-        .unwrap();
-    let git_list = String::from_utf8_lossy(&git_out.stdout);
-    assert!(
-        git_list.contains("create-job") || git_list.contains(wt.to_str().unwrap()),
-        "git worktree list should show the new worktree:\n{}",
-        git_list
-    );
+    // workspace/ directory must exist inside the card
+    let wt = card_dir.join("workspace");
+    assert!(wt.exists(), "workspace/ dir should exist after create");
 }
 
 #[test]
@@ -323,9 +318,9 @@ fn worktree_clean_dry_run_does_not_remove() {
         .unwrap();
     assert!(s.success());
 
-    // Card in done/ with a worktree/ dir
+    // Card in done/ with a workspace/ dir
     let done_card = cards.join("done").join("done-clean.jobcard");
-    let wt = done_card.join("worktree");
+    let wt = done_card.join("workspace");
     fs::create_dir_all(&wt).unwrap();
     write_meta(&done_card, "done-clean", "job/done-clean");
 
@@ -352,8 +347,8 @@ fn worktree_clean_dry_run_does_not_remove() {
         stdout
     );
 
-    // Worktree must still exist after dry-run
-    assert!(wt.exists(), "dry-run must NOT delete the worktree");
+    // Workspace must still exist after dry-run
+    assert!(wt.exists(), "dry-run must NOT delete the workspace");
 }
 
 #[test]
@@ -369,21 +364,21 @@ fn worktree_clean_removes_done_and_merged_worktrees() {
         .unwrap();
     assert!(s.success());
 
-    // done/ card with worktree
+    // done/ card with workspace
     let done_card = cards.join("done").join("d1.jobcard");
-    let done_wt = done_card.join("worktree");
+    let done_wt = done_card.join("workspace");
     fs::create_dir_all(&done_wt).unwrap();
     write_meta(&done_card, "d1", "job/d1");
 
-    // merged/ card with worktree
+    // merged/ card with workspace
     let merged_card = cards.join("merged").join("m1.jobcard");
-    let merged_wt = merged_card.join("worktree");
+    let merged_wt = merged_card.join("workspace");
     fs::create_dir_all(&merged_wt).unwrap();
     write_meta(&merged_card, "m1", "job/m1");
 
-    // pending/ card with worktree — must NOT be removed
+    // pending/ card with workspace — must NOT be removed
     let pending_card = cards.join("pending").join("p1.jobcard");
-    let pending_wt = pending_card.join("worktree");
+    let pending_wt = pending_card.join("workspace");
     fs::create_dir_all(&pending_wt).unwrap();
     write_meta(&pending_card, "p1", "job/p1");
 
@@ -397,9 +392,9 @@ fn worktree_clean_removes_done_and_merged_worktrees() {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    assert!(!done_wt.exists(), "done worktree should be removed");
-    assert!(!merged_wt.exists(), "merged worktree should be removed");
-    assert!(pending_wt.exists(), "pending worktree must NOT be removed");
+    assert!(!done_wt.exists(), "done workspace should be removed");
+    assert!(!merged_wt.exists(), "merged workspace should be removed");
+    assert!(pending_wt.exists(), "pending workspace must NOT be removed");
 }
 
 #[test]

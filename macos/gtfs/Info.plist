@@ -38,7 +38,7 @@
         <key>NSExtensionPointIdentifier</key>
         <string>com.apple.quicklook.preview</string>
         <key>NSExtensionPrincipalClass</key>
-        <string>$(PRODUCT_MODULE_NAME).PreviewViewController</string>
+        <string>PreviewViewController</string>
     </dict>
 </dict>
 </plist>
