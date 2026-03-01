@@ -89,14 +89,14 @@ enum Command {
         #[arg(long, default_value = "adapters/mock.sh")]
         adapter: String,
 
-        #[arg(long, default_value_t = 1)]
-        max_workers: usize,
+        #[arg(long)]
+        max_workers: Option<usize>,
 
         #[arg(long, default_value_t = 500)]
         poll_ms: u64,
 
-        #[arg(long, default_value_t = 3)]
-        max_retries: u32,
+        #[arg(long)]
+        max_retries: Option<u32>,
 
         #[arg(long, default_value_t = 1000)]
         reap_ms: u64,
@@ -1247,6 +1247,9 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let root = PathBuf::from(&cli.cards_dir);
 
+    // Load merged global+project config (missing files silently skipped)
+    let cfg = jobcard_core::load_config().unwrap_or_default();
+
     match cli.cmd {
         Command::Init => {
             ensure_cards_layout(&root)?;
@@ -1337,12 +1340,14 @@ async fn main() -> anyhow::Result<()> {
             once,
             validation_fail_threshold,
         } => {
+            let effective_max_workers = max_workers.or(cfg.max_concurrent).unwrap_or(1);
+            let effective_max_retries = max_retries.unwrap_or(3);
             run_dispatcher(
                 &root,
                 &adapter,
-                max_workers,
+                effective_max_workers,
                 poll_ms,
-                max_retries,
+                effective_max_retries,
                 reap_ms,
                 no_reap,
                 once,
