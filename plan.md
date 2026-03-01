@@ -1,13 +1,24 @@
-# Main Plan: Simple, Bomb-Proof Card Factory
+# Main Plan (bop): Simple, Bomb-Proof Card Factory
 
 This is the canonical operating plan for `main`.
 If you are a new agent, start here before writing code.
+
+## 0) Naming Lock (Do Not Re-Litigate)
+
+- Product/repo name: `bop`
+- Canonical CLI verb: `bop`
+- Domain verbs:
+  - `bop deal` = create/deal work cards
+  - `bop bet` = estimate/prioritize cards
+- Compatibility during transition: keep `jc` as legacy alias only.
+
+Reason: `bop` is short, memorable, and low-token-cost in prompts/logs.
 
 ## 1) Mission
 
 Build a low-latency, low-overhead software factory where:
 - filesystem cards are the source of truth,
-- `jc` is the only writer of state transitions,
+- `bop` is the only writer of state transitions,
 - UIs (Finder/Quick Look/vibekanban/zellij) are read and action surfaces,
 - reliability and cost control beat feature sprawl.
 
@@ -17,11 +28,11 @@ Target behavior: Auto-Claude/Gas-Town style task manager with explicit stages:
 ## 2) Non-Negotiables
 
 - Keep architecture simple: no new control-plane database for v1.
-- Keep one binary (`jc`) as the canonical command.
-- Every transition is a folder move by `jc`, never by UI direct write.
+- Keep one binary (`bop`) as the canonical command.
+- Every transition is a folder move by `bop`, never by UI direct write.
 - Every change must pass both:
   - `make check`
-  - `jc policy check --staged` (or `scripts/policy_check.zsh --staged --cards-dir .cards`)
+  - `bop policy check --staged` (or `scripts/policy_check.zsh --staged --cards-dir .cards`)
 - No hidden magic: behavior must be visible in files.
 
 ## 3) 60-Second Start For Any Agent
@@ -29,11 +40,13 @@ Target behavior: Auto-Claude/Gas-Town style task manager with explicit stages:
 Run this exact sequence:
 
 ```zsh
-./target/debug/jc doctor
-./target/debug/jc status
-./target/debug/jc inspect <card-id>
+# Transition note: bop command may still be built as jc in this repo snapshot.
+BOP_BIN="${BOP_BIN:-./target/debug/jc}"
+$BOP_BIN doctor
+$BOP_BIN status
+$BOP_BIN inspect <card-id>
 make check
-./target/debug/jc policy check --staged
+$BOP_BIN policy check --staged
 ```
 
 If no card is assigned, pick one from `.cards/pending/` and inspect it first.
@@ -126,6 +139,7 @@ Users should always see card symbols and state quickly without reading long docs
    - glyph meaning
    - scope
    - exact gate commands
+   - recommended `bop deal` or `bop bet` next action
 3. Keep rollout automation simple:
    - blue/green roots
    - deterministic canary routing

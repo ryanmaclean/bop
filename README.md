@@ -1,8 +1,13 @@
-# JobCard: Heterogeneous Agent Orchestrator
+# bop (formerly gtfs/jc): Heterogeneous Agent Orchestrator
 
 A pluggable job system for parallel AI coding agents that uses APFS/Btrfs filesystem primitives as the control plane. Jobs are macOS directory bundles (UTI-registered "cards") navigable in Finder with Quick Look previews. The filesystem IS the state machine, the job queue, and the audit log.
 
 Main operating plan for all agents: [`plan.md`](plan.md)
+
+Naming decision:
+- Canonical product/CLI name is `bop`
+- Legacy command name `jc` remains temporarily for compatibility
+- Planned card-game verbs: `bop deal` (dispatch/create flow) and `bop bet` (estimation flow)
 
 ## 🚀 Quick Start
 
@@ -10,20 +15,23 @@ Main operating plan for all agents: [`plan.md`](plan.md)
 # Build the project
 cargo build
 
+# Temporary shim: run bop using current jc binary until binary rename lands
+bop() { ./target/debug/jc "$@"; }
+
 # Initialize the job card system
-./target/debug/jc init
+bop init
 
 # Create a new job from a template
-./target/debug/jc new implement my-feature
+bop new implement my-feature
 
 # Run the dispatcher (processes pending jobs)
-./target/debug/jc dispatcher --max-workers 3
+bop dispatcher --max-workers 3
 
 # Run the merge gate (merges completed jobs)
-./target/debug/jc merge-gate
+bop merge-gate
 
 # Check status
-./target/debug/jc status
+bop status
 ```
 
 ## 🏗️ Architecture
@@ -92,14 +100,15 @@ cargo build
 
 ```bash
 # Clone the repository
-git clone <repository-url>
-cd gtfs
+git clone <repository-url> bop
+cd bop
 
 # Build the CLI tool
 cargo build
 
 # Install to system (optional)
-sudo cp target/debug/jc /usr/local/bin/jc
+sudo cp target/debug/jc /usr/local/bin/bop
+sudo ln -sf /usr/local/bin/bop /usr/local/bin/jc   # legacy compatibility
 ```
 
 ### macOS Integration
@@ -120,27 +129,27 @@ launchctl load ~/Library/LaunchAgents/com.yourorg.jobcard.merge-gate.plist
 ## 📋 CLI Commands
 
 ```bash
-jc init                          # Create .cards/ structure in current repo
-jc new <template> <id>           # Clone template → pending/
-jc new implement feat-auth       # Example
-jc status                        # ls across all state directories
-jc status feat-auth              # Show meta.json for specific card
-jc validate <id>                 # Validate card structure
-jc dispatcher --vcs-engine git_gt   # Run dispatcher daemon (Graphite/Git lane)
-jc merge-gate --vcs-engine jj       # Run merge gate daemon (JJ lane)
-jc retry <id>                    # Move card back to pending/
-jc kill <id>                     # SIGTERM running card and move to failed/
-jc logs <id> --follow            # Stream stdout/stderr for a card
-jc inspect <id>                  # Show meta/spec/log summary
-jc policy check --staged         # Run anti-slop policy gates on staged changes
-jc policy check <id>             # Run policy gates for a specific card
-jc doctor                        # Verify required local tooling
-jc serve --port 8080             # Start REST API (default bind 127.0.0.1)
-jc serve --bind 0.0.0.0 --port 8080
+bop init                          # Create .cards/ structure in current repo
+bop new <template> <id>           # Clone template → pending/
+bop new implement feat-auth       # Example
+bop status                        # ls across all state directories
+bop status feat-auth              # Show meta.json for specific card
+bop validate <id>                 # Validate card structure
+bop dispatcher --vcs-engine git_gt   # Run dispatcher daemon (Graphite/Git lane)
+bop merge-gate --vcs-engine jj       # Run merge gate daemon (JJ lane)
+bop retry <id>                    # Move card back to pending/
+bop kill <id>                     # SIGTERM running card and move to failed/
+bop logs <id> --follow            # Stream stdout/stderr for a card
+bop inspect <id>                  # Show meta/spec/log summary
+bop policy check --staged         # Run anti-slop policy gates on staged changes
+bop policy check <id>             # Run policy gates for a specific card
+bop doctor                        # Verify required local tooling
+bop serve --port 8080             # Start REST API (default bind 127.0.0.1)
+bop serve --bind 0.0.0.0 --port 8080
 # WARNING: non-localhost --bind exposes unauthenticated job control endpoints.
 ```
 
-REST API endpoints served by `jc serve`:
+REST API endpoints served by `bop serve`:
 - `GET /jobs`
 - `GET /jobs/:id`
 - `POST /jobs`
@@ -189,7 +198,7 @@ exit $rc
 
 ## 🔄 Job Lifecycle
 
-1. **Create**: `jc new implement my-feature` clones template to `pending/`
+1. **Create**: `bop new implement my-feature` clones template to `pending/`
 2. **Dispatch**: Dispatcher moves job to `running/` and executes adapter
 3. **Execute**: Agent processes the job in its workspace
 4. **Complete**: Successful jobs move to `done/`
@@ -310,7 +319,7 @@ sudo systemctl start jobcard-merge-gate
 
 2. **Rate limiting**: Check provider cooldowns
    ```bash
-   jc providers  # Shows provider status and cooldowns
+   bop providers  # Shows provider status and cooldowns
    ```
 
 3. **Merge conflicts**: Jobs fail during merge gate
@@ -321,7 +330,7 @@ sudo systemctl start jobcard-merge-gate
 
 4. **Missing templates**: Ensure templates directory exists
    ```bash
-   jc init  # Creates default templates
+   bop init  # Creates default templates
    ```
 
 ### Debug Mode
@@ -329,6 +338,8 @@ sudo systemctl start jobcard-merge-gate
 ```bash
 # Run dispatcher with verbose output
 RUST_LOG=debug ./target/debug/jc dispatcher --once
+# (or, if installed)
+RUST_LOG=debug bop dispatcher --once
 
 # Test individual adapter
 zsh adapters/claude.zsh /path/to/workdir /path/to/prompt /tmp/stdout /tmp/stderr
@@ -358,7 +369,7 @@ zsh adapters/claude.zsh /path/to/workdir /path/to/prompt /tmp/stdout /tmp/stderr
 cargo install cargo-watch
 
 # Run with auto-reload
-cargo watch -x 'run -- jc dispatcher --once'
+cargo watch -x 'run -p jc -- dispatcher --once'
 
 # Run tests
 cargo test

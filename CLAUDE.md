@@ -13,6 +13,7 @@ cargo fmt                    # Format code
 cargo fmt --check            # Check formatting without changes
 make check                   # Run test + lint + fmt check together
 
+# Canonical CLI name is bop (legacy binary path may still be jc)
 RUST_LOG=debug ./target/debug/jc dispatcher --once  # Debug dispatcher
 ```
 
@@ -21,7 +22,7 @@ RUST_LOG=debug ./target/debug/jc dispatcher --once  # Debug dispatcher
 This is a **Rust Cargo workspace** with two active crates (two stubs exist but are not implemented):
 
 - **`crates/jobcard-core`** — shared library: `Meta` struct (job card state), `read_meta`/`write_meta`, `render_prompt` (template substitution with `{{spec}}`, `{{plan}}`, etc.), and the `realtime` module (feed validation types + tests).
-- **`crates/jc`** — the main CLI binary. All commands (`init`, `new`, `status`, `validate`, `dispatcher`, `merge-gate`) are implemented in a single `main.rs`. The dispatcher and merge-gate run as async loops using Tokio.
+- **`crates/jc`** — legacy crate path for the main CLI binary (canonical command name: `bop`). All commands (`init`, `new`, `status`, `validate`, `dispatcher`, `merge-gate`) are implemented in a single `main.rs`. The dispatcher and merge-gate run as async loops using Tokio.
 
 ### Job Card State Machine
 
@@ -37,7 +38,7 @@ Each job is a `<id>.jobcard/` directory bundle containing `meta.json`, `spec.md`
 
 ### Key Data Flows
 
-1. **`jc new <template> <id>`** — COW-clones a template from `.cards/templates/` into `.cards/pending/` using APFS `cp -c` (macOS) or `--reflink=auto` (Linux), then writes `meta.json`.
+1. **`bop new <template> <id>`** — COW-clones a template from `.cards/templates/` into `.cards/pending/` using APFS `cp -c` (macOS) or `--reflink=auto` (Linux), then writes `meta.json`.
 
 2. **Dispatcher loop** — polls `pending/`, moves cards to `running/`, selects a provider from `.cards/providers.json` (respecting cooldowns), spawns the adapter shell script, writes PID to `logs/pid` and as xattr `com.yourorg.agent-pid`, then moves the card to `done/` (exit 0), back to `pending/` (exit 75 = rate-limited), or `failed/`.
 
