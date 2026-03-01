@@ -2693,9 +2693,10 @@ async fn run_dispatcher(
 
                     // Create jj workspace for isolation (best-effort; non-fatal if jj not available)
                     {
-                        let _ = jobcard_core::worktree::ensure_jj_repo(cards_dir);
+                        let jj_root = find_git_root(cards_dir).unwrap_or_else(|| cards_dir.to_path_buf());
+                        let _ = jobcard_core::worktree::ensure_jj_repo(&jj_root);
                         let ws_path = running_path.join("workspace");
-                        if let Err(e) = jobcard_core::worktree::create_workspace(cards_dir, &ws_path) {
+                        if let Err(e) = jobcard_core::worktree::create_workspace(&jj_root, &ws_path) {
                             eprintln!("[dispatcher] jj workspace create failed: {e}");
                         }
                     }
@@ -3099,96 +3100,14 @@ async fn run_merge_gate(cards_dir: &Path, poll_ms: u64, once: bool) -> anyhow::R
                     continue;
                 }
 
-                let wt_path = card_dir.join("workspace");
-                if wt_path.exists() {
-                    // Derive card_id by stripping the ".jobcard" extension from the filename.
-                    let card_id = name.trim_end_matches(".jobcard");
-
-                    // Step 1: Stage and commit all agent changes from inside the workspace.
-                    if let Err(e) = jobcard_core::worktree::commit_worktree(&wt_path, card_id) {
-                        let _ =
-                            fs::write(&qa_log, format!("commit_worktree failed: {e}\n").as_bytes());
-                        meta.failure_reason = Some("worktree_commit_failed".to_string());
-                        let _ = write_meta(&card_dir, &meta);
-                        let _ = fs::rename(&card_dir, failed_dir.join(&name));
-                        continue;
-                    }
-
-                    // Step 2: Find the main repo root (works from any path inside the repo).
-                    let git_root = match find_git_root(&card_dir) {
-                        Some(r) => r,
-                        None => {
-                            let _ = fs::write(&qa_log, b"find_git_root failed\n");
-                            meta.failure_reason = Some("git_root_not_found".to_string());
-                            let _ = write_meta(&card_dir, &meta);
-                            let _ = fs::rename(&card_dir, failed_dir.join(&name));
-                            continue;
-                        }
-                    };
-
-                    // Step 3: Determine the branch name.
-                    // Prefer the canonical dispatcher format; fall back to meta.worktree_branch.
-                    let branch = {
-                        let preferred = format!("jobs/{}", card_id);
-                        // Check if the preferred branch exists in the repo.
-                        let exists = std::process::Command::new("git")
-                            .args(["rev-parse", "--verify", &preferred])
-                            .current_dir(&git_root)
-                            .output()
-                            .map(|o| o.status.success())
-                            .unwrap_or(false);
-                        if exists {
-                            preferred
-                        } else {
-                            meta.worktree_branch.clone().unwrap_or(preferred)
-                        }
-                    };
-
-                    // Step 4: Merge the card branch into main from the git root.
-                    match jobcard_core::worktree::merge_card_branch(&git_root, &branch) {
-                        Ok(true) => {
-                            // Merge succeeded — clean up the worktree, then move to merged/.
-                            let _ = jobcard_core::worktree::remove_worktree(&git_root, &wt_path);
-                            let _ = write_meta(&card_dir, &meta);
-                            let _ = fs::rename(&card_dir, merged_dir.join(&name));
-                            continue;
-                        }
-                        Ok(false) => {
-                            // Merge conflict — write conflicts.diff and abort the merge.
-                            meta.failure_reason = Some("merge_conflict".to_string());
-                            let conflicts = std::process::Command::new("git")
-                                .args(["diff", "--name-only", "--diff-filter=U"])
-                                .current_dir(&git_root)
-                                .output()
-                                .ok();
-                            if let Some(c) = conflicts {
-                                let _ = fs::create_dir_all(card_dir.join("output"));
-                                let _ = fs::write(
-                                    card_dir.join("output").join("conflicts.diff"),
-                                    c.stdout,
-                                );
-                            }
-                            // Abort the merge so the repo stays clean.
-                            let _ = std::process::Command::new("git")
-                                .args(["merge", "--abort"])
-                                .current_dir(&git_root)
-                                .status();
-                            let _ = write_meta(&card_dir, &meta);
-                            let _ = fs::rename(&card_dir, failed_dir.join(&name));
-                            continue;
-                        }
-                        Err(e) => {
-                            let _ = fs::write(
-                                &qa_log,
-                                format!("merge_card_branch error: {e}\n").as_bytes(),
-                            );
-                            meta.failure_reason = Some("merge_failed".to_string());
-                            let _ = write_meta(&card_dir, &meta);
-                            let _ = fs::rename(&card_dir, failed_dir.join(&name));
-                            continue;
-                        }
-                    }
+                let ws_path = card_dir.join("workspace");
+                if ws_path.exists() {
+                    // jj workspace detected — Task 3 will implement jj squash+push.
+                    // Leave card in done/ (do not promote to merged/) to prevent data loss.
+                    eprintln!("[merge-gate] jj workspace found for {name} — skipping until Task 3 implements jj merge");
+                    continue;
                 }
+                // No workspace: use legacy git merge path (or move directly to merged/).
 
                 let _ = write_meta(&card_dir, &meta);
                 let _ = fs::rename(&card_dir, merged_dir.join(&name));
@@ -3718,8 +3637,9 @@ fn cmd_worktree_create(root: &Path, id: &str) -> anyhow::Result<()> {
         anyhow::bail!("workspace already exists for card \'{}\'", id);
     }
 
-    let _ = jobcard_core::worktree::ensure_jj_repo(root);
-    if let Err(e) = jobcard_core::worktree::create_workspace(root, &ws_path) {
+    let jj_root = find_git_root(root).unwrap_or_else(|| root.to_path_buf());
+    let _ = jobcard_core::worktree::ensure_jj_repo(&jj_root);
+    if let Err(e) = jobcard_core::worktree::create_workspace(&jj_root, &ws_path) {
         anyhow::bail!("jj workspace create failed: {}", e);
     }
 

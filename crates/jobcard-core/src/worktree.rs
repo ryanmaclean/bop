@@ -8,7 +8,7 @@ use std::path::Path;
 /// Initialize a jj repo at `repo_root` (colocated with git) if `.jj/` doesn't exist yet.
 /// Safe to call repeatedly.
 pub fn ensure_jj_repo(repo_root: &Path) -> Result<()> {
-    if repo_root.join(".jj").exists() {
+    if repo_root.join(".jj").join("repo").exists() {
         return Ok(());
     }
     let out = std::process::Command::new("jj")
@@ -29,7 +29,10 @@ pub fn create_workspace(repo_root: &Path, ws_path: &Path) -> Result<()> {
     let name = ws_path
         .file_name()
         .and_then(|n| n.to_str())
-        .unwrap_or("workspace");
+        .with_context(|| format!(
+            "workspace path has no usable basename: {}",
+            ws_path.display()
+        ))?;
     let out = std::process::Command::new("jj")
         .args(["workspace", "add", "--name", name])
         .arg(ws_path)
@@ -53,6 +56,10 @@ pub fn squash_workspace(ws_path: &Path) -> Result<()> {
         .context("failed to run `jj squash`")?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
+        // jj exits non-zero when there are no changes to squash — this is OK
+        if stderr.contains("Nothing changed") || stderr.contains("nothing to squash") || stderr.contains("No diff") {
+            return Ok(());
+        }
         anyhow::bail!("jj squash failed: {}", stderr);
     }
     Ok(())
@@ -68,6 +75,9 @@ pub fn forget_workspace(repo_root: &Path, ws_name: &str) -> Result<()> {
         .context("failed to run `jj workspace forget`")?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
+        if stderr.contains("no workspace named") || stderr.contains("doesn't have a workspace") {
+            return Ok(()); // already forgotten or never existed
+        }
         anyhow::bail!("jj workspace forget failed: {}", stderr);
     }
     Ok(())

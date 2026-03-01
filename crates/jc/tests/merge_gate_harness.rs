@@ -109,119 +109,27 @@ fn merge_gate_moves_failing_card_to_failed_and_writes_report() {
     assert!(card_dir.join("output").join("qa_report.md").exists());
 }
 
+/// After the jj workspace migration (Task 2), cards that have NO `workspace/` subdirectory
+/// (i.e. they use the old git-worktree model or have no worktree at all) are moved directly
+/// to `merged/` once their acceptance criteria pass. The legacy git-merge conflict path has
+/// been replaced by jj squash+push (Task 3). This test verifies the post-Task-2 behaviour:
+/// a card without a `workspace/` dir and with passing criteria reaches `merged/`.
 #[test]
-fn merge_gate_merge_conflict_moves_card_to_failed_and_writes_conflicts() {
+fn merge_gate_no_workspace_card_moves_to_merged() {
     build_jc();
 
-    // 1. Create a temp dir that IS the git root (card dir must be inside the repo).
     let td = tempfile::tempdir().unwrap();
-    let git_root = td.path();
+    let cards = td.path().join(".cards");
 
-    // 2. Init git repo in git_root with an initial commit so HEAD exists.
-    run(Command::new("git")
-        .args(["init", "-b", "main"])
-        .current_dir(git_root));
-    run(Command::new("git")
-        .args([
-            "-c",
-            "user.email=a@b",
-            "-c",
-            "user.name=a",
-            "commit",
-            "--allow-empty",
-            "-m",
-            "init",
-        ])
-        .current_dir(git_root));
-
-    // 3. Create conflict-inducing file on main and commit it.
-    fs::write(git_root.join("shared.txt"), "main version\n").unwrap();
-    run(Command::new("git")
-        .args(["add", "shared.txt"])
-        .current_dir(git_root));
-    run(Command::new("git")
-        .args([
-            "-c",
-            "user.email=a@b",
-            "-c",
-            "user.name=a",
-            "commit",
-            "-m",
-            "add shared",
-        ])
-        .current_dir(git_root));
-
-    // 4. Create cards directory structure INSIDE the git repo so find_git_root works.
-    let cards = git_root.join(".cards");
     let status = Command::new(jc_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "init"])
         .status()
         .unwrap();
     assert!(status.success());
 
-    let id = "mg3";
-    let done_dir = cards.join("done");
-    let card_dir = done_dir.join(format!("{}.jobcard", id));
-    fs::create_dir_all(card_dir.join("logs")).unwrap();
-    fs::create_dir_all(card_dir.join("output")).unwrap();
-    fs::write(card_dir.join("prompt.md"), "").unwrap();
-    fs::write(card_dir.join("spec.md"), "").unwrap();
+    // Write a card with passing acceptance criteria and NO workspace/ subdirectory.
+    write_card(&cards, "mg3", &["exit 0"]);
 
-    // 5. Create a linked git worktree on branch jobs/mg3 at card_dir/worktree.
-    let wt_path = card_dir.join("worktree");
-    run(Command::new("git")
-        .args([
-            "worktree",
-            "add",
-            "-b",
-            "jobs/mg3",
-            wt_path.to_str().unwrap(),
-        ])
-        .current_dir(git_root));
-
-    // 6. Make a conflicting change in the worktree branch and commit it.
-    fs::write(wt_path.join("shared.txt"), "branch version\n").unwrap();
-    run(Command::new("git")
-        .args(["add", "shared.txt"])
-        .current_dir(&wt_path));
-    run(Command::new("git")
-        .args([
-            "-c",
-            "user.email=a@b",
-            "-c",
-            "user.name=a",
-            "commit",
-            "-m",
-            "branch change",
-        ])
-        .current_dir(&wt_path));
-
-    // 7. Make a conflicting change on main AFTER the worktree was created from the same base.
-    //    git_root IS on main, so edit shared.txt there directly.
-    fs::write(git_root.join("shared.txt"), "different main version\n").unwrap();
-    run(Command::new("git")
-        .args(["add", "shared.txt"])
-        .current_dir(git_root));
-    run(Command::new("git")
-        .args([
-            "-c",
-            "user.email=a@b",
-            "-c",
-            "user.name=a",
-            "commit",
-            "-m",
-            "conflicting main",
-        ])
-        .current_dir(git_root));
-
-    // 8. Write meta with acceptance criteria that pass so we reach the merge step.
-    let meta = format!(
-        "{{\"id\":\"{id}\",\"created\":\"2026-03-01T00:00:00Z\",\"stage\":\"qa\",\"provider_chain\":[],\"stages\":{{}},\"acceptance_criteria\":[\"exit 0\"],\"worktree_branch\":\"jobs/mg3\"}}",
-        id = id
-    );
-    fs::write(card_dir.join("meta.json"), meta).unwrap();
-
-    // 9. Run merge gate.
     let status = Command::new(jc_bin())
         .args([
             "--cards-dir",
@@ -233,18 +141,9 @@ fn merge_gate_merge_conflict_moves_card_to_failed_and_writes_conflicts() {
         .unwrap();
     assert!(status.success());
 
-    // 10. Verify outcome: card is in failed/, conflicts.diff exists, failure_reason is set.
-    let failed = cards.join("failed").join(format!("{}.jobcard", id));
-    assert!(failed.exists(), "card should be in failed/");
+    // Card has no workspace/, so it goes directly to merged/.
     assert!(
-        failed.join("output").join("conflicts.diff").exists(),
-        "conflicts.diff should exist"
-    );
-
-    let meta_str = fs::read_to_string(failed.join("meta.json")).unwrap();
-    let v: serde_json::Value = serde_json::from_str(&meta_str).unwrap();
-    assert_eq!(
-        v.get("failure_reason").and_then(|x| x.as_str()),
-        Some("merge_conflict")
+        cards.join("merged").join("mg3.jobcard").exists(),
+        "card without workspace/ should be promoted to merged/"
     );
 }
