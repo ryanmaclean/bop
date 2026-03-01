@@ -81,9 +81,6 @@ enum Command {
     Dashboard,
     Validate {
         id: String,
-        /// Run realtime feed validation on the job's output records.
-        #[arg(long)]
-        realtime: bool,
     },
     Dispatcher {
         #[arg(long, default_value = "adapters/mock.sh")]
@@ -107,10 +104,6 @@ enum Command {
         #[arg(long)]
         once: bool,
 
-        /// Error-rate threshold (0.0–1.0) above which a job with critical alerts
-        /// is moved to failed/ instead of done/. Default 1.0 means never fail.
-        #[arg(long, default_value_t = 1.0)]
-        validation_fail_threshold: f64,
     },
     MergeGate {
         #[arg(long, default_value_t = 500)]
@@ -557,7 +550,6 @@ fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
             template_namespace: Some("implement".to_string()),
             retry_count: Some(0),
             failure_reason: None,
-            validation_summary: None,
         };
         write_meta(&implement, &meta)?;
 
@@ -626,7 +618,6 @@ fn create_card(
         template_namespace: Some(template.to_string()),
         retry_count: Some(0),
         failure_reason: None,
-        validation_summary: None,
     });
 
     meta.id = id.to_string();
@@ -1297,38 +1288,14 @@ async fn main() -> anyhow::Result<()> {
                 .and_then(|s| s.to_str())
                 .unwrap_or("unknown");
             let meta = jobcard_core::read_meta(&card)?;
-            let badge = meta
-                .validation_summary
-                .as_ref()
-                .map(|s| s.badge())
-                .unwrap_or("");
-            if badge.is_empty() {
-                println!("[{}] {}", state, meta.id);
-            } else {
-                println!("[{}] {} {}", state, meta.id, badge);
-            }
+            println!("[{}] {}", state, meta.id);
             println!("{}", serde_json::to_string_pretty(&meta)?);
             Ok(())
         }
         Command::Dashboard => cmd_dashboard(&root).await,
-        Command::Validate { id, realtime } => {
+        Command::Validate { id } => {
             let card = find_card(&root, &id).context("card not found")?;
             let _ = jobcard_core::read_meta(&card)?;
-            if realtime {
-                let summary = validate_realtime_output(&card)?;
-                println!(
-                    "validation: {} ({}/{} valid, {} alerts, {} critical)",
-                    summary.badge(),
-                    summary.valid,
-                    summary.total,
-                    summary.alert_count,
-                    summary.critical_alerts
-                );
-                let log = card.join("logs").join("validation.log");
-                if log.exists() {
-                    println!("{}", fs::read_to_string(log)?);
-                }
-            }
             Ok(())
         }
         Command::Dispatcher {
@@ -1339,7 +1306,6 @@ async fn main() -> anyhow::Result<()> {
             reap_ms,
             no_reap,
             once,
-            validation_fail_threshold,
         } => {
             let effective_max_workers = max_workers.or(cfg.max_concurrent).unwrap_or(1);
             let effective_max_retries = max_retries.unwrap_or(3);
@@ -1352,7 +1318,6 @@ async fn main() -> anyhow::Result<()> {
                 reap_ms,
                 no_reap,
                 once,
-                validation_fail_threshold,
             )
             .await
         }
@@ -2323,18 +2288,6 @@ fn build_audit_trail(meta: &Meta, state: &str) -> Vec<String> {
     }
     if let Some(reason) = &meta.failure_reason {
         lines.push(format!("failure_reason: {}", reason));
-    }
-    if let Some(summary) = &meta.validation_summary {
-        lines.push(format!(
-            "validation: badge={} valid={}/{} invalid={} alerts={} critical={} health={:?}",
-            summary.badge(),
-            summary.valid,
-            summary.total,
-            summary.invalid,
-            summary.alert_count,
-            summary.critical_alerts,
-            summary.health
-        ));
     }
     if !meta.acceptance_criteria.is_empty() {
         lines.push("acceptance_criteria:".to_string());
@@ -3313,7 +3266,6 @@ async fn run_dispatcher(
     reap_ms: u64,
     no_reap: bool,
     once: bool,
-    validation_fail_threshold: f64,
 ) -> anyhow::Result<()> {
     ensure_cards_layout(cards_dir)?;
     seed_providers(cards_dir)?;
@@ -3413,29 +3365,6 @@ async fn run_dispatcher(
 
                     let is_rate_limited = exit_code == rate_limit_exit;
 
-                    // Run realtime validation on job output when the job succeeded.
-                    let mut validation_triggered_fail = false;
-                    if exit_code == 0 {
-                        if let Ok(summary) = validate_realtime_output(&running_path) {
-                            let error_rate = if summary.total == 0 {
-                                0.0
-                            } else {
-                                summary.invalid as f64 / summary.total as f64
-                            };
-                            if summary.critical_alerts > 0 && error_rate > validation_fail_threshold
-                            {
-                                validation_triggered_fail = true;
-                                if let Some(ref mut meta) = meta {
-                                    meta.failure_reason =
-                                        Some("validation_threshold_exceeded".to_string());
-                                }
-                            }
-                            if let Some(ref mut meta) = meta {
-                                meta.validation_summary = Some(summary);
-                            }
-                        }
-                    }
-
                     if let Some(ref mut meta) = meta {
                         if is_rate_limited {
                             let next = meta.retry_count.unwrap_or(0).saturating_add(1);
@@ -3447,9 +3376,7 @@ async fn run_dispatcher(
 
                         let _ = write_meta(&running_path, meta);
                     }
-                    let target = if validation_triggered_fail {
-                        failed_dir.join(&name)
-                    } else if exit_code == 0 {
+                    let target = if exit_code == 0 {
                         done_dir.join(&name)
                     } else if is_rate_limited {
                         pending_dir.join(&name)
@@ -4156,123 +4083,6 @@ fn find_card(root: &Path, id: &str) -> Option<PathBuf> {
         }
     }
     None
-}
-
-// ── realtime validation ───────────────────────────────────────────────────────
-
-/// Scan `output/*.json` in a job card directory, validate each file as a
-/// [`FeedRecord`], write a structured audit log to `logs/validation.log`, and
-/// return an aggregated [`ValidationSummary`].
-///
-/// If `feed_config.json` exists in the card directory it is used as the
-/// [`FeedConfig`]; otherwise a permissive default is applied.
-fn validate_realtime_output(
-    card_dir: &Path,
-) -> anyhow::Result<jobcard_core::realtime::ValidationSummary> {
-    use jobcard_core::realtime::{
-        check_alerts, validate_record, AlertSeverity, FeedMetrics, FeedRecord, ValidationSummary,
-    };
-
-    let output_dir = card_dir.join("output");
-    let validation_log = card_dir.join("logs").join("validation.log");
-    let config = load_feed_config(card_dir);
-
-    let feed_id = card_dir
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown")
-        .to_string();
-    let mut metrics = FeedMetrics::new(feed_id);
-    let mut error_entries: Vec<serde_json::Value> = Vec::new();
-
-    if output_dir.exists() {
-        for entry in fs::read_dir(&output_dir)?.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) != Some("json") {
-                continue;
-            }
-            let bytes = match fs::read(&path) {
-                Ok(b) => b,
-                Err(_) => continue,
-            };
-            let record: FeedRecord = match serde_json::from_slice(&bytes) {
-                Ok(r) => r,
-                Err(_) => continue,
-            };
-            let result = validate_record(&record, &config);
-            if !result.valid {
-                error_entries.push(serde_json::json!({
-                    "file": path.file_name().and_then(|s| s.to_str()),
-                    "feed_id": record.feed_id,
-                    "errors": result.errors,
-                }));
-            }
-            metrics.record_received(result.valid);
-        }
-    }
-
-    let alerts = check_alerts(&metrics);
-    let alert_count = alerts.len() as u64;
-    let critical_alerts = alerts
-        .iter()
-        .filter(|a| a.severity == AlertSeverity::Critical)
-        .count() as u64;
-
-    let log_content = serde_json::json!({
-        "total": metrics.records_received,
-        "valid": metrics.records_valid,
-        "invalid": metrics.records_invalid,
-        "health": metrics.health,
-        "alerts": alerts.iter().map(|a| serde_json::json!({
-            "severity": a.severity,
-            "message": a.message,
-            "timestamp": a.timestamp,
-        })).collect::<Vec<_>>(),
-        "validation_errors": error_entries,
-    });
-    let _ = fs::create_dir_all(card_dir.join("logs"));
-    let _ = fs::write(&validation_log, serde_json::to_vec_pretty(&log_content)?);
-
-    Ok(ValidationSummary {
-        total: metrics.records_received,
-        valid: metrics.records_valid,
-        invalid: metrics.records_invalid,
-        alert_count,
-        critical_alerts,
-        health: metrics.health,
-    })
-}
-
-/// Load a [`FeedConfig`] from `card_dir/feed_config.json`, or return a
-/// permissive default that accepts any well-formed [`FeedRecord`].
-fn load_feed_config(card_dir: &Path) -> jobcard_core::realtime::FeedConfig {
-    use jobcard_core::realtime::{FeedConfig, FeedSourceType, ValidationConfig};
-
-    let path = card_dir.join("feed_config.json");
-    if let Ok(bytes) = fs::read(&path) {
-        if let Ok(cfg) = serde_json::from_slice::<FeedConfig>(&bytes) {
-            return cfg;
-        }
-    }
-
-    let id = card_dir
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("job")
-        .to_string();
-
-    FeedConfig {
-        id,
-        source_type: FeedSourceType::File,
-        endpoint: card_dir.display().to_string(),
-        poll_interval_secs: 0,
-        validation: ValidationConfig {
-            required_fields: vec!["feed_id".to_string()],
-            // Large but not u64::MAX to avoid overflow in signed arithmetic.
-            max_staleness_secs: 60 * 60 * 24 * 365 * 10,
-            value_ranges: std::collections::HashMap::new(),
-        },
-    }
 }
 
 /// Returns (path, branch) for every linked worktree known to git (excluding the main worktree).

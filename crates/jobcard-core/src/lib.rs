@@ -1,5 +1,4 @@
 pub mod config;
-pub mod realtime;
 pub mod worktree;
 
 pub use config::{load_config, Config};
@@ -75,8 +74,6 @@ pub struct Meta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_reason: Option<String>,
 
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub validation_summary: Option<realtime::ValidationSummary>,
 }
 
 impl Meta {
