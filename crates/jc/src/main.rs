@@ -61,6 +61,8 @@ enum Command {
         #[arg(default_value = "")]
         id: String,
     },
+    /// Open a live terminal dashboard for all jobs.
+    Dashboard,
     Validate {
         id: String,
         /// Run realtime feed validation on the job's output records.
@@ -2302,63 +2304,77 @@ async fn run_merge_gate(cards_dir: &Path, poll_ms: u64, once: bool) -> anyhow::R
                     continue;
                 }
 
-                if let Some(branch) = meta.worktree_branch.clone() {
-                    let is_git = workdir.join(".git").exists();
-                    if is_git {
-                        let checkout = TokioCommand::new("git")
-                            .arg("checkout")
-                            .arg("main")
-                            .current_dir(&workdir)
+                let wt_path = card_dir.join("worktree");
+                if wt_path.exists() {
+                    // Derive card_id by stripping the ".jobcard" extension from the filename.
+                    let card_id = name.trim_end_matches(".jobcard");
+
+                    // Step 1: Stage and commit all agent changes from inside the worktree.
+                    if let Err(e) =
+                        jobcard_core::worktree::commit_worktree(&wt_path, card_id)
+                    {
+                        let _ = fs::write(
+                            &qa_log,
+                            format!("commit_worktree failed: {e}\n").as_bytes(),
+                        );
+                        meta.failure_reason = Some("worktree_commit_failed".to_string());
+                        let _ = write_meta(&card_dir, &meta);
+                        let _ = fs::rename(&card_dir, failed_dir.join(&name));
+                        continue;
+                    }
+
+                    // Step 2: Find the main repo root (works from any path inside the repo).
+                    let git_root = match find_git_root(&card_dir) {
+                        Some(r) => r,
+                        None => {
+                            let _ = fs::write(&qa_log, b"find_git_root failed\n");
+                            meta.failure_reason = Some("git_root_not_found".to_string());
+                            let _ = write_meta(&card_dir, &meta);
+                            let _ = fs::rename(&card_dir, failed_dir.join(&name));
+                            continue;
+                        }
+                    };
+
+                    // Step 3: Determine the branch name.
+                    // Prefer the canonical dispatcher format; fall back to meta.worktree_branch.
+                    let branch = {
+                        let preferred = format!("jobs/{}", card_id);
+                        // Check if the preferred branch exists in the repo.
+                        let exists = std::process::Command::new("git")
+                            .args(["rev-parse", "--verify", &preferred])
+                            .current_dir(&git_root)
                             .output()
-                            .await?;
-                        let mut buf = Vec::new();
-                        buf.extend_from_slice(&checkout.stdout);
-                        buf.extend_from_slice(&checkout.stderr);
-                        let _ = fs::write(&qa_log, buf);
-
-                        if checkout.status.success() {
-                            let merge = TokioCommand::new("git")
-                                .arg("merge")
-                                .arg("--no-ff")
-                                .arg(&branch)
-                                .arg("-m")
-                                .arg(format!("Merge {}", meta.id))
-                                .current_dir(&workdir)
-                                .output()
-                                .await?;
-
-                            let mut buf = Vec::new();
-                            buf.extend_from_slice(&merge.stdout);
-                            buf.extend_from_slice(&merge.stderr);
-                            let _ = fs::write(&qa_log, buf);
-
-                            if !merge.status.success() {
-                                meta.failure_reason = Some("merge_conflict".to_string());
-                                let conflicts = TokioCommand::new("git")
-                                    .arg("diff")
-                                    .arg("--name-only")
-                                    .arg("--diff-filter=U")
-                                    .current_dir(&workdir)
-                                    .output()
-                                    .await
-                                    .ok();
-
-                                if let Some(c) = conflicts {
-                                    let mut buf = Vec::new();
-                                    buf.extend_from_slice(&c.stdout);
-                                    buf.extend_from_slice(&c.stderr);
-                                    let _ = fs::write(
-                                        card_dir.join("output").join("conflicts.diff"),
-                                        buf,
-                                    );
-                                }
-
-                                let _ = write_meta(&card_dir, &meta);
-                                let _ = fs::rename(&card_dir, failed_dir.join(&name));
-                                continue;
-                            }
+                            .map(|o| o.status.success())
+                            .unwrap_or(false);
+                        if exists {
+                            preferred
                         } else {
-                            meta.failure_reason = Some("merge_checkout_failed".to_string());
+                            meta.worktree_branch.clone().unwrap_or(preferred)
+                        }
+                    };
+
+                    // Step 4: Merge the card branch into main from the git root.
+                    match jobcard_core::worktree::merge_card_branch(&git_root, &branch) {
+                        Ok(true) => {
+                            // Merge succeeded — clean up the worktree, then move to merged/.
+                            let _ = jobcard_core::worktree::remove_worktree(&git_root, &wt_path);
+                            let _ = write_meta(&card_dir, &meta);
+                            let _ = fs::rename(&card_dir, merged_dir.join(&name));
+                            continue;
+                        }
+                        Ok(false) => {
+                            // Merge conflict.
+                            meta.failure_reason = Some("merge_conflict".to_string());
+                            let _ = write_meta(&card_dir, &meta);
+                            let _ = fs::rename(&card_dir, failed_dir.join(&name));
+                            continue;
+                        }
+                        Err(e) => {
+                            let _ = fs::write(
+                                &qa_log,
+                                format!("merge_card_branch error: {e}\n").as_bytes(),
+                            );
+                            meta.failure_reason = Some("merge_failed".to_string());
                             let _ = write_meta(&card_dir, &meta);
                             let _ = fs::rename(&card_dir, failed_dir.join(&name));
                             continue;
