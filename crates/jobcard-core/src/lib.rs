@@ -204,6 +204,7 @@ pub struct PromptContext {
     pub memory: String,
     /// Prepended verbatim before the template. Load from `.cards/system_context.md`.
     pub system_context: String,
+    pub worktree_branch: String,
 }
 
 impl PromptContext {
@@ -235,6 +236,7 @@ impl PromptContext {
             agent: meta.agent_type.clone().unwrap_or_default(),
             memory: String::new(),
             system_context,
+            worktree_branch: meta.worktree_branch.clone().unwrap_or_default(),
         })
     }
 }
@@ -253,6 +255,7 @@ pub fn render_prompt(template: &str, ctx: &PromptContext) -> String {
     out = out.replace("{{provider}}", &ctx.provider);
     out = out.replace("{{agent}}", &ctx.agent);
     out = out.replace("{{memory}}", &ctx.memory);
+    out = out.replace("{{worktree_branch}}", &ctx.worktree_branch);
     if ctx.system_context.is_empty() {
         out
     } else {
@@ -275,6 +278,7 @@ mod tests {
             agent: "agent".to_string(),
             memory: "k: v".to_string(),
             system_context: String::new(),
+            worktree_branch: String::new(),
         };
 
         let rendered = render_prompt("Memory:\n{{memory}}\n", &ctx);
