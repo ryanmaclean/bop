@@ -96,19 +96,6 @@ enum Command {
         #[command(subcommand)]
         cmd: ProvidersCommand,
     },
-    /// Read and write global/project config settings.
-    Config {
-        #[command(subcommand)]
-        action: ConfigAction,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum ConfigAction {
-    /// Print the current value of a config key.
-    Get { key: String },
-    /// Set a config key to a value (writes to the config file).
-    Set { key: String, value: String },
 }
 
 #[derive(Subcommand, Debug)]
@@ -619,13 +606,6 @@ async fn main() -> anyhow::Result<()> {
             ProvidersCommand::Remove { name, force } => cmd_providers_remove(&root, &name, force),
             ProvidersCommand::Status => cmd_providers_status(&root),
         },
-        Command::Config { action } => {
-            let config_path = resolve_config_path();
-            match action {
-                ConfigAction::Get { key } => cmd_config_get(&config_path, &key),
-                ConfigAction::Set { key, value } => cmd_config_set(&config_path, &key, &value),
-            }
-        }
     }
 }
 
@@ -1905,86 +1885,3 @@ fn resolve_config_path() -> PathBuf {
     jobcard_core::config::project_config_path()
 }
 
-fn cmd_config_get(config_path: &Path, key: &str) -> anyhow::Result<()> {
-    let cfg = if config_path.exists() {
-        jobcard_core::config::read_config_file(config_path)?
-    } else {
-        jobcard_core::Config::default()
-    };
-
-    match key {
-        "default_provider_chain" => match cfg.default_provider_chain {
-            Some(chain) => println!("{}", chain.join(",")),
-            None => println!("(unset)"),
-        },
-        "max_concurrent" => match cfg.max_concurrent {
-            Some(v) => println!("{}", v),
-            None => println!("(unset)"),
-        },
-        "cooldown_seconds" => match cfg.cooldown_seconds {
-            Some(v) => println!("{}", v),
-            None => println!("(unset)"),
-        },
-        "log_retention_days" => match cfg.log_retention_days {
-            Some(v) => println!("{}", v),
-            None => println!("(unset)"),
-        },
-        "default_template" => match cfg.default_template {
-            Some(v) => println!("{}", v),
-            None => println!("(unset)"),
-        },
-        _ => anyhow::bail!(
-            "unknown config key '{}'. Valid keys: default_provider_chain, \
-            max_concurrent, cooldown_seconds, log_retention_days, default_template",
-            key
-        ),
-    }
-    Ok(())
-}
-
-fn cmd_config_set(config_path: &Path, key: &str, value: &str) -> anyhow::Result<()> {
-    let mut cfg = if config_path.exists() {
-        jobcard_core::config::read_config_file(config_path)?
-    } else {
-        jobcard_core::Config::default()
-    };
-
-    match key {
-        "default_provider_chain" => {
-            cfg.default_provider_chain =
-                Some(value.split(',').map(|s| s.trim().to_string()).collect());
-        }
-        "max_concurrent" => {
-            cfg.max_concurrent = Some(value.parse::<usize>().with_context(|| {
-                format!("max_concurrent must be a positive integer, got: {}", value)
-            })?);
-        }
-        "cooldown_seconds" => {
-            cfg.cooldown_seconds = Some(value.parse::<u64>().with_context(|| {
-                format!(
-                    "cooldown_seconds must be a non-negative integer, got: {}",
-                    value
-                )
-            })?);
-        }
-        "log_retention_days" => {
-            cfg.log_retention_days = Some(value.parse::<u64>().with_context(|| {
-                format!(
-                    "log_retention_days must be a non-negative integer, got: {}",
-                    value
-                )
-            })?);
-        }
-        "default_template" => {
-            cfg.default_template = Some(value.to_string());
-        }
-        _ => anyhow::bail!(
-            "unknown config key '{}'. Valid keys: default_provider_chain, \
-            max_concurrent, cooldown_seconds, log_retention_days, default_template",
-            key
-        ),
-    }
-
-    jobcard_core::config::write_config_file(config_path, &cfg)?;
-    Ok(())
-}
