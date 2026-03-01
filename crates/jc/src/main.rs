@@ -23,8 +23,6 @@ struct Cli {
     cmd: Command,
 }
 
-const DEFAULT_MEMORY_TTL_SECONDS: i64 = 60 * 60 * 24 * 30;
-
 #[derive(Subcommand, Debug)]
 enum Command {
     Init,
@@ -100,11 +98,6 @@ enum Command {
     Inspect {
         id: String,
     },
-    /// Manage per-template persistent memory.
-    Memory {
-        #[command(subcommand)]
-        cmd: MemoryCommand,
-    },
     /// Manage git worktrees associated with job cards.
     Worktree {
         #[command(subcommand)]
@@ -165,67 +158,6 @@ enum WorktreeAction {
     },
 }
 
-#[derive(Subcommand, Debug)]
-enum MemoryCommand {
-    /// List all memory entries in a namespace.
-    List { namespace: String },
-    /// Get a single memory entry value by key.
-    Get { namespace: String, key: String },
-    /// Set a memory entry with a TTL.
-    Set {
-        namespace: String,
-        key: String,
-        value: String,
-        #[arg(long, default_value_t = DEFAULT_MEMORY_TTL_SECONDS)]
-        ttl_seconds: i64,
-    },
-    /// Delete a memory entry by key.
-    Delete { namespace: String, key: String },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct MemoryStore {
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    entries: BTreeMap<String, MemoryEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct MemoryEntry {
-    value: String,
-    updated_at: DateTime<Utc>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    expires_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum MemoryOutput {
-    Ops(MemoryOutputOps),
-    Flat(BTreeMap<String, MemoryOutputValue>),
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-struct MemoryOutputOps {
-    #[serde(default)]
-    set: BTreeMap<String, MemoryOutputValue>,
-    #[serde(default)]
-    delete: Vec<String>,
-    #[serde(default)]
-    ttl_seconds: Option<i64>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum MemoryOutputValue {
-    String(String),
-    Detailed {
-        value: String,
-        #[serde(default)]
-        ttl_seconds: Option<i64>,
-    },
-}
-
 fn ensure_cards_layout(root: &Path) -> anyhow::Result<()> {
     for dir in [
         "templates",
@@ -234,7 +166,6 @@ fn ensure_cards_layout(root: &Path) -> anyhow::Result<()> {
         "done",
         "merged",
         "failed",
-        "memory",
     ] {
         fs::create_dir_all(root.join(dir))?;
     }
@@ -692,7 +623,6 @@ async fn run_provider_prompt(adapter: &str, prompt: &str) -> anyhow::Result<(i32
     let prompt_file = temp_dir.join("prompt.md");
     let stdout_log = temp_dir.join("stdout.log");
     let stderr_log = temp_dir.join("stderr.log");
-    let memory_out = temp_dir.join("memory-out.json");
 
     fs::write(&prompt_file, prompt)?;
 
@@ -714,8 +644,6 @@ async fn run_provider_prompt(adapter: &str, prompt: &str) -> anyhow::Result<(i32
         .arg(&prompt_file)
         .arg(&stdout_log)
         .arg(&stderr_log)
-        .arg(&memory_out)
-        .env("JOBCARD_MEMORY_OUT", &memory_out)
         .status()
         .await
         .with_context(|| format!("failed to spawn adapter: {}", adapter))?;
@@ -922,262 +850,6 @@ async fn cmd_create_from_description(
     Ok(())
 }
 
-fn normalize_namespace(namespace: &str) -> String {
-    let trimmed = namespace.trim();
-    if trimmed.is_empty() {
-        "default".to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
-fn sanitize_namespace(namespace: &str) -> String {
-    let normalized = normalize_namespace(namespace);
-    let sanitized: String = normalized
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    if sanitized.is_empty() {
-        "default".to_string()
-    } else {
-        sanitized
-    }
-}
-
-fn memory_store_path(cards_dir: &Path, namespace: &str) -> PathBuf {
-    cards_dir
-        .join("memory")
-        .join(format!("{}.json", sanitize_namespace(namespace)))
-}
-
-fn prune_memory_store(store: &mut MemoryStore, now: DateTime<Utc>) -> usize {
-    let before = store.entries.len();
-    store
-        .entries
-        .retain(|_, entry| entry.expires_at.map(|exp| exp > now).unwrap_or(true));
-    before.saturating_sub(store.entries.len())
-}
-
-fn read_memory_store(cards_dir: &Path, namespace: &str) -> anyhow::Result<MemoryStore> {
-    let namespace = normalize_namespace(namespace);
-    let path = memory_store_path(cards_dir, &namespace);
-    if !path.exists() {
-        return Ok(MemoryStore::default());
-    }
-
-    let bytes = fs::read(&path)?;
-    let mut store = if bytes.is_empty() {
-        MemoryStore::default()
-    } else {
-        serde_json::from_slice::<MemoryStore>(&bytes)
-            .with_context(|| format!("invalid memory store {}", path.display()))?
-    };
-
-    let pruned = prune_memory_store(&mut store, Utc::now());
-    if pruned > 0 {
-        write_memory_store(cards_dir, &namespace, &store)?;
-    }
-
-    Ok(store)
-}
-
-fn write_memory_store(
-    cards_dir: &Path,
-    namespace: &str,
-    store: &MemoryStore,
-) -> anyhow::Result<()> {
-    fs::create_dir_all(cards_dir.join("memory"))?;
-    let path = memory_store_path(cards_dir, namespace);
-    let bytes = serde_json::to_vec_pretty(store)?;
-    fs::write(path, bytes)?;
-    Ok(())
-}
-
-fn set_memory_entry(
-    store: &mut MemoryStore,
-    key: &str,
-    value: &str,
-    ttl_seconds: i64,
-    now: DateTime<Utc>,
-) {
-    let expires_at = now + ChronoDuration::seconds(ttl_seconds);
-    store.entries.insert(
-        key.to_string(),
-        MemoryEntry {
-            value: value.to_string(),
-            updated_at: now,
-            expires_at: Some(expires_at),
-        },
-    );
-}
-
-fn format_memory_for_prompt(store: &MemoryStore) -> String {
-    if store.entries.is_empty() {
-        return String::new();
-    }
-
-    let facts: BTreeMap<String, String> = store
-        .entries
-        .iter()
-        .map(|(k, v)| (k.clone(), v.value.clone()))
-        .collect();
-
-    serde_json::to_string_pretty(&facts).unwrap_or_default()
-}
-
-fn memory_namespace_from_meta(meta: &Meta) -> String {
-    meta.template_namespace
-        .as_deref()
-        .map(normalize_namespace)
-        .filter(|ns| !ns.is_empty())
-        .unwrap_or_else(|| normalize_namespace(&meta.stage))
-}
-
-fn parse_memory_output(path: &Path) -> anyhow::Result<MemoryOutputOps> {
-    let bytes = fs::read(path)?;
-    if bytes.iter().all(|b| b.is_ascii_whitespace()) {
-        return Ok(MemoryOutputOps::default());
-    }
-
-    let parsed: MemoryOutput = serde_json::from_slice(&bytes)
-        .with_context(|| format!("invalid memory output {}", path.display()))?;
-    Ok(match parsed {
-        MemoryOutput::Ops(ops) => ops,
-        MemoryOutput::Flat(set) => MemoryOutputOps {
-            set,
-            delete: vec![],
-            ttl_seconds: None,
-        },
-    })
-}
-
-fn merge_memory_output(cards_dir: &Path, namespace: &str, path: &Path) -> anyhow::Result<()> {
-    if !path.exists() {
-        return Ok(());
-    }
-
-    let ops = parse_memory_output(path)?;
-    if ops.set.is_empty() && ops.delete.is_empty() {
-        return Ok(());
-    }
-
-    let mut store = read_memory_store(cards_dir, namespace)?;
-    let now = Utc::now();
-
-    for key in ops.delete {
-        let key = key.trim();
-        if !key.is_empty() {
-            store.entries.remove(key);
-        }
-    }
-
-    for (key, value) in ops.set {
-        let key = key.trim();
-        if key.is_empty() {
-            continue;
-        }
-        let (value, item_ttl) = match value {
-            MemoryOutputValue::String(v) => (v, None),
-            MemoryOutputValue::Detailed { value, ttl_seconds } => (value, ttl_seconds),
-        };
-        let ttl_seconds = item_ttl
-            .or(ops.ttl_seconds)
-            .filter(|ttl| *ttl > 0)
-            .unwrap_or(DEFAULT_MEMORY_TTL_SECONDS);
-        set_memory_entry(&mut store, key, &value, ttl_seconds, now);
-    }
-
-    let _ = prune_memory_store(&mut store, now);
-    write_memory_store(cards_dir, namespace, &store)?;
-    Ok(())
-}
-
-fn append_log_line(path: &Path, line: &str) -> anyhow::Result<()> {
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    writeln!(file, "{}", line)?;
-    Ok(())
-}
-
-fn cmd_memory_list(root: &Path, namespace: &str) -> anyhow::Result<()> {
-    let namespace = normalize_namespace(namespace);
-    let store = read_memory_store(root, &namespace)?;
-    if store.entries.is_empty() {
-        println!("(empty)");
-        return Ok(());
-    }
-
-    for (key, entry) in store.entries {
-        let expires = entry
-            .expires_at
-            .map(|t| t.to_rfc3339())
-            .unwrap_or_else(|| "never".to_string());
-        println!("{}\t{}\t{}", key, entry.value, expires);
-    }
-
-    Ok(())
-}
-
-fn cmd_memory_get(root: &Path, namespace: &str, key: &str) -> anyhow::Result<()> {
-    let namespace = normalize_namespace(namespace);
-    let key = key.trim();
-    if key.is_empty() {
-        anyhow::bail!("key cannot be empty");
-    }
-
-    let store = read_memory_store(root, &namespace)?;
-    let entry = store
-        .entries
-        .get(key)
-        .with_context(|| format!("memory key not found: {}", key))?;
-    println!("{}", entry.value);
-    Ok(())
-}
-
-fn cmd_memory_set(
-    root: &Path,
-    namespace: &str,
-    key: &str,
-    value: &str,
-    ttl_seconds: i64,
-) -> anyhow::Result<()> {
-    if ttl_seconds <= 0 {
-        anyhow::bail!("ttl_seconds must be > 0");
-    }
-
-    let namespace = normalize_namespace(namespace);
-    let key = key.trim();
-    if key.is_empty() {
-        anyhow::bail!("key cannot be empty");
-    }
-
-    let mut store = read_memory_store(root, &namespace)?;
-    set_memory_entry(&mut store, key, value, ttl_seconds, Utc::now());
-    write_memory_store(root, &namespace, &store)?;
-    Ok(())
-}
-
-fn cmd_memory_delete(root: &Path, namespace: &str, key: &str) -> anyhow::Result<()> {
-    let namespace = normalize_namespace(namespace);
-    let key = key.trim();
-    if key.is_empty() {
-        anyhow::bail!("key cannot be empty");
-    }
-
-    let mut store = read_memory_store(root, &namespace)?;
-    store.entries.remove(key);
-    write_memory_store(root, &namespace, &store)?;
-    Ok(())
-}
-
 fn print_status_summary(root: &Path) -> anyhow::Result<()> {
     for dir in ["pending", "running", "done", "merged", "failed"] {
         let p = root.join(dir);
@@ -1281,17 +953,6 @@ async fn main() -> anyhow::Result<()> {
         Command::Kill { id } => cmd_kill(&root, &id).await,
         Command::Logs { id, follow } => cmd_logs(&root, &id, follow).await,
         Command::Inspect { id } => cmd_inspect(&root, &id),
-        Command::Memory { cmd } => match cmd {
-            MemoryCommand::List { namespace } => cmd_memory_list(&root, &namespace),
-            MemoryCommand::Get { namespace, key } => cmd_memory_get(&root, &namespace, &key),
-            MemoryCommand::Set {
-                namespace,
-                key,
-                value,
-                ttl_seconds,
-            } => cmd_memory_set(&root, &namespace, &key, &value, ttl_seconds),
-            MemoryCommand::Delete { namespace, key } => cmd_memory_delete(&root, &namespace, &key),
-        },
         Command::Worktree { action } => match action {
             WorktreeAction::List => cmd_worktree_list(&root),
             WorktreeAction::Create { id } => cmd_worktree_create(&root, &id),
@@ -1475,7 +1136,7 @@ async fn run_dispatcher(
 }
 
 async fn run_card(
-    cards_dir: &Path,
+    _cards_dir: &Path,
     card_dir: &Path,
     adapter: &str,
     provider_name: &str,
@@ -1490,31 +1151,11 @@ async fn run_card(
 
     let stdout_log = card_dir.join("logs").join("stdout.log");
     let stderr_log = card_dir.join("logs").join("stderr.log");
-    let memory_out_file = card_dir.join("memory-out.json");
-    let _ = fs::remove_file(&memory_out_file);
 
     // Render prompt template with actual values
     let mut meta = jobcard_core::read_meta(card_dir).ok();
-    let memory_namespace = meta
-        .as_ref()
-        .map(memory_namespace_from_meta)
-        .unwrap_or_else(|| "default".to_string());
     if let Some(ref m) = meta {
-        let mut ctx = jobcard_core::PromptContext::from_files(card_dir, m)?;
-        match read_memory_store(cards_dir, &memory_namespace) {
-            Ok(store) => {
-                ctx.memory = format_memory_for_prompt(&store);
-            }
-            Err(err) => {
-                let _ = append_log_line(
-                    &stderr_log,
-                    &format!(
-                        "memory load failed (namespace={}): {}",
-                        memory_namespace, err
-                    ),
-                );
-            }
-        }
+        let ctx = jobcard_core::PromptContext::from_files(card_dir, m)?;
         let template = fs::read_to_string(&prompt_file)?;
         let rendered = jobcard_core::render_prompt(&template, &ctx);
         fs::write(&prompt_file, rendered)?;
@@ -1571,9 +1212,6 @@ async fn run_card(
         .arg(&prompt_file)
         .arg(&stdout_log)
         .arg(&stderr_log)
-        .arg(&memory_out_file)
-        .env("JOBCARD_MEMORY_OUT", &memory_out_file)
-        .env("JOBCARD_MEMORY_NAMESPACE", &memory_namespace)
         .spawn()
         .with_context(|| format!("failed to spawn adapter: {}", adapter))?;
 
@@ -1591,16 +1229,6 @@ async fn run_card(
 
     let status = child.wait().await?;
     let exit_code = status.code().unwrap_or(1);
-
-    if let Err(err) = merge_memory_output(cards_dir, &memory_namespace, &memory_out_file) {
-        let _ = append_log_line(
-            &stderr_log,
-            &format!(
-                "memory merge failed (namespace={}): {}",
-                memory_namespace, err
-            ),
-        );
-    }
 
     let finished_at = Utc::now();
     if let Some(ref mut m) = meta {
