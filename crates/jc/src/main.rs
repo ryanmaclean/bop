@@ -1265,13 +1265,14 @@ async fn main() -> anyhow::Result<()> {
                     log_retention_days: Some(30),
                     default_template: Some("implement".to_string()),
                 };
-                jobcard_core::config::write_config_file(&config_path, &defaults)
-                    .with_context(|| {
+                jobcard_core::config::write_config_file(&config_path, &defaults).with_context(
+                    || {
                         format!(
                             "failed to create default config at {}",
                             config_path.display()
                         )
-                    })?;
+                    },
+                )?;
             }
             Ok(())
         }
@@ -4274,41 +4275,457 @@ fn load_feed_config(card_dir: &Path) -> jobcard_core::realtime::FeedConfig {
     }
 }
 
-fn cmd_worktree_list(_root: &Path) -> anyhow::Result<()> {
-    todo!()
+/// Returns (path, branch) for every linked worktree known to git (excluding the main worktree).
+/// Returns empty vec if git is unavailable or not in a git repo.
+fn git_worktree_paths(from_dir: &Path) -> Vec<(PathBuf, String)> {
+    let Ok(out) = StdCommand::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(from_dir)
+        .output()
+    else {
+        return vec![];
+    };
+    if !out.status.success() {
+        return vec![];
+    }
+
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut result = Vec::new();
+    let mut current_path: Option<PathBuf> = None;
+    let mut current_branch = String::new();
+    let mut block_index: usize = 0;
+
+    for line in text.lines() {
+        if line.starts_with("worktree ") {
+            if let Some(p) = current_path.take() {
+                if block_index > 1 {
+                    result.push((p, std::mem::take(&mut current_branch)));
+                }
+            }
+            current_path = line.strip_prefix("worktree ").map(PathBuf::from);
+            current_branch = String::new();
+            block_index += 1;
+        } else if let Some(rest) = line.strip_prefix("branch refs/heads/") {
+            current_branch = rest.to_string();
+        } else if line.is_empty() {
+            if let Some(p) = current_path.take() {
+                if block_index > 1 {
+                    result.push((p, std::mem::take(&mut current_branch)));
+                }
+            }
+        }
+    }
+    if let Some(p) = current_path {
+        if block_index > 1 {
+            result.push((p, current_branch));
+        }
+    }
+    result
 }
 
-fn cmd_worktree_create(_root: &Path, _id: &str) -> anyhow::Result<()> {
-    todo!()
+fn cmd_worktree_list(root: &Path) -> anyhow::Result<()> {
+    let states = ["pending", "running", "done", "merged", "failed"];
+    let mut card_worktrees: Vec<(PathBuf, String, String, String)> = Vec::new();
+
+    for &state in &states {
+        let dir = root.join(state);
+        if !dir.exists() {
+            continue;
+        }
+        for ent in fs::read_dir(&dir)?.flatten() {
+            let card_dir = ent.path();
+            if !card_dir.is_dir() {
+                continue;
+            }
+            if card_dir.extension().and_then(|s| s.to_str()).unwrap_or("") != "jobcard" {
+                continue;
+            }
+            let wt_path = card_dir.join("worktree");
+            if !wt_path.exists() {
+                continue;
+            }
+            let meta = jobcard_core::read_meta(&card_dir).ok();
+            let id = meta.as_ref().map(|m| m.id.clone()).unwrap_or_else(|| {
+                card_dir
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("?")
+                    .to_string()
+            });
+            let branch = meta
+                .as_ref()
+                .and_then(|m| m.worktree_branch.clone())
+                .unwrap_or_else(|| "?".to_string());
+            card_worktrees.push((wt_path, id, branch, state.to_string()));
+        }
+    }
+
+    println!("{:<20} {:<30} {:<10} PATH", "ID", "BRANCH", "STATUS");
+    for (path, id, branch, state) in &card_worktrees {
+        println!("{:<20} {:<30} {:<10} {}", id, branch, state, path.display());
+    }
+
+    let git_wt_list = git_worktree_paths(root);
+    let known_paths: std::collections::HashSet<PathBuf> = card_worktrees
+        .iter()
+        .map(|(p, _, _, _)| p.clone())
+        .collect();
+
+    for (gp, _branch) in git_wt_list {
+        if !known_paths.contains(&gp) {
+            println!(
+                "{:<20} {:<30} {:<10} {}",
+                "[orphaned]",
+                "?",
+                "orphaned",
+                gp.display()
+            );
+        }
+    }
+
+    Ok(())
 }
 
-fn cmd_worktree_clean(_root: &Path, _dry_run: bool) -> anyhow::Result<()> {
-    todo!()
+fn cmd_worktree_create(root: &Path, id: &str) -> anyhow::Result<()> {
+    let card = ["pending", "running"]
+        .iter()
+        .find_map(|&state| {
+            let p = root.join(state).join(format!("{}.jobcard", id));
+            if p.exists() {
+                Some(p)
+            } else {
+                None
+            }
+        })
+        .with_context(|| format!("card \'{}\' not found in pending/ or running/", id))?;
+
+    let meta = jobcard_core::read_meta(&card)?;
+    let branch = meta
+        .worktree_branch
+        .as_deref()
+        .unwrap_or(&format!("job/{}", id))
+        .to_string();
+
+    let wt_path = card.join("worktree");
+    if wt_path.exists() {
+        anyhow::bail!("worktree already exists for card \'{}\'", id);
+    }
+
+    let git_root_out = StdCommand::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(root.parent().unwrap_or(root))
+        .output()
+        .context("failed to run git; is this directory inside a git repo?")?;
+    if !git_root_out.status.success() {
+        anyhow::bail!("not inside a git repository");
+    }
+    let git_root = PathBuf::from(String::from_utf8(git_root_out.stdout)?.trim());
+
+    let add = StdCommand::new("git")
+        .args(["worktree", "add", "-b", &branch, wt_path.to_str().unwrap()])
+        .current_dir(&git_root)
+        .output()?;
+
+    if !add.status.success() {
+        let add2 = StdCommand::new("git")
+            .args(["worktree", "add", wt_path.to_str().unwrap(), &branch])
+            .current_dir(&git_root)
+            .output()?;
+        if !add2.status.success() {
+            let err = String::from_utf8_lossy(&add2.stderr);
+            anyhow::bail!("git worktree add failed: {}", err);
+        }
+    }
+
+    println!(
+        "created worktree for \'{}\' at {} (branch: {})",
+        id,
+        wt_path.display(),
+        branch
+    );
+    Ok(())
+}
+
+/// Remove a directory: first try `git worktree remove --force`, fall back to `fs::remove_dir_all`.
+fn remove_worktree(path: &Path, git_root: Option<&Path>) -> anyhow::Result<()> {
+    if let Some(root) = git_root {
+        let status = StdCommand::new("git")
+            .args(["worktree", "remove", "--force", path.to_str().unwrap_or("")])
+            .current_dir(root)
+            .status();
+        if matches!(status, Ok(s) if s.success()) {
+            return Ok(());
+        }
+    }
+    fs::remove_dir_all(path).with_context(|| format!("failed to remove {}", path.display()))
+}
+
+fn cmd_worktree_clean(root: &Path, dry_run: bool) -> anyhow::Result<()> {
+    let stale_states = ["done", "merged"];
+    let mut to_remove: Vec<PathBuf> = Vec::new();
+
+    for &state in &stale_states {
+        let dir = root.join(state);
+        if !dir.exists() {
+            continue;
+        }
+        for ent in fs::read_dir(&dir)?.flatten() {
+            let card_dir = ent.path();
+            if !card_dir.is_dir() {
+                continue;
+            }
+            if card_dir.extension().and_then(|s| s.to_str()).unwrap_or("") != "jobcard" {
+                continue;
+            }
+            let wt = card_dir.join("worktree");
+            if wt.exists() {
+                to_remove.push(wt);
+            }
+        }
+    }
+
+    let git_root: Option<PathBuf> = StdCommand::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(root.parent().unwrap_or(root))
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| PathBuf::from(s.trim()));
+
+    if let Some(ref gr) = git_root {
+        let active_wt_paths: std::collections::HashSet<PathBuf> = ["pending", "running"]
+            .iter()
+            .flat_map(|&state| {
+                let dir = root.join(state);
+                fs::read_dir(dir)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .filter_map(|e| {
+                        let p = e.path();
+                        if p.extension().and_then(|s| s.to_str()).unwrap_or("") == "jobcard" {
+                            Some(p.join("worktree"))
+                        } else {
+                            None
+                        }
+                    })
+            })
+            .collect();
+
+        for (wt_path, _branch) in git_worktree_paths(gr) {
+            if !active_wt_paths.contains(&wt_path) && !to_remove.contains(&wt_path) {
+                to_remove.push(wt_path);
+            }
+        }
+    }
+
+    if to_remove.is_empty() {
+        println!("nothing to clean");
+        return Ok(());
+    }
+
+    for path in &to_remove {
+        if dry_run {
+            println!("would remove: {}", path.display());
+        } else {
+            println!("removing: {}", path.display());
+            remove_worktree(path, git_root.as_deref())?;
+        }
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
-// Providers subcommand stubs (implementation by providers-cli agent)
+// Providers subcommand implementations
 // ---------------------------------------------------------------------------
 
-fn cmd_providers_list(_root: &Path) -> anyhow::Result<()> {
-    todo!("providers list not yet implemented")
+fn cmd_providers_list(root: &Path) -> anyhow::Result<()> {
+    let pf = read_providers(root)?;
+    let now = chrono::Utc::now().timestamp();
+    if pf.providers.is_empty() {
+        println!("No providers configured. Run: jc providers add <name> --adapter <script>");
+        return Ok(());
+    }
+    println!("{:<20} {:<30} {:<20} COOLDOWN", "NAME", "ADAPTER", "MODEL");
+    for (name, p) in &pf.providers {
+        let model = p.model.as_deref().unwrap_or("-");
+        let cooldown = match p.cooldown_until_epoch_s {
+            Some(until) if until > now => format!("cooldown: {}s", until - now),
+            _ => "none".to_string(),
+        };
+        println!("{:<20} {:<30} {:<20} {}", name, p.command, model, cooldown);
+    }
+    Ok(())
 }
 
 fn cmd_providers_add(
-    _root: &Path,
-    _name: &str,
-    _adapter: &str,
-    _model: Option<&str>,
+    root: &Path,
+    name: &str,
+    adapter: &str,
+    model: Option<&str>,
 ) -> anyhow::Result<()> {
-    todo!("providers add not yet implemented")
+    if name.trim().is_empty() {
+        anyhow::bail!("provider name cannot be empty");
+    }
+    if adapter.trim().is_empty() {
+        anyhow::bail!("--adapter cannot be empty");
+    }
+
+    let mut pf = read_providers(root)?;
+
+    if pf.providers.contains_key(name) {
+        anyhow::bail!(
+            "provider '{}' already exists. Use 'providers remove' first.",
+            name
+        );
+    }
+
+    let provider = Provider {
+        command: adapter.to_string(),
+        rate_limit_exit: 75,
+        cooldown_until_epoch_s: None,
+        model: model.map(str::to_string),
+    };
+    validate_provider(name, &provider)?;
+
+    pf.providers.insert(name.to_string(), provider);
+    write_providers(root, &pf)?;
+    println!("Added provider '{}'.", name);
+    Ok(())
 }
 
-fn cmd_providers_remove(_root: &Path, _name: &str, _force: bool) -> anyhow::Result<()> {
-    todo!("providers remove not yet implemented")
+struct ProviderStats {
+    total: usize,
+    success: usize,
+    failed: usize,
 }
 
-fn cmd_providers_status(_root: &Path) -> anyhow::Result<()> {
-    todo!("providers status not yet implemented")
+fn count_active_jobs_for_provider(cards_dir: &Path, provider_name: &str) -> usize {
+    let running_dir = cards_dir.join("running");
+    let Ok(entries) = std::fs::read_dir(&running_dir) else {
+        return 0;
+    };
+    let mut count = 0;
+    for ent in entries.flatten() {
+        let card_dir = ent.path();
+        if !card_dir.is_dir() {
+            continue;
+        }
+        if card_dir.extension().and_then(|s| s.to_str()).unwrap_or("") != "jobcard" {
+            continue;
+        }
+        if let Ok(meta) = jobcard_core::read_meta(&card_dir) {
+            for record in meta.stages.values() {
+                if record.provider.as_deref() == Some(provider_name) {
+                    count += 1;
+                    break;
+                }
+            }
+        }
+    }
+    count
+}
+
+fn compute_provider_stats(cards_dir: &Path) -> std::collections::BTreeMap<String, ProviderStats> {
+    let mut stats: std::collections::BTreeMap<String, ProviderStats> = Default::default();
+    let state_dirs = ["pending", "running", "done", "merged", "failed"];
+    for state in state_dirs {
+        let dir = cards_dir.join(state);
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for ent in entries.flatten() {
+            let card_dir = ent.path();
+            if !card_dir.is_dir() {
+                continue;
+            }
+            if card_dir.extension().and_then(|s| s.to_str()).unwrap_or("") != "jobcard" {
+                continue;
+            }
+            let Ok(meta) = jobcard_core::read_meta(&card_dir) else {
+                continue;
+            };
+            for record in meta.stages.values() {
+                let Some(prov) = &record.provider else {
+                    continue;
+                };
+                let entry = stats.entry(prov.clone()).or_insert(ProviderStats {
+                    total: 0,
+                    success: 0,
+                    failed: 0,
+                });
+                entry.total += 1;
+                match record.status {
+                    jobcard_core::StageStatus::Done => entry.success += 1,
+                    jobcard_core::StageStatus::Failed => entry.failed += 1,
+                    _ => {}
+                }
+            }
+        }
+    }
+    stats
+}
+
+fn cmd_providers_remove(root: &Path, name: &str, force: bool) -> anyhow::Result<()> {
+    let mut pf = read_providers(root)?;
+    if !pf.providers.contains_key(name) {
+        anyhow::bail!("provider '{}' not found", name);
+    }
+
+    let active = count_active_jobs_for_provider(root, name);
+    if active > 0 && !force {
+        anyhow::bail!(
+            "provider '{}' has {} active job(s) in running/. \
+             Use --force to remove anyway.",
+            name,
+            active
+        );
+    }
+
+    pf.providers.remove(name);
+    // Clear default_provider if it was pointing to the removed provider
+    if pf.default_provider.as_deref() == Some(name) {
+        pf.default_provider = None;
+    }
+    write_providers(root, &pf)?;
+    if active > 0 {
+        eprintln!("Warning: removed '{}' with {} active job(s).", name, active);
+    }
+    println!("Removed provider '{}'.", name);
+    Ok(())
+}
+
+fn cmd_providers_status(root: &Path) -> anyhow::Result<()> {
+    let pf = read_providers(root)?;
+    let stats = compute_provider_stats(root);
+    let now = chrono::Utc::now().timestamp();
+
+    if pf.providers.is_empty() {
+        println!("No providers configured.");
+        return Ok(());
+    }
+
+    println!(
+        "{:<20} {:>6} {:>8} {:>8} COOLDOWN",
+        "PROVIDER", "TOTAL", "SUCCESS", "FAILED"
+    );
+    for (name, p) in &pf.providers {
+        let s = stats.get(name);
+        let total = s.map(|s| s.total).unwrap_or(0);
+        let success = s.map(|s| s.success).unwrap_or(0);
+        let failed = s.map(|s| s.failed).unwrap_or(0);
+        let cooldown = match p.cooldown_until_epoch_s {
+            Some(until) if until > now => format!("{}s", until - now),
+            _ => "none".to_string(),
+        };
+        println!(
+            "{:<20} {:>6} {:>8} {:>8} {}",
+            name, total, success, failed, cooldown
+        );
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -4374,10 +4791,7 @@ fn cmd_config_set(config_path: &Path, key: &str, value: &str) -> anyhow::Result<
         }
         "max_concurrent" => {
             cfg.max_concurrent = Some(value.parse::<usize>().with_context(|| {
-                format!(
-                    "max_concurrent must be a positive integer, got: {}",
-                    value
-                )
+                format!("max_concurrent must be a positive integer, got: {}", value)
             })?);
         }
         "cooldown_seconds" => {

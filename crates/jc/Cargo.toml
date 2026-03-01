@@ -26,3 +26,5 @@ utoipa = { version = "5", features = ["chrono"] }
 [dev-dependencies]
 tempfile = "3"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
+chrono.workspace = true
+serde_json.workspace = true
