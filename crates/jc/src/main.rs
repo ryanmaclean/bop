@@ -3157,9 +3157,19 @@ async fn run_merge_gate(cards_dir: &Path, poll_ms: u64, once: bool) -> anyhow::R
                 if ws_path.exists() {
                     // Step 1: Squash agent changes from workspace into parent change.
                     if let Err(e) = jobcard_core::worktree::squash_workspace(&ws_path) {
-                        let _ = fs::write(&qa_log, format!("jj squash failed: {e}\n").as_bytes());
+                        let _ = fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&qa_log)
+                            .and_then(|mut f| {
+                                f.write_all(format!("jj squash failed: {e}\n").as_bytes())
+                            });
                         meta.failure_reason = Some("jj_squash_failed".to_string());
                         let _ = write_meta(&card_dir, &meta);
+                        // Best-effort cleanup: forget the workspace even on squash failure to avoid
+                        // orphaned workspace registrations in jj.
+                        let jj_root = find_git_root(cards_dir).unwrap_or_else(|| cards_dir.to_path_buf());
+                        let _ = jobcard_core::worktree::forget_workspace(&jj_root, "workspace");
                         let _ = fs::rename(&card_dir, failed_dir.join(&name));
                         continue;
                     }
