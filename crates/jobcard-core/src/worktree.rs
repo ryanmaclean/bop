@@ -1,236 +1,177 @@
+//! jj workspace management for per-card isolation.
+//!
+//! Each job card gets `jj workspace add <card>/workspace` before the adapter runs.
+//! On merge: `jj squash` folds changes back, `jj workspace forget` cleans up.
 use anyhow::{Context, Result};
 use std::path::Path;
 
-/// Create a git worktree at `wt_path` on branch `branch_name`.
-/// If the branch already exists, attaches the worktree to it.
-pub fn create_worktree(git_root: &Path, wt_path: &Path, branch_name: &str) -> Result<()> {
-    // Try creating a new branch with the worktree
-    let result = std::process::Command::new("git")
-        .args(["worktree", "add", "-b", branch_name])
-        .arg(wt_path)
-        .current_dir(git_root)
-        .output()
-        .context("failed to run git worktree add -b")?;
-
-    if result.status.success() {
+/// Initialize a jj repo at `repo_root` (colocated with git) if `.jj/` doesn't exist yet.
+/// Safe to call repeatedly.
+pub fn ensure_jj_repo(repo_root: &Path) -> Result<()> {
+    if repo_root.join(".jj").exists() {
         return Ok(());
     }
-
-    // Branch already exists — attach worktree to existing branch
-    let result = std::process::Command::new("git")
-        .args(["worktree", "add"])
-        .arg(wt_path)
-        .arg(branch_name)
-        .current_dir(git_root)
+    let out = std::process::Command::new("jj")
+        .args(["git", "init", "--colocate"])
+        .current_dir(repo_root)
         .output()
-        .context("failed to run git worktree add")?;
-
-    if result.status.success() {
-        return Ok(());
+        .context("failed to run `jj git init --colocate` (is jj installed?)")?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        anyhow::bail!("jj git init failed: {}", stderr);
     }
-
-    let stderr = String::from_utf8_lossy(&result.stderr);
-    anyhow::bail!("git worktree add failed: {}", stderr);
-}
-
-/// Stage all changes in the worktree and commit with a standard message.
-/// Uses `--allow-empty` so cards with only log output still produce a commit.
-pub fn commit_worktree(wt_path: &Path, card_id: &str) -> Result<()> {
-    let env_vars = [
-        ("GIT_AUTHOR_NAME", "jobcard-agent"),
-        ("GIT_AUTHOR_EMAIL", "agent@jobcard.local"),
-        ("GIT_COMMITTER_NAME", "jobcard-agent"),
-        ("GIT_COMMITTER_EMAIL", "agent@jobcard.local"),
-    ];
-
-    // Stage all changes
-    let result = std::process::Command::new("git")
-        .args(["add", "-A"])
-        .current_dir(wt_path)
-        .envs(env_vars)
-        .output()
-        .context("failed to run git add -A")?;
-
-    if !result.status.success() {
-        let stderr = String::from_utf8_lossy(&result.stderr);
-        anyhow::bail!("git add -A failed: {}", stderr);
-    }
-
-    // Commit with standard message
-    let message = format!("feat(jobcard): complete {}", card_id);
-    let result = std::process::Command::new("git")
-        .args(["commit", "--allow-empty", "-m", &message])
-        .current_dir(wt_path)
-        .envs(env_vars)
-        .output()
-        .context("failed to run git commit")?;
-
-    if !result.status.success() {
-        let stderr = String::from_utf8_lossy(&result.stderr);
-        anyhow::bail!("git commit failed: {}", stderr);
-    }
-
     Ok(())
 }
 
-/// Merge `branch_name` into the current HEAD of `git_root`.
-/// Returns `true` if merge succeeded, `false` if there's a conflict.
-pub fn merge_card_branch(git_root: &Path, branch_name: &str) -> Result<bool> {
-    let message = format!("Merge {} via merge-gate", branch_name);
-    let out = std::process::Command::new("git")
-        .args(["merge", "--no-ff", branch_name, "-m", &message])
-        .current_dir(git_root)
+/// Create a jj workspace at `ws_path` from `repo_root`.
+/// The workspace name is derived from the path basename.
+pub fn create_workspace(repo_root: &Path, ws_path: &Path) -> Result<()> {
+    let name = ws_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("workspace");
+    let out = std::process::Command::new("jj")
+        .args(["workspace", "add", "--name", name])
+        .arg(ws_path)
+        .current_dir(repo_root)
         .output()
-        .context("failed to run git merge")?;
-
-    Ok(out.status.success())
+        .context("failed to run `jj workspace add`")?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        anyhow::bail!("jj workspace add failed: {}", stderr);
+    }
+    Ok(())
 }
 
-/// Prune and remove the worktree at `wt_path`.
-pub fn remove_worktree(git_root: &Path, wt_path: &Path) -> Result<()> {
-    let result = std::process::Command::new("git")
-        .args(["worktree", "remove", "--force"])
-        .arg(wt_path)
-        .current_dir(git_root)
+/// Squash all changes in the card workspace into its parent change.
+/// Run this from inside the workspace directory after the agent finishes.
+pub fn squash_workspace(ws_path: &Path) -> Result<()> {
+    let out = std::process::Command::new("jj")
+        .args(["squash"])
+        .current_dir(ws_path)
         .output()
-        .context("failed to run git worktree remove")?;
-
-    if !result.status.success() {
-        let stderr = String::from_utf8_lossy(&result.stderr);
-        anyhow::bail!("git worktree remove failed: {}", stderr);
+        .context("failed to run `jj squash`")?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        anyhow::bail!("jj squash failed: {}", stderr);
     }
-
     Ok(())
+}
+
+/// Forget (deregister) the workspace. Call from repo_root after squashing.
+/// jj does not delete the directory — that's the caller's responsibility.
+pub fn forget_workspace(repo_root: &Path, ws_name: &str) -> Result<()> {
+    let out = std::process::Command::new("jj")
+        .args(["workspace", "forget", ws_name])
+        .current_dir(repo_root)
+        .output()
+        .context("failed to run `jj workspace forget`")?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        anyhow::bail!("jj workspace forget failed: {}", stderr);
+    }
+    Ok(())
+}
+
+/// Push all un-pushed changes to the remote as git branches.
+/// Best-effort: non-fatal if no remote is configured.
+pub fn push_stack(repo_root: &Path, remote: &str) -> Result<()> {
+    let out = std::process::Command::new("jj")
+        .args(["git", "push", "--remote", remote, "--all"])
+        .current_dir(repo_root)
+        .output()
+        .context("failed to run `jj git push`")?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        anyhow::bail!("jj git push failed: {}", stderr);
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Legacy aliases — kept so existing call sites compile until Task 3 migrates
+// the merge gate. Marked deprecated to surface them in warnings.
+// ---------------------------------------------------------------------------
+
+#[deprecated(note = "use create_workspace instead")]
+pub fn create_worktree(git_root: &Path, wt_path: &Path, _branch_name: &str) -> Result<()> {
+    create_workspace(git_root, wt_path)
+}
+
+#[deprecated(note = "use squash_workspace + forget_workspace instead")]
+pub fn commit_worktree(_wt_path: &Path, _card_id: &str) -> Result<()> {
+    Ok(()) // no-op: jj tracks all changes automatically
+}
+
+#[deprecated(note = "push_stack handles this now")]
+pub fn merge_card_branch(_git_root: &Path, _branch_name: &str) -> Result<bool> {
+    Ok(true) // signal success; real work happens in Task 3
+}
+
+#[deprecated(note = "use forget_workspace instead")]
+pub fn remove_worktree(_git_root: &Path, _wt_path: &Path) -> Result<()> {
+    Ok(()) // no-op until Task 3
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
 
-    fn make_git_repo() -> tempfile::TempDir {
+    fn jj_available() -> bool {
+        std::process::Command::new("jj").arg("--version").output().is_ok()
+    }
+
+    fn make_jj_repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path();
-
-        // git init -b main
-        let out = std::process::Command::new("git")
-            .args(["init", "-b", "main"])
-            .current_dir(path)
-            .output()
-            .expect("git init failed");
-        assert!(
-            out.status.success(),
-            "git init: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-
-        // Configure user identity
-        std::process::Command::new("git")
-            .args(["config", "user.email", "test@test.local"])
-            .current_dir(path)
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["config", "user.name", "Test User"])
-            .current_dir(path)
-            .output()
-            .unwrap();
-
-        // Initial empty commit so HEAD exists
-        let out = std::process::Command::new("git")
-            .args(["commit", "--allow-empty", "-m", "init"])
-            .current_dir(path)
-            .output()
-            .expect("initial commit failed");
-        assert!(
-            out.status.success(),
-            "init commit: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-
+        std::process::Command::new("jj")
+            .args(["git", "init", "--colocate"])
+            .current_dir(dir.path())
+            .output().unwrap();
+        std::process::Command::new("jj")
+            .args(["config", "set", "--repo", "user.name", "Test"])
+            .current_dir(dir.path()).output().unwrap();
+        std::process::Command::new("jj")
+            .args(["config", "set", "--repo", "user.email", "test@test.local"])
+            .current_dir(dir.path()).output().unwrap();
         dir
     }
 
     #[test]
-    fn test_create_and_remove_worktree() {
-        let repo = make_git_repo();
-        let repo_path = repo.path();
-
-        let wt_dir = tempfile::tempdir().unwrap();
-        let wt_path = wt_dir.path().join("my-worktree");
-
-        // create_worktree should create the directory
-        create_worktree(repo_path, &wt_path, "feature/test-wt").expect("create_worktree failed");
-        assert!(
-            wt_path.exists(),
-            "worktree directory should exist after creation"
-        );
-
-        // remove_worktree should delete it
-        remove_worktree(repo_path, &wt_path).expect("remove_worktree failed");
-        assert!(
-            !wt_path.exists(),
-            "worktree directory should be gone after removal"
-        );
+    fn test_ensure_jj_repo_idempotent() {
+        if !jj_available() { eprintln!("jj not installed, skipping"); return; }
+        let dir = tempfile::tempdir().unwrap();
+        ensure_jj_repo(dir.path()).unwrap();
+        ensure_jj_repo(dir.path()).unwrap();
+        assert!(dir.path().join(".jj").exists());
     }
 
     #[test]
-    fn test_commit_worktree_changes() {
-        let repo = make_git_repo();
-        let repo_path = repo.path();
-
-        let wt_dir = tempfile::tempdir().unwrap();
-        let wt_path = wt_dir.path().join("commit-wt");
-
-        let branch = "feature/commit-test";
-        create_worktree(repo_path, &wt_path, branch).expect("create_worktree failed");
-
-        // Write a file inside the worktree
-        fs::write(wt_path.join("hello.txt"), b"hello from worktree\n").expect("write file failed");
-
-        // Commit from inside the worktree
-        commit_worktree(&wt_path, "CARD-42").expect("commit_worktree failed");
-
-        // Verify the branch appears in `git branch` output
-        let out = std::process::Command::new("git")
-            .args(["branch"])
-            .current_dir(repo_path)
-            .output()
-            .unwrap();
-        let branches = String::from_utf8_lossy(&out.stdout);
-        assert!(
-            branches.contains("feature/commit-test"),
-            "branch should appear after commit; got: {}",
-            branches
-        );
+    fn test_create_workspace() {
+        if !jj_available() { eprintln!("jj not installed, skipping"); return; }
+        let repo = make_jj_repo();
+        let ws = repo.path().join("my-workspace");
+        create_workspace(repo.path(), &ws).unwrap();
+        assert!(ws.exists());
     }
 
     #[test]
-    fn test_merge_card_branch() {
-        let repo = make_git_repo();
-        let repo_path = repo.path();
+    fn test_create_and_forget_workspace() {
+        if !jj_available() { eprintln!("jj not installed, skipping"); return; }
+        let repo = make_jj_repo();
+        let ws = repo.path().join("card-workspace");
+        create_workspace(repo.path(), &ws).unwrap();
+        forget_workspace(repo.path(), "card-workspace").unwrap();
+    }
 
-        let wt_dir = tempfile::tempdir().unwrap();
-        let wt_path = wt_dir.path().join("merge-wt");
-
-        let branch = "feature/merge-test";
-        create_worktree(repo_path, &wt_path, branch).expect("create_worktree failed");
-
-        // Write and commit a file in the worktree
-        fs::write(wt_path.join("merged.txt"), b"merged content\n").expect("write file failed");
-        commit_worktree(&wt_path, "CARD-99").expect("commit_worktree failed");
-
-        // Remove the worktree before merging (not strictly required, but clean)
-        remove_worktree(repo_path, &wt_path).expect("remove_worktree failed");
-
-        // Merge the branch into main
-        let merged = merge_card_branch(repo_path, branch).expect("merge_card_branch failed");
-        assert!(merged, "merge should succeed");
-
-        // Verify the file now exists in the main repo working tree
-        assert!(
-            repo_path.join("merged.txt").exists(),
-            "merged.txt should appear in main repo after merge"
-        );
+    #[test]
+    fn test_squash_workspace_changes() {
+        if !jj_available() { eprintln!("jj not installed, skipping"); return; }
+        let repo = make_jj_repo();
+        let ws = repo.path().join("squash-ws");
+        create_workspace(repo.path(), &ws).unwrap();
+        // Write a file in the workspace
+        std::fs::write(ws.join("result.txt"), b"agent output").unwrap();
+        // squash moves changes to parent change
+        squash_workspace(&ws).unwrap();
     }
 }

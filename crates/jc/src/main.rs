@@ -2691,21 +2691,12 @@ async fn run_dispatcher(
                         continue;
                     }
 
-                    // Create git worktree for isolation (best-effort; non-fatal if git not available)
-                    if let Some(git_root) = find_git_root(&running_path) {
-                        let wt_path = running_path.join("worktree");
-                        let branch = format!(
-                            "jobs/{}",
-                            running_path
-                                .file_stem()
-                                .and_then(|s| s.to_str())
-                                .unwrap_or("unknown")
-                                .trim_end_matches(".jobcard")
-                        );
-                        if let Err(e) =
-                            jobcard_core::worktree::create_worktree(&git_root, &wt_path, &branch)
-                        {
-                            eprintln!("[dispatcher] worktree create failed for {branch}: {e}");
+                    // Create jj workspace for isolation (best-effort; non-fatal if jj not available)
+                    {
+                        let _ = jobcard_core::worktree::ensure_jj_repo(cards_dir);
+                        let ws_path = running_path.join("workspace");
+                        if let Err(e) = jobcard_core::worktree::create_workspace(cards_dir, &ws_path) {
+                            eprintln!("[dispatcher] jj workspace create failed: {e}");
                         }
                     }
 
@@ -2842,12 +2833,8 @@ async fn run_card(
     }
 
     let workdir = {
-        let wt = card_dir.join("worktree");
-        if wt.exists() {
-            wt
-        } else {
-            card_dir.to_path_buf()
-        }
+        let ws = card_dir.join("workspace");
+        if ws.exists() { ws } else { card_dir.to_path_buf() }
     };
 
     let stage = meta
@@ -3059,12 +3046,8 @@ async fn run_merge_gate(cards_dir: &Path, poll_ms: u64, once: bool) -> anyhow::R
                 fs::create_dir_all(card_dir.join("output"))?;
 
                 let workdir = {
-                    let wt = card_dir.join("worktree");
-                    if wt.exists() {
-                        wt
-                    } else {
-                        card_dir.clone()
-                    }
+                    let ws = card_dir.join("workspace");
+                    if ws.exists() { ws } else { card_dir.clone() }
                 };
 
                 let qa_log = card_dir.join("logs").join("qa.log");
@@ -3116,12 +3099,12 @@ async fn run_merge_gate(cards_dir: &Path, poll_ms: u64, once: bool) -> anyhow::R
                     continue;
                 }
 
-                let wt_path = card_dir.join("worktree");
+                let wt_path = card_dir.join("workspace");
                 if wt_path.exists() {
                     // Derive card_id by stripping the ".jobcard" extension from the filename.
                     let card_id = name.trim_end_matches(".jobcard");
 
-                    // Step 1: Stage and commit all agent changes from inside the worktree.
+                    // Step 1: Stage and commit all agent changes from inside the workspace.
                     if let Err(e) = jobcard_core::worktree::commit_worktree(&wt_path, card_id) {
                         let _ =
                             fs::write(&qa_log, format!("commit_worktree failed: {e}\n").as_bytes());
@@ -3664,7 +3647,7 @@ fn cmd_worktree_list(root: &Path) -> anyhow::Result<()> {
             if card_dir.extension().and_then(|s| s.to_str()).unwrap_or("") != "jobcard" {
                 continue;
             }
-            let wt_path = card_dir.join("worktree");
+            let wt_path = card_dir.join("workspace");
             if !wt_path.exists() {
                 continue;
             }
@@ -3730,42 +3713,20 @@ fn cmd_worktree_create(root: &Path, id: &str) -> anyhow::Result<()> {
         .unwrap_or(&format!("job/{}", id))
         .to_string();
 
-    let wt_path = card.join("worktree");
-    if wt_path.exists() {
-        anyhow::bail!("worktree already exists for card \'{}\'", id);
+    let ws_path = card.join("workspace");
+    if ws_path.exists() {
+        anyhow::bail!("workspace already exists for card \'{}\'", id);
     }
 
-    let git_root_out = StdCommand::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(root.parent().unwrap_or(root))
-        .output()
-        .context("failed to run git; is this directory inside a git repo?")?;
-    if !git_root_out.status.success() {
-        anyhow::bail!("not inside a git repository");
-    }
-    let git_root = PathBuf::from(String::from_utf8(git_root_out.stdout)?.trim());
-
-    let add = StdCommand::new("git")
-        .args(["worktree", "add", "-b", &branch, wt_path.to_str().unwrap()])
-        .current_dir(&git_root)
-        .output()?;
-
-    if !add.status.success() {
-        let add2 = StdCommand::new("git")
-            .args(["worktree", "add", wt_path.to_str().unwrap(), &branch])
-            .current_dir(&git_root)
-            .output()?;
-        if !add2.status.success() {
-            let err = String::from_utf8_lossy(&add2.stderr);
-            anyhow::bail!("git worktree add failed: {}", err);
-        }
+    let _ = jobcard_core::worktree::ensure_jj_repo(root);
+    if let Err(e) = jobcard_core::worktree::create_workspace(root, &ws_path) {
+        anyhow::bail!("jj workspace create failed: {}", e);
     }
 
     println!(
-        "created worktree for \'{}\' at {} (branch: {})",
+        "created workspace for \'{}\' at {}",
         id,
-        wt_path.display(),
-        branch
+        ws_path.display()
     );
     Ok(())
 }
@@ -3801,7 +3762,7 @@ fn cmd_worktree_clean(root: &Path, dry_run: bool) -> anyhow::Result<()> {
             if card_dir.extension().and_then(|s| s.to_str()).unwrap_or("") != "jobcard" {
                 continue;
             }
-            let wt = card_dir.join("worktree");
+            let wt = card_dir.join("workspace");
             if wt.exists() {
                 to_remove.push(wt);
             }
@@ -3829,7 +3790,7 @@ fn cmd_worktree_clean(root: &Path, dry_run: bool) -> anyhow::Result<()> {
                     .filter_map(|e| {
                         let p = e.path();
                         if p.extension().and_then(|s| s.to_str()).unwrap_or("") == "jobcard" {
-                            Some(p.join("worktree"))
+                            Some(p.join("workspace"))
                         } else {
                             None
                         }
