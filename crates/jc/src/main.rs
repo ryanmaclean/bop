@@ -156,6 +156,11 @@ enum Command {
         #[command(subcommand)]
         action: ConfigAction,
     },
+    /// Generate shell completion script.
+    GenerateCompletion {
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1378,6 +1383,11 @@ async fn main() -> anyhow::Result<()> {
                 ConfigAction::Get { key } => cmd_config_get(&config_path, &key),
                 ConfigAction::Set { key, value } => cmd_config_set(&config_path, &key, &value),
             }
+        }
+        Command::GenerateCompletion { shell } => {
+            use clap::CommandFactory;
+            clap_complete::generate(shell, &mut Cli::command(), "jc", &mut std::io::stdout());
+            Ok(())
         }
     }
 }
@@ -2627,6 +2637,59 @@ fn find_git_root(start: &Path) -> Option<std::path::PathBuf> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ZellijMode {
+    Interactive, // $ZELLIJ set, stdout is a tty
+    Virtual,     // $ZELLIJ set, piped/headless
+    None,        // not in zellij
+}
+
+fn detect_zellij_mode() -> ZellijMode {
+    if std::env::var("ZELLIJ").is_err() {
+        return ZellijMode::None;
+    }
+    // Check if stdout is a tty
+    use std::os::unix::io::AsRawFd;
+    let is_tty = unsafe { libc::isatty(std::io::stdout().as_raw_fd()) } != 0;
+    if is_tty {
+        ZellijMode::Interactive
+    } else {
+        ZellijMode::Virtual
+    }
+}
+
+fn count_running_cards(cards_dir: &Path) -> usize {
+    let running = cards_dir.join("running");
+    std::fs::read_dir(&running)
+        .map(|d| {
+            d.filter_map(Result::ok)
+                .filter(|e| {
+                    e.path()
+                        .extension()
+                        .map(|x| x == "jobcard")
+                        .unwrap_or(false)
+                })
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+fn zellij_open_card_pane(card_id: &str, card_dir: &Path) {
+    let log = card_dir.join("logs").join("stdout.log");
+    let _ = std::process::Command::new("zellij")
+        .args([
+            "action",
+            "new-pane",
+            "--name",
+            card_id,
+            "--",
+            "tail",
+            "-f",
+            log.to_str().unwrap_or(""),
+        ])
+        .output();
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_dispatcher(
     cards_dir: &Path,
@@ -2698,6 +2761,17 @@ async fn run_dispatcher(
                         let ws_path = running_path.join("workspace");
                         if let Err(e) = jobcard_core::worktree::create_workspace(&jj_root, &ws_path) {
                             eprintln!("[dispatcher] jj workspace create failed: {e}");
+                        }
+                    }
+
+                    // Adaptive zellij pane management
+                    let zellij = detect_zellij_mode();
+                    let active = count_running_cards(cards_dir);
+                    if zellij == ZellijMode::Interactive {
+                        match active {
+                            0..=5 => zellij_open_card_pane(&name, &running_path),
+                            6..=20 => { /* team pane already open per layout */ }
+                            _ => { /* tier 3: status bar only */ }
                         }
                     }
 
@@ -3102,12 +3176,41 @@ async fn run_merge_gate(cards_dir: &Path, poll_ms: u64, once: bool) -> anyhow::R
 
                 let ws_path = card_dir.join("workspace");
                 if ws_path.exists() {
-                    // jj workspace detected — Task 3 will implement jj squash+push.
-                    // Leave card in done/ (do not promote to merged/) to prevent data loss.
-                    eprintln!("[merge-gate] jj workspace found for {name} — skipping until Task 3 implements jj merge");
+                    // Step 1: Squash agent changes from workspace into parent change.
+                    if let Err(e) = jobcard_core::worktree::squash_workspace(&ws_path) {
+                        let _ = fs::write(&qa_log, format!("jj squash failed: {e}\n").as_bytes());
+                        meta.failure_reason = Some("jj_squash_failed".to_string());
+                        let _ = write_meta(&card_dir, &meta);
+                        let _ = fs::rename(&card_dir, failed_dir.join(&name));
+                        continue;
+                    }
+
+                    // Step 2: Forget the workspace (clean up; data is in parent change).
+                    let jj_root = find_git_root(cards_dir).unwrap_or_else(|| cards_dir.to_path_buf());
+                    let _ = jobcard_core::worktree::forget_workspace(&jj_root, "workspace");
+
+                    // Step 3: Push stack to remote (best-effort; non-fatal if no remote).
+                    if let Err(e) = jobcard_core::worktree::push_stack(&jj_root, "origin") {
+                        eprintln!("[merge-gate] jj git push failed (no remote?): {e}");
+                    }
+
+                    // Step 4: Create stacked PR (best-effort; requires gh + GitHub remote).
+                    let pr_result = std::process::Command::new("gh")
+                        .args(["pr", "create", "--fill", "--draft"])
+                        .current_dir(cards_dir)
+                        .output();
+                    if let Ok(out) = pr_result {
+                        if !out.status.success() {
+                            eprintln!("[merge-gate] gh pr create failed (no remote?): {}",
+                                String::from_utf8_lossy(&out.stderr));
+                        }
+                    }
+
+                    let _ = write_meta(&card_dir, &meta);
+                    let _ = fs::rename(&card_dir, merged_dir.join(&name));
                     continue;
                 }
-                // No workspace: use legacy git merge path (or move directly to merged/).
+                // No workspace: move directly to merged (no VCS work).
 
                 let _ = write_meta(&card_dir, &meta);
                 let _ = fs::rename(&card_dir, merged_dir.join(&name));

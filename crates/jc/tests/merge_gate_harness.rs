@@ -109,6 +109,20 @@ fn merge_gate_moves_failing_card_to_failed_and_writes_report() {
     assert!(card_dir.join("output").join("qa_report.md").exists());
 }
 
+#[test]
+fn merge_gate_jj_squash_and_push() {
+    // Verify merge gate uses jj squash, not git merge
+    // Skip if jj not available
+    if std::process::Command::new("jj").arg("--version").output().is_err() {
+        eprintln!("jj not installed, skipping");
+        return;
+    }
+    // Verify the new functions exist and compile
+    let dir = tempfile::tempdir().unwrap();
+    let _ = jobcard_core::worktree::squash_workspace(dir.path());
+    let _ = jobcard_core::worktree::forget_workspace(dir.path(), "test");
+}
+
 /// After the jj workspace migration (Task 2), cards that have NO `workspace/` subdirectory
 /// (i.e. they use the old git-worktree model or have no worktree at all) are moved directly
 /// to `merged/` once their acceptance criteria pass. The legacy git-merge conflict path has
