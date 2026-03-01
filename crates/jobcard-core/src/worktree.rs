@@ -1,5 +1,5 @@
-use std::path::Path;
 use anyhow::{Context, Result};
+use std::path::Path;
 
 /// Create a git worktree at `wt_path` on branch `branch_name`.
 /// If the branch already exists, attaches the worktree to it.
@@ -118,7 +118,11 @@ mod tests {
             .current_dir(path)
             .output()
             .expect("git init failed");
-        assert!(out.status.success(), "git init: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "git init: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
 
         // Configure user identity
         std::process::Command::new("git")
@@ -138,7 +142,11 @@ mod tests {
             .current_dir(path)
             .output()
             .expect("initial commit failed");
-        assert!(out.status.success(), "init commit: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "init commit: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
 
         dir
     }
@@ -152,14 +160,18 @@ mod tests {
         let wt_path = wt_dir.path().join("my-worktree");
 
         // create_worktree should create the directory
-        create_worktree(repo_path, &wt_path, "feature/test-wt")
-            .expect("create_worktree failed");
-        assert!(wt_path.exists(), "worktree directory should exist after creation");
+        create_worktree(repo_path, &wt_path, "feature/test-wt").expect("create_worktree failed");
+        assert!(
+            wt_path.exists(),
+            "worktree directory should exist after creation"
+        );
 
         // remove_worktree should delete it
-        remove_worktree(repo_path, &wt_path)
-            .expect("remove_worktree failed");
-        assert!(!wt_path.exists(), "worktree directory should be gone after removal");
+        remove_worktree(repo_path, &wt_path).expect("remove_worktree failed");
+        assert!(
+            !wt_path.exists(),
+            "worktree directory should be gone after removal"
+        );
     }
 
     #[test]
@@ -171,16 +183,13 @@ mod tests {
         let wt_path = wt_dir.path().join("commit-wt");
 
         let branch = "feature/commit-test";
-        create_worktree(repo_path, &wt_path, branch)
-            .expect("create_worktree failed");
+        create_worktree(repo_path, &wt_path, branch).expect("create_worktree failed");
 
         // Write a file inside the worktree
-        fs::write(wt_path.join("hello.txt"), b"hello from worktree\n")
-            .expect("write file failed");
+        fs::write(wt_path.join("hello.txt"), b"hello from worktree\n").expect("write file failed");
 
         // Commit from inside the worktree
-        commit_worktree(&wt_path, "CARD-42")
-            .expect("commit_worktree failed");
+        commit_worktree(&wt_path, "CARD-42").expect("commit_worktree failed");
 
         // Verify the branch appears in `git branch` output
         let out = std::process::Command::new("git")
@@ -205,22 +214,17 @@ mod tests {
         let wt_path = wt_dir.path().join("merge-wt");
 
         let branch = "feature/merge-test";
-        create_worktree(repo_path, &wt_path, branch)
-            .expect("create_worktree failed");
+        create_worktree(repo_path, &wt_path, branch).expect("create_worktree failed");
 
         // Write and commit a file in the worktree
-        fs::write(wt_path.join("merged.txt"), b"merged content\n")
-            .expect("write file failed");
-        commit_worktree(&wt_path, "CARD-99")
-            .expect("commit_worktree failed");
+        fs::write(wt_path.join("merged.txt"), b"merged content\n").expect("write file failed");
+        commit_worktree(&wt_path, "CARD-99").expect("commit_worktree failed");
 
         // Remove the worktree before merging (not strictly required, but clean)
-        remove_worktree(repo_path, &wt_path)
-            .expect("remove_worktree failed");
+        remove_worktree(repo_path, &wt_path).expect("remove_worktree failed");
 
         // Merge the branch into main
-        let merged = merge_card_branch(repo_path, branch)
-            .expect("merge_card_branch failed");
+        let merged = merge_card_branch(repo_path, branch).expect("merge_card_branch failed");
         assert!(merged, "merge should succeed");
 
         // Verify the file now exists in the main repo working tree

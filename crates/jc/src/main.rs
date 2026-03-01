@@ -1,10 +1,10 @@
 use anyhow::Context;
 use async_stream::stream;
-use axum::extract::{Path as AxumPath, State};
+use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::{
     sse::{Event, Sse},
-    IntoResponse,
+    Html, IntoResponse,
 };
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::min;
 use std::collections::BTreeMap;
 use std::convert::Infallible;
+use std::fmt::Write as _;
 use std::fs;
 use std::io::{IsTerminal, Read, Seek, SeekFrom, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -50,6 +51,8 @@ struct Cli {
 }
 
 const DEFAULT_MEMORY_TTL_SECONDS: i64 = 60 * 60 * 24 * 30;
+const UI_SSE_POLL_MS: u64 = 1000;
+const UI_MAX_FILE_PREVIEW_BYTES: usize = 64 * 1024;
 
 #[derive(Subcommand, Debug)]
 enum Command {
@@ -149,6 +152,9 @@ enum Command {
         /// unauthenticated job control endpoints.
         #[arg(long, default_value = "127.0.0.1")]
         bind: String,
+        /// Serve the browser dashboard at /ui.
+        #[arg(long)]
+        ui: bool,
     },
 }
 
@@ -1262,7 +1268,7 @@ async fn main() -> anyhow::Result<()> {
             } => cmd_memory_set(&root, &namespace, &key, &value, ttl_seconds),
             MemoryCommand::Delete { namespace, key } => cmd_memory_delete(&root, &namespace, &key),
         },
-        Command::Serve { port, bind } => cmd_serve(&root, &bind, port).await,
+        Command::Serve { port, bind, ui } => cmd_serve(&root, &bind, port, ui).await,
     }
 }
 
@@ -1618,7 +1624,671 @@ async fn api_openapi() -> Json<utoipa::openapi::OpenApi> {
     Json(ApiDoc::openapi())
 }
 
-async fn cmd_serve(root: &Path, bind: &str, port: u16) -> anyhow::Result<()> {
+#[derive(Debug, Deserialize, Default)]
+struct UiEventsQuery {
+    #[serde(default)]
+    once: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct UiJobsEventPayload {
+    generated_at: String,
+    jobs: Vec<JobSummaryResponse>,
+}
+
+async fn ui_dashboard(State(state): State<ApiState>) -> Html<String> {
+    let jobs = list_jobs(&state.cards_dir);
+    let generated_at = Utc::now().to_rfc3339();
+    let pending_count = jobs.iter().filter(|job| job.state == "pending").count();
+    let running_count = jobs.iter().filter(|job| job.state == "running").count();
+    let done_count = jobs.iter().filter(|job| job.state == "done").count();
+    let failed_count = jobs.iter().filter(|job| job.state == "failed").count();
+    let merged_count = jobs.iter().filter(|job| job.state == "merged").count();
+    let rows = render_ui_job_rows(&jobs);
+
+    let body = format!(
+        r#"<section class="page-header">
+<h1>Job Dashboard</h1>
+<p class="muted">Last update: <span id="updated-at">{generated_at}</span> · <span id="live-status">live stream connecting...</span></p>
+<div class="chip-row">
+<span class="chip">pending {pending_count}</span>
+<span class="chip">running {running_count}</span>
+<span class="chip">done {done_count}</span>
+<span class="chip">failed {failed_count}</span>
+<span class="chip">merged {merged_count}</span>
+</div>
+</section>
+<noscript><p class="notice">JavaScript is disabled. The page still works server-side; refresh manually for updates.</p></noscript>
+<table>
+<thead>
+<tr>
+<th>Job</th>
+<th>State</th>
+<th>Stage</th>
+<th>Provider</th>
+<th>Created</th>
+<th>Retries</th>
+<th>Failure</th>
+</tr>
+</thead>
+<tbody id="jobs-body">
+{rows}
+</tbody>
+</table>"#,
+    );
+
+    let script = r#"<script>
+(() => {
+  const body = document.getElementById("jobs-body");
+  const updatedAt = document.getElementById("updated-at");
+  const liveStatus = document.getElementById("live-status");
+
+  function stateClass(state) {
+    if (state === "running") return "state-running";
+    if (state === "pending") return "state-pending";
+    if (state === "done") return "state-done";
+    if (state === "merged") return "state-merged";
+    if (state === "failed") return "state-failed";
+    return "state-unknown";
+  }
+
+  function toText(value) {
+    if (value === null || value === undefined || value === "") return "-";
+    return String(value);
+  }
+
+  function appendCell(row, valueOrNode) {
+    const cell = document.createElement("td");
+    if (valueOrNode instanceof Node) {
+      cell.appendChild(valueOrNode);
+    } else {
+      cell.textContent = toText(valueOrNode);
+    }
+    row.appendChild(cell);
+    return cell;
+  }
+
+  function renderRows(jobs) {
+    body.replaceChildren();
+    if (!Array.isArray(jobs) || jobs.length === 0) {
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = 7;
+      cell.className = "empty";
+      cell.textContent = "No jobs found.";
+      row.appendChild(cell);
+      body.appendChild(row);
+      return;
+    }
+
+    for (const job of jobs) {
+      const row = document.createElement("tr");
+      const link = document.createElement("a");
+      link.href = `/ui/jobs/${encodeURIComponent(job.id)}`;
+      link.textContent = toText(job.id);
+      appendCell(row, link);
+
+      const badge = document.createElement("span");
+      badge.className = `state-badge ${stateClass(job.state)}`;
+      badge.textContent = toText(job.state);
+      appendCell(row, badge);
+
+      appendCell(row, job.stage);
+      appendCell(row, job.provider || "-");
+      appendCell(row, job.created_at);
+      appendCell(row, job.retry_count ?? "-");
+      appendCell(row, job.failure_reason || "-");
+      body.appendChild(row);
+    }
+  }
+
+  const stream = new EventSource("/ui/events");
+  stream.addEventListener("jobs", (event) => {
+    const payload = JSON.parse(event.data);
+    renderRows(payload.jobs || []);
+    updatedAt.textContent = payload.generated_at || "";
+    const total = Array.isArray(payload.jobs) ? payload.jobs.length : 0;
+    liveStatus.textContent = `live (${total} jobs)`;
+  });
+  stream.onerror = () => {
+    liveStatus.textContent = "stream reconnecting...";
+  };
+})();
+</script>"#;
+
+    Html(render_ui_shell(
+        "jc Web UI",
+        &body,
+        r#"<noscript><meta http-equiv="refresh" content="5"></noscript>"#,
+        script,
+    ))
+}
+
+async fn ui_stream_jobs(
+    State(state): State<ApiState>,
+    Query(query): Query<UiEventsQuery>,
+) -> impl IntoResponse {
+    let cards_dir = state.cards_dir.clone();
+    let stream_once = query.once;
+    let stream = stream! {
+        loop {
+            let payload = UiJobsEventPayload {
+                generated_at: Utc::now().to_rfc3339(),
+                jobs: list_jobs(&cards_dir),
+            };
+            match serde_json::to_string(&payload) {
+                Ok(data) => yield Ok::<Event, Infallible>(Event::default().event("jobs").data(data)),
+                Err(err) => yield Ok::<Event, Infallible>(Event::default().event("error").data(err.to_string())),
+            }
+
+            if stream_once {
+                break;
+            }
+
+            tokio::time::sleep(Duration::from_millis(UI_SSE_POLL_MS)).await;
+        }
+    };
+
+    Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(Duration::from_secs(10))
+            .text("keep-alive"),
+    )
+}
+
+async fn ui_job_details(
+    State(state): State<ApiState>,
+    AxumPath(id): AxumPath<String>,
+) -> ApiResult<Html<String>> {
+    let card_dir = find_card(&state.cards_dir, &id)
+        .with_context(|| format!("card not found: {}", id))
+        .map_err(map_lookup_error)?;
+    let details = read_job_details(&state.cards_dir, &id).map_err(map_lookup_error)?;
+    let meta = jobcard_core::read_meta(&card_dir).map_err(map_lookup_error)?;
+    let logs = collect_text_files(&card_dir.join("logs"), "logs");
+    let output_files = collect_text_files(&card_dir.join("output"), "output");
+    let audit_lines = build_audit_trail(&meta, &details.job.state);
+    let meta_json =
+        serde_json::to_string_pretty(&details.meta).unwrap_or_else(|_| "{}".to_string());
+
+    let body = format!(
+        r#"<section class="page-header">
+<h1>Job: {id}</h1>
+<p class="muted">state: <span class="state-badge {state_class}">{state}</span> · stage: {stage} · provider: {provider}</p>
+</section>
+<section>
+<h2>Spec</h2>
+<pre>{spec}</pre>
+</section>
+<section>
+<h2>Logs</h2>
+{logs_section}
+</section>
+<section>
+<h2>Output</h2>
+{output_section}
+</section>
+<section>
+<h2>Audit Trail</h2>
+<pre>{audit}</pre>
+<details>
+<summary>raw meta.json</summary>
+<pre>{meta_json}</pre>
+</details>
+</section>"#,
+        id = escape_html(&details.job.id),
+        state = escape_html(&details.job.state),
+        stage = escape_html(&details.job.stage),
+        provider = escape_html(details.job.provider.as_deref().unwrap_or("-")),
+        state_class = ui_state_class(&details.job.state),
+        spec = escape_html(&details.spec),
+        logs_section = render_ui_file_sections(&logs, "No logs found."),
+        output_section = render_ui_file_sections(&output_files, "No output files found."),
+        audit = escape_html(&audit_lines.join("\n")),
+        meta_json = escape_html(&meta_json),
+    );
+
+    Ok(Html(render_ui_shell("jc Job Details", &body, "", "")))
+}
+
+async fn ui_providers(State(state): State<ApiState>) -> Html<String> {
+    let providers = read_providers(&state.cards_dir).unwrap_or_default();
+    let mut rows = String::new();
+    let now_epoch = Utc::now().timestamp();
+
+    for (name, provider) in &providers.providers {
+        let (status, cooldown_until) = provider_status(provider.cooldown_until_epoch_s, now_epoch);
+        let _ = write!(
+            rows,
+            "<tr><td>{}</td><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            escape_html(name),
+            escape_html(&provider.command),
+            provider.rate_limit_exit,
+            escape_html(&status),
+            escape_html(&cooldown_until)
+        );
+    }
+
+    if rows.is_empty() {
+        rows.push_str(r#"<tr><td colspan="5" class="empty">No providers configured.</td></tr>"#);
+    }
+
+    let default_provider = providers
+        .default_provider
+        .unwrap_or_else(|| "-".to_string());
+    let body = format!(
+        r#"<section class="page-header">
+<h1>Providers</h1>
+<p class="muted">default provider: <code>{}</code></p>
+</section>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Command</th>
+<th>Rate Limit Exit</th>
+<th>Status</th>
+<th>Cooldown Until (UTC)</th>
+</tr>
+</thead>
+<tbody>
+{}
+</tbody>
+</table>"#,
+        escape_html(&default_provider),
+        rows
+    );
+
+    Html(render_ui_shell("jc Providers", &body, "", ""))
+}
+
+fn render_ui_shell(title: &str, body: &str, head_extra: &str, script_extra: &str) -> String {
+    format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+{head_extra}
+<style>
+:root {{
+  --bg: #f2f4f7;
+  --surface: #ffffff;
+  --ink: #0f172a;
+  --muted: #5b6573;
+  --line: #d7dde5;
+  --accent: #0f766e;
+  --warn: #b45309;
+  --ok: #166534;
+  --bad: #991b1b;
+}}
+* {{ box-sizing: border-box; }}
+body {{
+  margin: 0;
+  background: linear-gradient(160deg, #f9fbfd 0%, #eef2f6 100%);
+  color: var(--ink);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}}
+main {{
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1rem;
+}}
+nav {{
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}}
+nav .inner {{
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0.75rem 1rem;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}}
+nav a {{
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}}
+section {{
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}}
+.page-header {{
+  background: linear-gradient(135deg, #ffffff 0%, #eef7f5 100%);
+}}
+.chip-row {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}}
+.chip {{
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #f8fafc;
+  font-size: 0.9rem;
+}}
+.muted {{
+  color: var(--muted);
+  margin: 0;
+}}
+.notice {{
+  margin: 0.5rem 0 0;
+  color: var(--warn);
+}}
+table {{
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}}
+th, td {{
+  border-bottom: 1px solid var(--line);
+  padding: 0.6rem;
+  text-align: left;
+  vertical-align: top;
+  font-size: 0.95rem;
+}}
+th {{
+  background: #f5f9fc;
+}}
+tr:last-child td {{
+  border-bottom: 0;
+}}
+.empty {{
+  color: var(--muted);
+  text-align: center;
+  padding: 1rem;
+}}
+pre {{
+  margin: 0;
+  padding: 0.75rem;
+  background: #0b1020;
+  color: #e2e8f0;
+  border-radius: 8px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}}
+details {{
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+}}
+details > summary {{
+  cursor: pointer;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}}
+.state-badge {{
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.85rem;
+  font-weight: 600;
+}}
+.state-running {{ color: #075985; background: #e0f2fe; border-color: #7dd3fc; }}
+.state-pending {{ color: #92400e; background: #fef3c7; border-color: #fcd34d; }}
+.state-done {{ color: var(--ok); background: #dcfce7; border-color: #86efac; }}
+.state-merged {{ color: #6d28d9; background: #ede9fe; border-color: #c4b5fd; }}
+.state-failed {{ color: var(--bad); background: #fee2e2; border-color: #fca5a5; }}
+.state-unknown {{ color: #334155; background: #e2e8f0; border-color: #cbd5e1; }}
+@media (max-width: 800px) {{
+  th, td {{ font-size: 0.85rem; padding: 0.45rem; }}
+  nav .inner {{ flex-wrap: wrap; }}
+}}
+</style>
+</head>
+<body>
+<nav>
+  <div class="inner">
+    <a href="/ui">Dashboard</a>
+    <a href="/ui/providers">Providers</a>
+    <a href="/openapi.json">OpenAPI</a>
+  </div>
+</nav>
+<main>
+{body}
+</main>
+{script_extra}
+</body>
+</html>"#,
+        title = escape_html(title),
+        body = body,
+        head_extra = head_extra,
+        script_extra = script_extra,
+    )
+}
+
+fn render_ui_job_rows(jobs: &[JobSummaryResponse]) -> String {
+    let mut rows = String::new();
+    for job in jobs {
+        let id = escape_html(&job.id);
+        let id_href = percent_encode_path_segment(&job.id);
+        let provider = escape_html(job.provider.as_deref().unwrap_or("-"));
+        let failure_reason = escape_html(job.failure_reason.as_deref().unwrap_or("-"));
+        let retry_count = job
+            .retry_count
+            .map(|count| count.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let _ = write!(
+            rows,
+            "<tr>\
+<td><a href=\"/ui/jobs/{id_href}\">{id}</a></td>\
+<td><span class=\"state-badge {state_class}\">{state}</span></td>\
+<td>{stage}</td>\
+<td>{provider}</td>\
+<td>{created}</td>\
+<td>{retry_count}</td>\
+<td>{failure_reason}</td>\
+</tr>",
+            state_class = ui_state_class(&job.state),
+            state = escape_html(&job.state),
+            stage = escape_html(&job.stage),
+            created = escape_html(&job.created_at),
+            retry_count = escape_html(&retry_count),
+        );
+    }
+
+    if rows.is_empty() {
+        rows.push_str(r#"<tr><td colspan="7" class="empty">No jobs found.</td></tr>"#);
+    }
+    rows
+}
+
+fn render_ui_file_sections(files: &BTreeMap<String, String>, empty_message: &str) -> String {
+    if files.is_empty() {
+        return format!(r#"<p class="muted">{}</p>"#, escape_html(empty_message));
+    }
+
+    let mut out = String::new();
+    for (name, content) in files {
+        let _ = write!(
+            out,
+            "<details><summary>{}</summary><pre>{}</pre></details>",
+            escape_html(name),
+            escape_html(content)
+        );
+    }
+    out
+}
+
+fn collect_text_files(dir: &Path, prefix: &str) -> BTreeMap<String, String> {
+    let mut files = BTreeMap::new();
+    if !dir.exists() {
+        return files;
+    }
+
+    for entry in WalkDir::new(dir).min_depth(1).into_iter().flatten() {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        let path = entry.path();
+        let rel = match path.strip_prefix(dir) {
+            Ok(rel) => rel,
+            Err(_) => continue,
+        };
+        let key = format!("{}/{}", prefix, rel.to_string_lossy());
+        let bytes = match fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(_) => continue,
+        };
+
+        let (shown, truncated) = if bytes.len() > UI_MAX_FILE_PREVIEW_BYTES {
+            (&bytes[..UI_MAX_FILE_PREVIEW_BYTES], true)
+        } else {
+            (&bytes[..], false)
+        };
+        let mut content = String::from_utf8_lossy(shown).to_string();
+        if truncated {
+            let _ = write!(
+                content,
+                "\n\n[truncated: showing first {} bytes of {}]",
+                UI_MAX_FILE_PREVIEW_BYTES,
+                bytes.len()
+            );
+        }
+        files.insert(key, content);
+    }
+    files
+}
+
+fn build_audit_trail(meta: &Meta, state: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    lines.push(format!("created: {}", meta.created.to_rfc3339()));
+    lines.push(format!("current_state: {}", state));
+    lines.push(format!("current_stage: {}", meta.stage));
+
+    for (stage, record) in &meta.stages {
+        let started = record
+            .started
+            .as_ref()
+            .map(DateTime::<Utc>::to_rfc3339)
+            .unwrap_or_else(|| "-".to_string());
+        let duration = record
+            .duration_s
+            .map(|seconds| format!("{}s", seconds))
+            .unwrap_or_else(|| "-".to_string());
+        lines.push(format!(
+            "stage={} status={} provider={} agent={} started={} duration={}",
+            stage,
+            stage_status_label(&record.status),
+            record.provider.as_deref().unwrap_or("-"),
+            record.agent.as_deref().unwrap_or("-"),
+            started,
+            duration
+        ));
+    }
+
+    if let Some(retry_count) = meta.retry_count {
+        lines.push(format!("retry_count: {}", retry_count));
+    }
+    if let Some(reason) = &meta.failure_reason {
+        lines.push(format!("failure_reason: {}", reason));
+    }
+    if let Some(summary) = &meta.validation_summary {
+        lines.push(format!(
+            "validation: badge={} valid={}/{} invalid={} alerts={} critical={} health={:?}",
+            summary.badge(),
+            summary.valid,
+            summary.total,
+            summary.invalid,
+            summary.alert_count,
+            summary.critical_alerts,
+            summary.health
+        ));
+    }
+    if !meta.acceptance_criteria.is_empty() {
+        lines.push("acceptance_criteria:".to_string());
+        for criterion in &meta.acceptance_criteria {
+            lines.push(format!("  - {}", criterion));
+        }
+    }
+
+    lines
+}
+
+fn stage_status_label(status: &jobcard_core::StageStatus) -> &'static str {
+    match status {
+        jobcard_core::StageStatus::Pending => "pending",
+        jobcard_core::StageStatus::Running => "running",
+        jobcard_core::StageStatus::Done => "done",
+        jobcard_core::StageStatus::Blocked => "blocked",
+        jobcard_core::StageStatus::Failed => "failed",
+    }
+}
+
+fn provider_status(cooldown_until_epoch_s: Option<i64>, now_epoch: i64) -> (String, String) {
+    match cooldown_until_epoch_s {
+        Some(until) if until > now_epoch => {
+            let remaining = until.saturating_sub(now_epoch);
+            (
+                format!("cooldown ({}s)", remaining),
+                format_epoch_utc(until),
+            )
+        }
+        Some(until) => ("ready".to_string(), format_epoch_utc(until)),
+        None => ("ready".to_string(), "-".to_string()),
+    }
+}
+
+fn format_epoch_utc(epoch_s: i64) -> String {
+    DateTime::<Utc>::from_timestamp(epoch_s, 0)
+        .map(|dt| dt.to_rfc3339())
+        .unwrap_or_else(|| epoch_s.to_string())
+}
+
+fn ui_state_class(state: &str) -> &'static str {
+    match state {
+        "running" => "state-running",
+        "pending" => "state-pending",
+        "done" => "state-done",
+        "merged" => "state-merged",
+        "failed" => "state-failed",
+        _ => "state-unknown",
+    }
+}
+
+fn escape_html(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+fn percent_encode_path_segment(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            let _ = write!(out, "%{:02X}", byte);
+        }
+    }
+    out
+}
+
+async fn cmd_serve(root: &Path, bind: &str, port: u16, ui: bool) -> anyhow::Result<()> {
     ensure_cards_layout(root)?;
     seed_default_templates(root)?;
     seed_providers(root)?;
@@ -1635,18 +2305,29 @@ async fn cmd_serve(root: &Path, bind: &str, port: u16) -> anyhow::Result<()> {
         cards_dir: root.to_path_buf(),
     };
 
-    let app = Router::new()
+    let mut app = Router::new()
         .route("/jobs", get(api_list_jobs).post(api_create_job))
         .route("/jobs/:id", get(api_get_job).delete(api_kill_job))
         .route("/jobs/:id/retry", post(api_retry_job))
         .route("/jobs/:id/output", get(api_get_job_output))
         .route("/jobs/:id/logs", get(api_stream_logs))
-        .route("/openapi.json", get(api_openapi))
-        .layer(CorsLayer::permissive())
-        .with_state(state);
+        .route("/openapi.json", get(api_openapi));
+
+    if ui {
+        app = app
+            .route("/ui", get(ui_dashboard))
+            .route("/ui/events", get(ui_stream_jobs))
+            .route("/ui/jobs/:id", get(ui_job_details))
+            .route("/ui/providers", get(ui_providers));
+    }
+
+    let app = app.layer(CorsLayer::permissive()).with_state(state);
 
     let listener = TcpListener::bind(addr).await?;
     println!("REST API listening on http://{}:{}/", bind, port);
+    if ui {
+        println!("Web UI listening on http://{}:{}/ui", bind, port);
+    }
     axum::serve(listener, app).await?;
     Ok(())
 }
