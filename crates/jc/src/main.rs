@@ -156,6 +156,24 @@ enum Command {
         #[arg(long)]
         ui: bool,
     },
+    /// Manage git worktrees associated with job cards.
+    Worktree {
+        #[command(subcommand)]
+        action: WorktreeAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum WorktreeAction {
+    /// List all job card worktrees and flag orphans.
+    List,
+    /// Create a git worktree for a pending or running job card.
+    Create { id: String },
+    /// Remove worktrees for done/merged cards or orphaned git worktrees.
+    Clean {
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1269,6 +1287,11 @@ async fn main() -> anyhow::Result<()> {
             MemoryCommand::Delete { namespace, key } => cmd_memory_delete(&root, &namespace, &key),
         },
         Command::Serve { port, bind, ui } => cmd_serve(&root, &bind, port, ui).await,
+        Command::Worktree { action } => match action {
+            WorktreeAction::List => cmd_worktree_list(&root),
+            WorktreeAction::Create { id } => cmd_worktree_create(&root, &id),
+            WorktreeAction::Clean { dry_run } => cmd_worktree_clean(&root, dry_run),
+        },
     }
 }
 
@@ -4147,4 +4170,16 @@ fn load_feed_config(card_dir: &Path) -> jobcard_core::realtime::FeedConfig {
             value_ranges: std::collections::HashMap::new(),
         },
     }
+}
+
+fn cmd_worktree_list(_root: &Path) -> anyhow::Result<()> {
+    todo!()
+}
+
+fn cmd_worktree_create(_root: &Path, _id: &str) -> anyhow::Result<()> {
+    todo!()
+}
+
+fn cmd_worktree_clean(_root: &Path, _dry_run: bool) -> anyhow::Result<()> {
+    todo!()
 }
