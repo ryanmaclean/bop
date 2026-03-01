@@ -3413,11 +3413,7 @@ fn spawn_child_cards(cards_dir: &Path, done_card_dir: &Path) {
         if let Some(desc) = entry["description"].as_str() {
             let _ = fs::write(
                 child_dir.join("spec.md"),
-                format!(
-                    "# {}\n\n{}\n",
-                    entry["title"].as_str().unwrap_or(id),
-                    desc
-                ),
+                format!("# {}\n\n{}\n", entry["title"].as_str().unwrap_or(id), desc),
             );
         }
 
