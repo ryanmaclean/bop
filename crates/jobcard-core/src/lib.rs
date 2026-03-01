@@ -1,4 +1,5 @@
 pub mod realtime;
+pub mod worktree;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
