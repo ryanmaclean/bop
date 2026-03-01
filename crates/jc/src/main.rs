@@ -1252,6 +1252,24 @@ async fn main() -> anyhow::Result<()> {
             ensure_cards_layout(&root)?;
             seed_default_templates(&root)?;
             seed_providers(&root)?;
+            // Create config with sensible defaults if it doesn't exist
+            let config_path = resolve_config_path();
+            if !config_path.exists() {
+                let defaults = jobcard_core::Config {
+                    default_provider_chain: Some(vec!["mock".to_string()]),
+                    max_concurrent: Some(1),
+                    cooldown_seconds: Some(300),
+                    log_retention_days: Some(30),
+                    default_template: Some("implement".to_string()),
+                };
+                jobcard_core::config::write_config_file(&config_path, &defaults)
+                    .with_context(|| {
+                        format!(
+                            "failed to create default config at {}",
+                            config_path.display()
+                        )
+                    })?;
+            }
             Ok(())
         }
         Command::New { template, id } => {
