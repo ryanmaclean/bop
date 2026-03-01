@@ -73,7 +73,6 @@ pub struct Meta {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_reason: Option<String>,
-
 }
 
 impl Meta {

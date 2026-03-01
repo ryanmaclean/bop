@@ -1,10 +1,8 @@
 use anyhow::Context;
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use chrono::Utc;
 use clap::{Parser, Subcommand};
 use jobcard_core::{write_meta, Meta};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::fmt::Write as _;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -58,7 +56,6 @@ enum Command {
 
         #[arg(long)]
         once: bool,
-
     },
     MergeGate {
         #[arg(long, default_value_t = 500)]
@@ -1360,11 +1357,6 @@ fn find_card(root: &Path, id: &str) -> Option<PathBuf> {
     None
 }
 
-
-// ---------------------------------------------------------------------------
-// Config subcommands
-// ---------------------------------------------------------------------------
-
 /// Return the config path: JOBCARD_CONFIG env var if set, else project config path.
 fn resolve_config_path() -> PathBuf {
     if let Ok(p) = std::env::var("JOBCARD_CONFIG") {
@@ -1372,4 +1364,3 @@ fn resolve_config_path() -> PathBuf {
     }
     jobcard_core::config::project_config_path()
 }
-
