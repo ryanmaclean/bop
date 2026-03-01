@@ -15,7 +15,9 @@ pub struct Config {
 /// Merge `overlay` on top of `base`.  Non-None overlay values win.
 pub fn merge_configs(base: Config, overlay: Config) -> Config {
     Config {
-        default_provider_chain: overlay.default_provider_chain.or(base.default_provider_chain),
+        default_provider_chain: overlay
+            .default_provider_chain
+            .or(base.default_provider_chain),
         max_concurrent: overlay.max_concurrent.or(base.max_concurrent),
         cooldown_seconds: overlay.cooldown_seconds.or(base.cooldown_seconds),
         log_retention_days: overlay.log_retention_days.or(base.log_retention_days),
@@ -52,8 +54,9 @@ pub fn project_config_path() -> PathBuf {
 /// Returns merged Config and emits a clear error for malformed YAML.
 pub fn load_config() -> anyhow::Result<Config> {
     let global = match global_config_path() {
-        Some(p) if p.exists() => read_config_file(&p)
-            .with_context(|| format!("global config error: {}", p.display()))?,
+        Some(p) if p.exists() => {
+            read_config_file(&p).with_context(|| format!("global config error: {}", p.display()))?
+        }
         _ => Config::default(),
     };
 
