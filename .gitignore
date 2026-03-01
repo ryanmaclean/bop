@@ -13,3 +13,6 @@
 # Logs
 *.log
 /tmp/jobcard-*.log
+
+# Local agent worktrees / scratch
+.claude/
