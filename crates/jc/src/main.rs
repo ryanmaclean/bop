@@ -3197,7 +3197,7 @@ async fn run_merge_gate(cards_dir: &Path, poll_ms: u64, once: bool) -> anyhow::R
                     // Step 4: Create stacked PR (best-effort; requires gh + GitHub remote).
                     let pr_result = std::process::Command::new("gh")
                         .args(["pr", "create", "--fill", "--draft"])
-                        .current_dir(cards_dir)
+                        .current_dir(&jj_root)
                         .output();
                     if let Ok(out) = pr_result {
                         if !out.status.success() {
