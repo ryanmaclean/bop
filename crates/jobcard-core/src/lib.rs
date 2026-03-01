@@ -202,6 +202,8 @@ pub struct PromptContext {
     pub provider: String,
     pub agent: String,
     pub memory: String,
+    /// Prepended verbatim before the template. Load from `.cards/system_context.md`.
+    pub system_context: String,
 }
 
 impl PromptContext {
@@ -215,6 +217,15 @@ impl PromptContext {
             meta.acceptance_criteria.join("\n")
         };
 
+        // Walk up from card_dir to find .cards/system_context.md
+        let system_context = card_dir
+            .ancestors()
+            .find_map(|p| {
+                let candidate = p.join("system_context.md");
+                fs::read_to_string(&candidate).ok()
+            })
+            .unwrap_or_default();
+
         Ok(Self {
             spec,
             plan,
@@ -223,13 +234,15 @@ impl PromptContext {
             provider: String::new(),
             agent: meta.agent_type.clone().unwrap_or_default(),
             memory: String::new(),
+            system_context,
         })
     }
 }
 
-/// Very small template renderer supporting {{spec}}, {{plan}}, {{stage}},
+/// Template renderer supporting {{spec}}, {{plan}}, {{stage}},
 /// {{acceptance_criteria}}, {{provider}}, {{agent}}, {{memory}}.
 ///
+/// If `ctx.system_context` is non-empty it is prepended before the template.
 /// If the template has no {{...}} markers, it is returned unchanged.
 pub fn render_prompt(template: &str, ctx: &PromptContext) -> String {
     let mut out = template.to_string();
@@ -240,7 +253,11 @@ pub fn render_prompt(template: &str, ctx: &PromptContext) -> String {
     out = out.replace("{{provider}}", &ctx.provider);
     out = out.replace("{{agent}}", &ctx.agent);
     out = out.replace("{{memory}}", &ctx.memory);
-    out
+    if ctx.system_context.is_empty() {
+        out
+    } else {
+        format!("{}\n\n---\n\n{}", ctx.system_context.trim_end(), out)
+    }
 }
 
 #[cfg(test)]
@@ -257,6 +274,7 @@ mod tests {
             provider: "mock".to_string(),
             agent: "agent".to_string(),
             memory: "k: v".to_string(),
+            system_context: String::new(),
         };
 
         let rendered = render_prompt("Memory:\n{{memory}}\n", &ctx);

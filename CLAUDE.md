@@ -2,6 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Skills
+
+Three skills provide orientation for this repo — invoke before working:
+- `jobcard-system` — what jc is, card lifecycle, GTFS disambiguation
+- `vibekanban` — Quick Look cards, Zellij plugin, glyph system, SwiftUI card anatomy
+- `unicode-glyphs` — playing card encoding, BMP/SMP safety, font recommendations
+
+## System context for dispatched agents
+
+`.cards/system_context.md` is auto-prepended to every agent prompt by
+`PromptContext::from_files`. Edit it to orient agents without touching templates.
+
 ## Commands
 
 ```bash
