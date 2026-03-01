@@ -16,3 +16,4 @@
 
 # Local agent worktrees / scratch
 .claude/
+.worktrees/

@@ -25,7 +25,7 @@
   <array>
     <dict>
       <key>UTTypeIdentifier</key>
-      <string>com.yourorg.jobcard</string>
+      <string>sh.bop.card</string>
       <key>UTTypeDescription</key>
       <string>Agent Job Card</string>
       <key>UTTypeConformsTo</key>
@@ -50,7 +50,7 @@
       <string>Agent Job Card</string>
       <key>LSItemContentTypes</key>
       <array>
-        <string>com.yourorg.jobcard</string>
+        <string>sh.bop.card</string>
       </array>
       <key>LSHandlerRank</key>
       <string>Owner</string>

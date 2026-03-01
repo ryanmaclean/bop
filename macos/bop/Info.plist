@@ -9,7 +9,7 @@
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.yourorg.JobCardHost.QuickLook</string>
+	<string>sh.bop.ql</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -30,7 +30,7 @@
 			<false/>
 			<key>QLSupportedContentTypes</key>
 			<array>
-				<string>com.yourorg.jobcard</string>
+				<string>sh.bop.card</string>
 			</array>
 			<key>QLSupportsSearchableItems</key>
 			<false/>
