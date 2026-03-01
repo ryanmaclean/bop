@@ -1,0 +1,12 @@
+{
+  "providers": {
+    "claude": {
+      "command": "/Users/studio/gtfs/adapters/claude.zsh",
+      "rate_limit_exit": 75
+    },
+    "mock": {
+      "command": "adapters/mock.zsh",
+      "rate_limit_exit": 75
+    }
+  }
+}

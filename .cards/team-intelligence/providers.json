@@ -1,0 +1,12 @@
+{
+  "providers": {
+    "mock": {
+      "command": "/Users/studio/gtfs/adapters/opencode.zsh",
+      "rate_limit_exit": 75
+    },
+    "opencode": {
+      "command": "/Users/studio/gtfs/adapters/opencode.zsh",
+      "rate_limit_exit": 75
+    }
+  }
+}

@@ -21,7 +21,7 @@ sleep 0.5
 
 echo "Launching dispatchers in zellij session: $SESSION"
 
-for i in {1..${#TEAMS[@]}}; do
+for (( i = 1; i <= ${#TEAMS}; i++ )); do
   IFS=':' read -r team_name adapter_name adapter_path <<< "${TEAMS[$i]}"
   cards_dir="$ROOT/.cards/$team_name"
   log_file="/tmp/jobcard-$team_name.log"
