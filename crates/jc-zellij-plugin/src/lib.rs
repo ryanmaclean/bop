@@ -3,10 +3,9 @@ use zellij_tile::prelude::*;
 
 #[derive(Default)]
 struct JobCardPlugin {
-    /// team_name → (running, pending, done_or_merged)
-    counts: BTreeMap<String, (usize, usize, usize)>,
+    /// team_name → (running, pending, done_or_merged, failed)
+    counts: BTreeMap<String, (usize, usize, usize, usize)>,
     cards_dir: String,
-    initialized: bool,
 }
 
 register_plugin!(JobCardPlugin);
@@ -19,6 +18,7 @@ impl ZellijPlugin for JobCardPlugin {
             .unwrap_or_else(|| ".cards".to_string());
         subscribe(&[EventType::Timer]);
         set_timeout(2.0);
+        self.refresh_counts();
     }
 
     fn update(&mut self, event: Event) -> bool {
@@ -31,20 +31,17 @@ impl ZellijPlugin for JobCardPlugin {
     }
 
     fn render(&mut self, _rows: usize, cols: usize) {
-        if !self.initialized {
-            self.refresh_counts();
-            self.initialized = true;
-        }
-
         let mut parts: Vec<String> = self
             .counts
             .iter()
-            .map(|(team, &(running, pending, done))| {
+            .map(|(team, &(running, pending, done, failed))| {
                 let short = team.strip_prefix("team-").unwrap_or(team);
                 let indicator = if running > 0 {
                     format!("{}\u{25b6}", running) // ▶
                 } else if pending > 0 {
                     format!("{}·", pending)
+                } else if failed > 0 {
+                    format!("{}✗", failed)
                 } else {
                     format!("{}✓", done)
                 };
@@ -53,21 +50,25 @@ impl ZellijPlugin for JobCardPlugin {
             .collect();
 
         // Totals summary
-        let total_running: usize = self.counts.values().map(|&(r, _, _)| r).sum();
-        let total_pending: usize = self.counts.values().map(|&(_, p, _)| p).sum();
-        let total_done: usize = self.counts.values().map(|&(_, _, d)| d).sum();
+        let total_running: usize = self.counts.values().map(|&(r, _, _, _)| r).sum();
+        let total_pending: usize = self.counts.values().map(|&(_, p, _, _)| p).sum();
+        let total_done: usize = self.counts.values().map(|&(_, _, d, _)| d).sum();
+        let total_failed: usize = self.counts.values().map(|&(_, _, _, f)| f).sum();
 
         if !parts.is_empty() {
             parts.push(format!(
-                "| {}▶ {}· {}✓",
-                total_running, total_pending, total_done
+                "| {}▶ {}· {}✓ {}✗",
+                total_running, total_pending, total_done, total_failed
             ));
         }
 
-        let bar = parts.join("  ");
-        // Truncate to available columns
-        let display = if bar.len() > cols { &bar[..cols] } else { &bar };
-        print!("{}", display);
+        let mut bar = parts.join("  ");
+        // Truncate to available columns using char boundaries to avoid
+        // panicking mid-multi-byte character (▶ = 3 bytes, · = 2, ✓ = 3).
+        if bar.chars().count() > cols {
+            bar = bar.chars().take(cols).collect();
+        }
+        print!("{}", bar);
     }
 }
 
@@ -76,7 +77,9 @@ impl JobCardPlugin {
         self.counts.clear();
         let base = std::path::Path::new(&self.cards_dir);
 
-        let Ok(teams) = std::fs::read_dir(base) else {
+        let Ok(teams) = std::fs::read_dir(base)
+            .map_err(|e| eprintln!("[jobcard-plugin] failed to read cards_dir {:?}: {e}", base))
+        else {
             return;
         };
 
@@ -94,8 +97,9 @@ impl JobCardPlugin {
             let mut running = 0usize;
             let mut pending = 0usize;
             let mut done = 0usize;
+            let mut failed = 0usize;
 
-            for state in ["running", "pending", "done", "merged"] {
+            for state in ["running", "pending", "done", "merged", "failed"] {
                 let dir = path.join(state);
                 if let Ok(cards) = std::fs::read_dir(&dir) {
                     let count = cards
@@ -111,13 +115,14 @@ impl JobCardPlugin {
                         "running" => running += count,
                         "pending" => pending += count,
                         "done" | "merged" => done += count,
+                        "failed" => failed += count,
                         _ => {}
                     }
                 }
             }
 
-            if running > 0 || pending > 0 || done > 0 {
-                self.counts.insert(team_name, (running, pending, done));
+            if running > 0 || pending > 0 || done > 0 || failed > 0 {
+                self.counts.insert(team_name, (running, pending, done, failed));
             }
         }
     }
