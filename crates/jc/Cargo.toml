@@ -17,14 +17,8 @@ serde.workspace = true
 notify = "8.2.0"
 crossterm = "0.29"
 ratatui = "0.29"
-axum = "0.7"
-tower = "0.5"
-tower-http = { version = "0.6", features = ["cors"] }
-async-stream = "0.3"
-utoipa = { version = "5", features = ["chrono"] }
 
 [dev-dependencies]
 tempfile = "3"
-reqwest = { version = "0.12", features = ["blocking", "json"] }
 chrono.workspace = true
 serde_json.workspace = true
