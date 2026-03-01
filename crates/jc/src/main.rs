@@ -10,16 +10,29 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use clap::{Parser, Subcommand};
+use crossterm::{
+    event::{self, Event as CEvent, KeyCode, KeyEventKind},
+    execute,
+    terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
+};
 use jobcard_core::{write_meta, Meta};
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap};
+use ratatui::{Frame, Terminal};
 use serde::{Deserialize, Serialize};
+use std::cmp::min;
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::fs;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{IsTerminal, Read, Seek, SeekFrom, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
-use std::time::Duration;
+use std::sync::mpsc;
+use std::time::{Duration, Instant, SystemTime};
 use tokio::net::TcpListener;
 use tokio::process::Command as TokioCommand;
 use tower_http::cors::CorsLayer;
@@ -323,8 +336,10 @@ fn seed_providers(cards_dir: &Path) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let mut pf = ProvidersFile::default();
-    pf.default_provider = Some("mock".to_string());
+    let mut pf = ProvidersFile {
+        default_provider: Some("mock".to_string()),
+        ..Default::default()
+    };
     pf.providers.insert(
         "mock".to_string(),
         Provider {
@@ -1130,6 +1145,17 @@ fn cmd_memory_delete(root: &Path, namespace: &str, key: &str) -> anyhow::Result<
     Ok(())
 }
 
+fn print_status_summary(root: &Path) -> anyhow::Result<()> {
+    for dir in ["pending", "running", "done", "merged", "failed"] {
+        let p = root.join(dir);
+        if p.exists() {
+            let count = fs::read_dir(&p).map(|rd| rd.count()).unwrap_or(0);
+            println!("{}\t{}", dir, count);
+        }
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -1153,14 +1179,7 @@ async fn main() -> anyhow::Result<()> {
         } => cmd_create_from_description(&root, &from_description, id.as_deref(), yes).await,
         Command::Status { id } => {
             if id.trim().is_empty() {
-                for dir in ["pending", "running", "done", "merged", "failed"] {
-                    let p = root.join(dir);
-                    if p.exists() {
-                        let count = fs::read_dir(&p).map(|rd| rd.count()).unwrap_or(0);
-                        println!("{}\t{}", dir, count);
-                    }
-                }
-                return Ok(());
+                return print_status_summary(&root);
             }
 
             let card = find_card(&root, &id).context("card not found")?;
@@ -1183,6 +1202,7 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&meta)?);
             Ok(())
         }
+        Command::Dashboard => cmd_dashboard(&root).await,
         Command::Validate { id, realtime } => {
             let card = find_card(&root, &id).context("card not found")?;
             let _ = jobcard_core::read_meta(&card)?;
@@ -1755,7 +1775,7 @@ fn job_summary_from_meta(state: &str, meta: &Meta) -> JobSummaryResponse {
     let stage_record = meta.stages.get(&meta.stage);
     let started_dt = stage_record.and_then(|rec| rec.started.as_ref().cloned());
     let duration_secs = stage_record.and_then(|rec| rec.duration_s);
-    let finished_at = match (started_dt.clone(), duration_secs) {
+    let finished_at = match (started_dt, duration_secs) {
         (Some(started), Some(duration)) => i64::try_from(duration)
             .ok()
             .map(|secs| (started + ChronoDuration::seconds(secs)).to_rfc3339()),
@@ -1798,6 +1818,667 @@ fn read_new_log_chunk(path: &Path, position: &mut u64) -> anyhow::Result<Option<
     } else {
         Ok(Some(String::from_utf8_lossy(&buf).to_string()))
     }
+}
+
+const DASHBOARD_MIN_WIDTH: u16 = 80;
+const DASHBOARD_MIN_HEIGHT: u16 = 20;
+const DASHBOARD_TICK_MS: u64 = 250;
+const DASHBOARD_LOG_TAIL_BYTES: u64 = 8192;
+const DASHBOARD_MAX_LOG_LINES: usize = 4000;
+const DASHBOARD_MAX_LAST_LOG_CHARS: usize = 120;
+
+#[derive(Debug, Clone)]
+struct DashboardJob {
+    id: String,
+    state: String,
+    provider: String,
+    elapsed: String,
+    last_log_line: String,
+    card_dir: PathBuf,
+    created: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Default)]
+enum DashboardMode {
+    #[default]
+    Table,
+    Logs(LogViewState),
+}
+
+#[derive(Debug, Clone)]
+struct LogViewState {
+    job_id: String,
+    card_dir: PathBuf,
+    stdout_pos: u64,
+    stderr_pos: u64,
+    stdout_partial: String,
+    stderr_partial: String,
+    lines: Vec<String>,
+    scroll: usize,
+    follow: bool,
+}
+
+impl LogViewState {
+    fn new(job: &DashboardJob) -> Self {
+        Self {
+            job_id: job.id.clone(),
+            card_dir: job.card_dir.clone(),
+            stdout_pos: 0,
+            stderr_pos: 0,
+            stdout_partial: String::new(),
+            stderr_partial: String::new(),
+            lines: Vec::new(),
+            scroll: 0,
+            follow: true,
+        }
+    }
+
+    fn refresh(&mut self, root: &Path) -> anyhow::Result<()> {
+        if let Some(card_dir) = find_card(root, &self.job_id) {
+            self.card_dir = card_dir;
+        }
+
+        let stdout_path = self.card_dir.join("logs").join("stdout.log");
+        let stderr_path = self.card_dir.join("logs").join("stderr.log");
+
+        if let Some(chunk) = read_new_log_chunk(&stdout_path, &mut self.stdout_pos)? {
+            Self::append_chunk_lines(
+                &mut self.lines,
+                &mut self.stdout_partial,
+                "stdout",
+                chunk.as_str(),
+            );
+        }
+        if let Some(chunk) = read_new_log_chunk(&stderr_path, &mut self.stderr_pos)? {
+            Self::append_chunk_lines(
+                &mut self.lines,
+                &mut self.stderr_partial,
+                "stderr",
+                chunk.as_str(),
+            );
+        }
+
+        self.trim_line_buffer();
+        Ok(())
+    }
+
+    fn append_chunk_lines(
+        lines: &mut Vec<String>,
+        partial: &mut String,
+        source: &str,
+        chunk: &str,
+    ) {
+        let mut combined = String::new();
+        combined.push_str(partial);
+        combined.push_str(chunk);
+
+        let ends_with_newline = combined.ends_with('\n');
+        let mut pieces: Vec<&str> = combined.split('\n').collect();
+
+        partial.clear();
+        if !ends_with_newline {
+            if let Some(last) = pieces.pop() {
+                partial.push_str(last);
+            }
+        } else if matches!(pieces.last(), Some(last) if last.is_empty()) {
+            pieces.pop();
+        }
+
+        for line in pieces {
+            lines.push(format!("[{}] {}", source, line.trim_end_matches('\r')));
+        }
+    }
+
+    fn trim_line_buffer(&mut self) {
+        if self.lines.len() <= DASHBOARD_MAX_LOG_LINES {
+            return;
+        }
+        let to_drop = self.lines.len() - DASHBOARD_MAX_LOG_LINES;
+        self.lines.drain(0..to_drop);
+        if !self.follow {
+            self.scroll = self.scroll.saturating_sub(to_drop);
+        }
+    }
+
+    fn max_scroll(&self, viewport_height: usize) -> usize {
+        self.lines.len().saturating_sub(viewport_height.max(1))
+    }
+
+    fn effective_scroll(&self, viewport_height: usize) -> usize {
+        let max_scroll = self.max_scroll(viewport_height);
+        if self.follow {
+            max_scroll
+        } else {
+            min(self.scroll, max_scroll)
+        }
+    }
+
+    fn scroll_up(&mut self, delta: usize, viewport_height: usize) {
+        let current = self.effective_scroll(viewport_height);
+        self.follow = false;
+        self.scroll = current.saturating_sub(delta);
+    }
+
+    fn scroll_down(&mut self, delta: usize, viewport_height: usize) {
+        let max_scroll = self.max_scroll(viewport_height);
+        let current = self.effective_scroll(viewport_height);
+        let next = min(current.saturating_add(delta), max_scroll);
+        self.scroll = next;
+        self.follow = next >= max_scroll;
+    }
+
+    fn scroll_home(&mut self) {
+        self.follow = false;
+        self.scroll = 0;
+    }
+
+    fn scroll_end(&mut self, viewport_height: usize) {
+        self.follow = true;
+        self.scroll = self.max_scroll(viewport_height);
+    }
+
+    fn render_text(&self) -> String {
+        if self.lines.is_empty() {
+            "(no log output yet)".to_string()
+        } else {
+            self.lines.join("\n")
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct DashboardApp {
+    jobs: Vec<DashboardJob>,
+    selected: usize,
+    mode: DashboardMode,
+    status_line: String,
+    log_view_height: usize,
+}
+
+struct DashboardTerminalGuard;
+
+impl Drop for DashboardTerminalGuard {
+    fn drop(&mut self) {
+        let _ = terminal::disable_raw_mode();
+        let mut stdout = std::io::stdout();
+        let _ = execute!(stdout, LeaveAlternateScreen);
+    }
+}
+
+async fn cmd_dashboard(root: &Path) -> anyhow::Result<()> {
+    ensure_cards_layout(root)?;
+    if dashboard_should_fallback() {
+        return print_status_summary(root);
+    }
+
+    let (watch_tx, watch_rx) = mpsc::channel::<notify::Result<notify::Event>>();
+    let mut _watcher = RecommendedWatcher::new(
+        move |event| {
+            let _ = watch_tx.send(event);
+        },
+        notify::Config::default(),
+    )
+    .context("failed to initialize watcher")?;
+    _watcher
+        .watch(root, RecursiveMode::Recursive)
+        .context("failed to watch cards directory")?;
+
+    let mut app = DashboardApp {
+        log_view_height: 10,
+        ..Default::default()
+    };
+    refresh_dashboard(root, &mut app)?;
+
+    let mut fallback_to_status = false;
+    {
+        terminal::enable_raw_mode().context("failed to enable raw mode")?;
+        let mut stdout = std::io::stdout();
+        execute!(stdout, EnterAlternateScreen).context("failed to enter alternate screen")?;
+        let _guard = DashboardTerminalGuard;
+
+        let backend = CrosstermBackend::new(stdout);
+        let mut terminal = Terminal::new(backend).context("failed to initialize terminal")?;
+        terminal.clear()?;
+
+        let tick = Duration::from_millis(DASHBOARD_TICK_MS);
+        let mut last_tick = Instant::now();
+        let mut needs_refresh = true;
+
+        loop {
+            while let Ok(event_result) = watch_rx.try_recv() {
+                match event_result {
+                    Ok(_) => needs_refresh = true,
+                    Err(err) => app.status_line = format!("watch error: {}", err),
+                }
+            }
+
+            if last_tick.elapsed() >= tick {
+                needs_refresh = true;
+                last_tick = Instant::now();
+            }
+
+            if needs_refresh {
+                if let Err(err) = refresh_dashboard(root, &mut app) {
+                    app.status_line = format!("refresh error: {}", err);
+                }
+                needs_refresh = false;
+            }
+
+            terminal.draw(|frame| draw_dashboard(frame, &mut app))?;
+
+            if event::poll(Duration::from_millis(100))? {
+                match event::read()? {
+                    CEvent::Key(key) if key.kind == KeyEventKind::Press => {
+                        if handle_dashboard_key(root, &mut app, key.code).await? {
+                            break;
+                        }
+                        needs_refresh = true;
+                    }
+                    CEvent::Resize(width, height) => {
+                        if width < DASHBOARD_MIN_WIDTH || height < DASHBOARD_MIN_HEIGHT {
+                            fallback_to_status = true;
+                            break;
+                        }
+                        needs_refresh = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    if fallback_to_status {
+        return print_status_summary(root);
+    }
+
+    Ok(())
+}
+
+fn dashboard_should_fallback() -> bool {
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        return true;
+    }
+
+    match terminal::size() {
+        Ok((width, height)) => width < DASHBOARD_MIN_WIDTH || height < DASHBOARD_MIN_HEIGHT,
+        Err(_) => true,
+    }
+}
+
+fn refresh_dashboard(root: &Path, app: &mut DashboardApp) -> anyhow::Result<()> {
+    let selected_id = app.jobs.get(app.selected).map(|job| job.id.clone());
+    app.jobs = collect_dashboard_jobs(root);
+
+    if app.jobs.is_empty() {
+        app.selected = 0;
+    } else if let Some(id) = selected_id {
+        if let Some(index) = app.jobs.iter().position(|job| job.id == id) {
+            app.selected = index;
+        } else {
+            app.selected = min(app.selected, app.jobs.len().saturating_sub(1));
+        }
+    } else {
+        app.selected = min(app.selected, app.jobs.len().saturating_sub(1));
+    }
+
+    if let DashboardMode::Logs(log_view) = &mut app.mode {
+        log_view.refresh(root)?;
+    }
+
+    Ok(())
+}
+
+fn collect_dashboard_jobs(root: &Path) -> Vec<DashboardJob> {
+    let now = Utc::now();
+    let mut jobs = Vec::new();
+
+    for state in ["running", "pending", "failed", "done", "merged"] {
+        let state_dir = root.join(state);
+        let entries = match fs::read_dir(state_dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+
+        for entry in entries.flatten() {
+            let card_dir = entry.path();
+            if !card_dir.is_dir() {
+                continue;
+            }
+            if card_dir.extension().and_then(|s| s.to_str()) != Some("jobcard") {
+                continue;
+            }
+
+            let Ok(meta) = jobcard_core::read_meta(&card_dir) else {
+                continue;
+            };
+
+            let stage_record = meta.stages.get(&meta.stage);
+            let provider = stage_record
+                .and_then(|record| record.provider.clone())
+                .or_else(|| meta.provider_chain.first().cloned())
+                .unwrap_or_else(|| "-".to_string());
+
+            jobs.push(DashboardJob {
+                id: meta.id.clone(),
+                state: state.to_string(),
+                provider,
+                elapsed: format_elapsed_duration(dashboard_elapsed_seconds(state, &meta, now)),
+                last_log_line: read_dashboard_last_log_line(&card_dir),
+                card_dir,
+                created: meta.created,
+            });
+        }
+    }
+
+    jobs.sort_by(|a, b| {
+        dashboard_state_rank(a.state.as_str())
+            .cmp(&dashboard_state_rank(b.state.as_str()))
+            .then_with(|| b.created.cmp(&a.created))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    jobs
+}
+
+fn dashboard_elapsed_seconds(state: &str, meta: &Meta, now: DateTime<Utc>) -> Option<u64> {
+    let stage_record = meta.stages.get(&meta.stage);
+    if state != "running" {
+        if let Some(duration) = stage_record.and_then(|record| record.duration_s) {
+            return Some(duration);
+        }
+    }
+
+    let started = stage_record.and_then(|record| record.started.as_ref())?;
+    let elapsed = now.signed_duration_since(*started).num_seconds();
+    if elapsed < 0 {
+        Some(0)
+    } else {
+        Some(elapsed as u64)
+    }
+}
+
+fn format_elapsed_duration(seconds: Option<u64>) -> String {
+    let Some(seconds) = seconds else {
+        return "-".to_string();
+    };
+
+    if seconds < 60 {
+        return format!("{}s", seconds);
+    }
+
+    let minutes = seconds / 60;
+    let secs = seconds % 60;
+    if minutes < 60 {
+        return format!("{}m{:02}s", minutes, secs);
+    }
+
+    let hours = minutes / 60;
+    let mins = minutes % 60;
+    if hours < 24 {
+        return format!("{}h{:02}m", hours, mins);
+    }
+
+    let days = hours / 24;
+    let hrs = hours % 24;
+    format!("{}d{:02}h", days, hrs)
+}
+
+fn read_dashboard_last_log_line(card_dir: &Path) -> String {
+    let stdout_path = card_dir.join("logs").join("stdout.log");
+    let stderr_path = card_dir.join("logs").join("stderr.log");
+
+    let stdout_line = read_last_nonempty_line(&stdout_path);
+    let stderr_line = read_last_nonempty_line(&stderr_path);
+    let stdout_mtime = file_modified_time(&stdout_path);
+    let stderr_mtime = file_modified_time(&stderr_path);
+
+    let selected = match (stdout_line, stderr_line) {
+        (Some(out), Some(err)) => match (stdout_mtime, stderr_mtime) {
+            (Some(out_t), Some(err_t)) if err_t >= out_t => err,
+            (Some(_), Some(_)) => out,
+            (None, Some(_)) => err,
+            _ => out,
+        },
+        (Some(out), None) => out,
+        (None, Some(err)) => err,
+        (None, None) => "-".to_string(),
+    };
+
+    truncate_for_dashboard_cell(selected.as_str(), DASHBOARD_MAX_LAST_LOG_CHARS)
+}
+
+fn read_last_nonempty_line(path: &Path) -> Option<String> {
+    let mut file = fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    if len == 0 {
+        return None;
+    }
+
+    let start = len.saturating_sub(DASHBOARD_LOG_TAIL_BYTES);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).ok()?;
+
+    let text = String::from_utf8_lossy(&buf);
+    text.lines().rev().find_map(|line| {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn file_modified_time(path: &Path) -> Option<SystemTime> {
+    fs::metadata(path).ok()?.modified().ok()
+}
+
+fn truncate_for_dashboard_cell(value: &str, limit: usize) -> String {
+    if value.chars().count() <= limit {
+        return value.to_string();
+    }
+
+    let mut out = String::new();
+    for ch in value.chars().take(limit) {
+        out.push(ch);
+    }
+    out.push_str("...");
+    out
+}
+
+fn dashboard_state_rank(state: &str) -> usize {
+    match state {
+        "running" => 0,
+        "pending" => 1,
+        "failed" => 2,
+        "done" => 3,
+        "merged" => 4,
+        _ => 5,
+    }
+}
+
+fn dashboard_state_color(state: &str) -> Color {
+    match state {
+        "running" => Color::Cyan,
+        "pending" => Color::Yellow,
+        "done" => Color::Green,
+        "merged" => Color::Magenta,
+        "failed" => Color::Red,
+        _ => Color::Gray,
+    }
+}
+
+fn draw_dashboard(frame: &mut Frame<'_>, app: &mut DashboardApp) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(2)])
+        .split(frame.area());
+
+    match &app.mode {
+        DashboardMode::Table => draw_dashboard_table(frame, chunks[0], app),
+        DashboardMode::Logs(log_view) => {
+            let viewport_height = usize::from(chunks[0].height.saturating_sub(2).max(1));
+            app.log_view_height = viewport_height;
+            draw_dashboard_logs(frame, chunks[0], log_view, viewport_height);
+        }
+    }
+
+    draw_dashboard_footer(frame, chunks[1], app);
+}
+
+fn draw_dashboard_table(frame: &mut Frame<'_>, area: Rect, app: &DashboardApp) {
+    if app.jobs.is_empty() {
+        let empty = Paragraph::new("No job cards found.")
+            .block(Block::default().borders(Borders::ALL).title("jc dashboard"));
+        frame.render_widget(empty, area);
+        return;
+    }
+
+    let rows = app.jobs.iter().map(|job| {
+        Row::new(vec![
+            Cell::from(job.id.clone()),
+            Cell::from(job.state.clone())
+                .style(Style::default().fg(dashboard_state_color(job.state.as_str()))),
+            Cell::from(job.provider.clone()),
+            Cell::from(job.elapsed.clone()),
+            Cell::from(job.last_log_line.clone()),
+        ])
+    });
+
+    let header = Row::new(vec![
+        "Job ID",
+        "State",
+        "Provider",
+        "Elapsed",
+        "Last log line",
+    ])
+    .style(Style::default().add_modifier(Modifier::BOLD));
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(24),
+            Constraint::Length(10),
+            Constraint::Length(14),
+            Constraint::Length(10),
+            Constraint::Min(10),
+        ],
+    )
+    .header(header)
+    .block(Block::default().borders(Borders::ALL).title("jc dashboard"))
+    .row_highlight_style(
+        Style::default()
+            .add_modifier(Modifier::REVERSED)
+            .add_modifier(Modifier::BOLD),
+    );
+
+    let mut table_state = TableState::default();
+    table_state.select(Some(app.selected));
+    frame.render_stateful_widget(table, area, &mut table_state);
+}
+
+fn draw_dashboard_logs(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    log_view: &LogViewState,
+    viewport_height: usize,
+) {
+    let text = log_view.render_text();
+    let scroll = log_view.effective_scroll(viewport_height);
+    let scroll_u16 = min(scroll, u16::MAX as usize) as u16;
+    let logs = Paragraph::new(text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!("logs: {}", log_view.job_id)),
+        )
+        .wrap(Wrap { trim: false })
+        .scroll((scroll_u16, 0));
+    frame.render_widget(logs, area);
+}
+
+fn draw_dashboard_footer(frame: &mut Frame<'_>, area: Rect, app: &DashboardApp) {
+    let mut help = match app.mode {
+        DashboardMode::Table => "q quit | r retry | k kill | l logs | Up/Down select".to_string(),
+        DashboardMode::Logs(_) => "q quit | l back | Up/Down/PgUp/PgDn/Home/End scroll".to_string(),
+    };
+    if !app.status_line.is_empty() {
+        help.push_str(" | ");
+        help.push_str(app.status_line.as_str());
+    }
+    let footer = Paragraph::new(help).block(Block::default().borders(Borders::TOP));
+    frame.render_widget(footer, area);
+}
+
+async fn handle_dashboard_key(
+    root: &Path,
+    app: &mut DashboardApp,
+    key_code: KeyCode,
+) -> anyhow::Result<bool> {
+    if key_code == KeyCode::Char('q') {
+        return Ok(true);
+    }
+
+    if matches!(app.mode, DashboardMode::Table) {
+        match key_code {
+            KeyCode::Up => {
+                if !app.jobs.is_empty() {
+                    app.selected = app.selected.saturating_sub(1);
+                }
+            }
+            KeyCode::Down => {
+                if !app.jobs.is_empty() {
+                    app.selected = min(app.selected.saturating_add(1), app.jobs.len() - 1);
+                }
+            }
+            KeyCode::Char('r') => {
+                if let Some(id) = app.jobs.get(app.selected).map(|job| job.id.clone()) {
+                    app.status_line = match retry_card(root, id.as_str()) {
+                        Ok(message) => message,
+                        Err(err) => format!("retry failed: {}", err),
+                    };
+                }
+            }
+            KeyCode::Char('k') => {
+                if let Some(id) = app.jobs.get(app.selected).map(|job| job.id.clone()) {
+                    app.status_line = match kill_card(root, id.as_str()).await {
+                        Ok(message) => message,
+                        Err(err) => format!("kill failed: {}", err),
+                    };
+                }
+            }
+            KeyCode::Char('l') => {
+                if let Some(job) = app.jobs.get(app.selected).cloned() {
+                    let mut log_view = LogViewState::new(&job);
+                    if let Err(err) = log_view.refresh(root) {
+                        app.status_line = format!("log stream error: {}", err);
+                    }
+                    app.mode = DashboardMode::Logs(log_view);
+                }
+            }
+            _ => {}
+        }
+        return Ok(false);
+    }
+
+    let page = app.log_view_height.max(1);
+    let mut close_logs = false;
+    if let DashboardMode::Logs(log_view) = &mut app.mode {
+        match key_code {
+            KeyCode::Char('l') | KeyCode::Esc => close_logs = true,
+            KeyCode::Up => log_view.scroll_up(1, page),
+            KeyCode::Down => log_view.scroll_down(1, page),
+            KeyCode::PageUp => log_view.scroll_up(page, page),
+            KeyCode::PageDown => log_view.scroll_down(page, page),
+            KeyCode::Home => log_view.scroll_home(),
+            KeyCode::End => log_view.scroll_end(page),
+            _ => {}
+        }
+    }
+    if close_logs {
+        app.mode = DashboardMode::Table;
+    }
+    Ok(false)
 }
 
 fn find_git_root(start: &Path) -> Option<std::path::PathBuf> {
@@ -2310,13 +2991,9 @@ async fn run_merge_gate(cards_dir: &Path, poll_ms: u64, once: bool) -> anyhow::R
                     let card_id = name.trim_end_matches(".jobcard");
 
                     // Step 1: Stage and commit all agent changes from inside the worktree.
-                    if let Err(e) =
-                        jobcard_core::worktree::commit_worktree(&wt_path, card_id)
-                    {
-                        let _ = fs::write(
-                            &qa_log,
-                            format!("commit_worktree failed: {e}\n").as_bytes(),
-                        );
+                    if let Err(e) = jobcard_core::worktree::commit_worktree(&wt_path, card_id) {
+                        let _ =
+                            fs::write(&qa_log, format!("commit_worktree failed: {e}\n").as_bytes());
                         meta.failure_reason = Some("worktree_commit_failed".to_string());
                         let _ = write_meta(&card_dir, &meta);
                         let _ = fs::rename(&card_dir, failed_dir.join(&name));
@@ -2363,8 +3040,25 @@ async fn run_merge_gate(cards_dir: &Path, poll_ms: u64, once: bool) -> anyhow::R
                             continue;
                         }
                         Ok(false) => {
-                            // Merge conflict.
+                            // Merge conflict — write conflicts.diff and abort the merge.
                             meta.failure_reason = Some("merge_conflict".to_string());
+                            let conflicts = std::process::Command::new("git")
+                                .args(["diff", "--name-only", "--diff-filter=U"])
+                                .current_dir(&git_root)
+                                .output()
+                                .ok();
+                            if let Some(c) = conflicts {
+                                let _ = fs::create_dir_all(card_dir.join("output"));
+                                let _ = fs::write(
+                                    card_dir.join("output").join("conflicts.diff"),
+                                    c.stdout,
+                                );
+                            }
+                            // Abort the merge so the repo stays clean.
+                            let _ = std::process::Command::new("git")
+                                .args(["merge", "--abort"])
+                                .current_dir(&git_root)
+                                .status();
                             let _ = write_meta(&card_dir, &meta);
                             let _ = fs::rename(&card_dir, failed_dir.join(&name));
                             continue;
@@ -2417,6 +3111,12 @@ fn copy_dir_all(src: &Path, dst: &Path) -> anyhow::Result<()> {
 // ── retry ────────────────────────────────────────────────────────────────────
 
 fn cmd_retry(root: &Path, id: &str) -> anyhow::Result<()> {
+    let message = retry_card(root, id)?;
+    println!("{}", message);
+    Ok(())
+}
+
+fn retry_card(root: &Path, id: &str) -> anyhow::Result<String> {
     let card = find_card(root, id).with_context(|| format!("card not found: {}", id))?;
     let state = card
         .parent()
@@ -2441,13 +3141,18 @@ fn cmd_retry(root: &Path, id: &str) -> anyhow::Result<()> {
     let target = root.join("pending").join(format!("{}.jobcard", id));
     fs::rename(&card, &target)
         .with_context(|| format!("failed to move card to pending/: {}", id))?;
-    println!("retrying: {} -> pending/", id);
-    Ok(())
+    Ok(format!("retrying: {} -> pending/", id))
 }
 
 // ── kill ─────────────────────────────────────────────────────────────────────
 
 async fn cmd_kill(root: &Path, id: &str) -> anyhow::Result<()> {
+    let message = kill_card(root, id).await?;
+    println!("{}", message);
+    Ok(())
+}
+
+async fn kill_card(root: &Path, id: &str) -> anyhow::Result<String> {
     let card = find_card(root, id).with_context(|| format!("card not found: {}", id))?;
     let state = card
         .parent()
@@ -2486,8 +3191,7 @@ async fn cmd_kill(root: &Path, id: &str) -> anyhow::Result<()> {
     fs::rename(&card, &target)
         .with_context(|| format!("failed to move card to failed/: {}", id))?;
 
-    println!("killed pid {} and moved '{}' to failed/", pid, id);
-    Ok(())
+    Ok(format!("killed pid {} and moved '{}' to failed/", pid, id))
 }
 
 // ── logs ─────────────────────────────────────────────────────────────────────
