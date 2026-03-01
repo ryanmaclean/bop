@@ -3626,7 +3626,7 @@ fn cmd_worktree_create(root: &Path, id: &str) -> anyhow::Result<()> {
         .with_context(|| format!("card \'{}\' not found in pending/ or running/", id))?;
 
     let meta = jobcard_core::read_meta(&card)?;
-    let branch = meta
+    let _branch = meta
         .worktree_branch
         .as_deref()
         .unwrap_or(&format!("job/{}", id))

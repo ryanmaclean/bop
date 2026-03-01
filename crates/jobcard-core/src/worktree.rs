@@ -56,8 +56,10 @@ pub fn squash_workspace(ws_path: &Path) -> Result<()> {
         .context("failed to run `jj squash`")?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
-        // jj exits non-zero when there are no changes to squash — this is OK
-        if stderr.contains("Nothing changed") || stderr.contains("nothing to squash") || stderr.contains("No diff") {
+        // jj exits non-zero when there are no changes to squash — this is OK.
+        // Verified against jj 0.x: the actual message is "Nothing changed after diffing".
+        // "nothing to squash" and "No diff" do NOT appear in real jj output; removed.
+        if stderr.contains("Nothing changed") {
             return Ok(());
         }
         anyhow::bail!("jj squash failed: {}", stderr);
