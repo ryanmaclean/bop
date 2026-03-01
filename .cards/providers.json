@@ -1,0 +1,36 @@
+{
+  "providers": {
+    "aider": {
+      "command": "adapters/aider.zsh",
+      "rate_limit_exit": 75
+    },
+    "claude": {
+      "command": "adapters/claude.zsh",
+      "rate_limit_exit": 75
+    },
+    "codex": {
+      "command": "adapters/codex.zsh",
+      "rate_limit_exit": 75
+    },
+    "goose": {
+      "command": "adapters/goose.zsh",
+      "rate_limit_exit": 75
+    },
+    "mock": {
+      "command": "adapters/mock.zsh",
+      "rate_limit_exit": 75
+    },
+    "mock2": {
+      "command": "adapters/mock.zsh",
+      "rate_limit_exit": 75
+    },
+    "ollama-local": {
+      "command": "adapters/ollama-local.zsh",
+      "rate_limit_exit": 75
+    },
+    "opencode": {
+      "command": "adapters/opencode.zsh",
+      "rate_limit_exit": 75
+    }
+  }
+}
