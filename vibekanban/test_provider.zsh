@@ -2,7 +2,7 @@
 set -euo pipefail
 # Create test .cards/ structure
 tmp=$(mktemp -d)
-trap "rm -rf $tmp" EXIT
+trap 'rm -rf "$tmp"' EXIT
 
 mkdir -p "$tmp/team-cli/pending" "$tmp/team-cli/running"
 mkdir -p "$tmp/team-cli/pending/card-abc.jobcard"
