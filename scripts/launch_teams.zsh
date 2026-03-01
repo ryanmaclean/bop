@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT=/Users/studio/gtfs
-JC=$ROOT/target/debug/jc
+BOP=$ROOT/target/debug/bop
 
 TEAMS=(
   "team-cli:claude:adapters/claude.zsh"
@@ -26,7 +26,7 @@ for (( i = 1; i <= ${#TEAMS}; i++ )); do
   cards_dir="$ROOT/.cards/$team_name"
   log_file="/tmp/jobcard-$team_name.log"
 
-  CMD="$JC --cards-dir $cards_dir dispatcher \
+  CMD=" --cards-dir $cards_dir dispatcher \
     --adapter $ROOT/$adapter_path \
     --max-workers 5 \
     --poll-ms 500 \
@@ -59,5 +59,5 @@ echo "All 5 dispatchers launched."
 echo "Watch logs:  tail -f /tmp/jobcard-team-*.log"
 echo "Check status per team:"
 for team in team-cli team-arch team-quality team-intelligence team-platform; do
-  echo "  $JC --cards-dir $ROOT/.cards/$team status"
+  echo "   --cards-dir $ROOT/.cards/$team status"
 done

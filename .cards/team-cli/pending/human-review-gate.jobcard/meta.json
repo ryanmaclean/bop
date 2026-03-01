@@ -1,0 +1,69 @@
+{
+  "id": "human-review-gate",
+  "created": "2026-03-01T00:00:00Z",
+  "glyph": "🂭",
+  "title": "jc approve/reject — human review gate",
+  "description": "Cards with decision_required:true must be approved by a human before merge-gate proceeds. Adds jc approve <id> and jc reject <id> commands.",
+  "labels": [
+    {
+      "name": "CLI",
+      "kind": "scope"
+    },
+    {
+      "name": "Safety",
+      "kind": "domain"
+    }
+  ],
+  "priority": 1,
+  "progress": 0,
+  "subtasks": [
+    {
+      "id": "gate",
+      "title": "merge-gate holds decision_required cards in done/",
+      "done": false
+    },
+    {
+      "id": "approve",
+      "title": "jc approve <id> — sets decision_required:false, unblocks",
+      "done": false
+    },
+    {
+      "id": "reject",
+      "title": "jc reject <id> [reason] — moves to failed/",
+      "done": false
+    },
+    {
+      "id": "notify",
+      "title": "Print pending approvals on jc status",
+      "done": false
+    }
+  ],
+  "stage": "spec",
+  "stages": {
+    "spec": {
+      "status": "pending",
+      "agent": null
+    },
+    "plan": {
+      "status": "pending",
+      "agent": null
+    },
+    "implement": {
+      "status": "pending",
+      "agent": null
+    },
+    "qa": {
+      "status": "blocked",
+      "agent": null,
+      "blocked_by": "implement"
+    }
+  },
+  "acceptance_criteria": [
+    "cargo test",
+    "cargo clippy -- -D warnings"
+  ],
+  "provider_chain": [
+    "claude"
+  ],
+  "retry_count": 0
+}

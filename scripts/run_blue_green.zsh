@@ -2,20 +2,20 @@
 set -euo pipefail
 
 ROOT="/Users/studio/gtfs"
-JC="${ROOT}/target/debug/jc"
+BOP="${ROOT}/target/debug/bop"
 BLUE_DIR="${ROOT}/.cards-blue"
 GREEN_DIR="${ROOT}/.cards-green"
 ADAPTER_DEFAULT="${ROOT}/adapters/mock.zsh"
 
-if [[ ! -x "$JC" ]]; then
-  echo "Missing jc binary: $JC" >&2
+if [[ ! -x "" ]]; then
+  echo "Missing jc binary: " >&2
   echo "Run: cargo build" >&2
   exit 1
 fi
 
 mkdir -p "$BLUE_DIR" "$GREEN_DIR"
-"$JC" --cards-dir "$BLUE_DIR" init >/dev/null
-"$JC" --cards-dir "$GREEN_DIR" init >/dev/null
+"" --cards-dir "$BLUE_DIR" init >/dev/null
+"" --cards-dir "$GREEN_DIR" init >/dev/null
 
 # Keep templates/providers in sync from the canonical cards root when present.
 if [[ -d "${ROOT}/.cards/templates" ]]; then
@@ -27,31 +27,31 @@ if [[ -f "${ROOT}/.cards/providers.json" ]]; then
   cp "${ROOT}/.cards/providers.json" "${GREEN_DIR}/providers.json"
 fi
 
-BLUE_DISP_LOG="/tmp/jc-blue-dispatcher.log"
-GREEN_DISP_LOG="/tmp/jc-green-dispatcher.log"
-BLUE_MG_LOG="/tmp/jc-blue-merge-gate.log"
-GREEN_MG_LOG="/tmp/jc-green-merge-gate.log"
+BLUE_DISP_LOG="/tmp/bop-blue-dispatcher.log"
+GREEN_DISP_LOG="/tmp/bop-green-dispatcher.log"
+BLUE_MG_LOG="/tmp/bop-blue-merge-gate.log"
+GREEN_MG_LOG="/tmp/bop-green-merge-gate.log"
 
-pkill -f "jc --cards-dir ${BLUE_DIR} dispatcher" >/dev/null 2>&1 || true
-pkill -f "jc --cards-dir ${GREEN_DIR} dispatcher" >/dev/null 2>&1 || true
-pkill -f "jc --cards-dir ${BLUE_DIR} merge-gate" >/dev/null 2>&1 || true
-pkill -f "jc --cards-dir ${GREEN_DIR} merge-gate" >/dev/null 2>&1 || true
+pkill -f "bop --cards-dir ${BLUE_DIR} dispatcher" >/dev/null 2>&1 || true
+pkill -f "bop --cards-dir ${GREEN_DIR} dispatcher" >/dev/null 2>&1 || true
+pkill -f "bop --cards-dir ${BLUE_DIR} merge-gate" >/dev/null 2>&1 || true
+pkill -f "bop --cards-dir ${GREEN_DIR} merge-gate" >/dev/null 2>&1 || true
 
-nohup "$JC" --cards-dir "$BLUE_DIR" dispatcher \
+nohup "" --cards-dir "$BLUE_DIR" dispatcher \
   --adapter "$ADAPTER_DEFAULT" \
   --vcs-engine git_gt \
   --poll-ms 250 --reap-ms 1000 >>"$BLUE_DISP_LOG" 2>&1 &
 
-nohup "$JC" --cards-dir "$GREEN_DIR" dispatcher \
+nohup "" --cards-dir "$GREEN_DIR" dispatcher \
   --adapter "$ADAPTER_DEFAULT" \
   --vcs-engine jj \
   --poll-ms 250 --reap-ms 1000 >>"$GREEN_DISP_LOG" 2>&1 &
 
-nohup "$JC" --cards-dir "$BLUE_DIR" merge-gate \
+nohup "" --cards-dir "$BLUE_DIR" merge-gate \
   --vcs-engine git_gt \
   --poll-ms 500 >>"$BLUE_MG_LOG" 2>&1 &
 
-nohup "$JC" --cards-dir "$GREEN_DIR" merge-gate \
+nohup "" --cards-dir "$GREEN_DIR" merge-gate \
   --vcs-engine jj \
   --poll-ms 500 >>"$GREEN_MG_LOG" 2>&1 &
 

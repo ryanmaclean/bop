@@ -28,7 +28,7 @@ use utoipa::{OpenApi, ToSchema};
 use walkdir::WalkDir;
 
 #[derive(Parser, Debug)]
-#[command(name = "jc")]
+#[command(name = "bop")]
 struct Cli {
     #[arg(long, default_value = ".cards")]
     cards_dir: String,
@@ -1723,7 +1723,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Doctor => cmd_doctor(&root),
         Command::GenerateCompletion { shell } => {
             use clap::CommandFactory;
-            clap_complete::generate(shell, &mut Cli::command(), "jc", &mut std::io::stdout());
+            clap_complete::generate(shell, &mut Cli::command(), "bop", &mut std::io::stdout());
             Ok(())
         }
     }

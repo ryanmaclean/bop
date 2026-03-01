@@ -29,8 +29,8 @@ check: test lint check-fmt
 
 # Install to system
 install: build
-	sudo cp target/debug/jc /usr/local/bin/jc
+	sudo cp target/debug/bop /usr/local/bin/bop
 
 # Development setup
 dev:
-	cargo watch -x 'run -- jc dispatcher --once'
+	cargo watch -x 'run -- bop dispatcher --once'

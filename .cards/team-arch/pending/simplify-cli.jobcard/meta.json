@@ -1,0 +1,81 @@
+{
+  "id": "simplify-cli",
+  "created": "2026-03-01T00:00:00Z",
+  "glyph": "🂾",
+  "title": "Remove scope-creep commands from jc",
+  "description": "The CLI should be a thin reference implementation of the jobcard spec. Remove: serve (REST API), providers, config, policy. Keep: new, status, inspect, dispatcher, merge-gate, doctor.",
+  "labels": [
+    {
+      "name": "Simplification",
+      "kind": "domain"
+    },
+    {
+      "name": "CLI",
+      "kind": "scope"
+    }
+  ],
+  "priority": 1,
+  "progress": 0,
+  "subtasks": [
+    {
+      "id": "audit",
+      "title": "List all commands; mark keep/remove against spec",
+      "done": false
+    },
+    {
+      "id": "remove-serve",
+      "title": "Remove serve (REST API) — not in spec",
+      "done": false
+    },
+    {
+      "id": "remove-providers",
+      "title": "Remove providers CLI — internal plumbing",
+      "done": false
+    },
+    {
+      "id": "remove-config",
+      "title": "Remove config CLI — internal plumbing",
+      "done": false
+    },
+    {
+      "id": "remove-policy",
+      "title": "Remove policy command — premature",
+      "done": false
+    },
+    {
+      "id": "test",
+      "title": "cargo test + cargo clippy pass after removals",
+      "done": false
+    }
+  ],
+  "stage": "spec",
+  "stages": {
+    "spec": {
+      "status": "pending",
+      "agent": null
+    },
+    "plan": {
+      "status": "pending",
+      "agent": null
+    },
+    "implement": {
+      "status": "pending",
+      "agent": null
+    },
+    "qa": {
+      "status": "blocked",
+      "agent": null,
+      "blocked_by": "implement"
+    }
+  },
+  "acceptance_criteria": [
+    "cargo test",
+    "cargo clippy -- -D warnings",
+    "! grep -r 'fn serve' crates/"
+  ],
+  "decision_required": true,
+  "provider_chain": [
+    "claude"
+  ],
+  "retry_count": 0
+}

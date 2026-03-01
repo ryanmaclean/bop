@@ -13,8 +13,8 @@ cargo fmt                    # Format code
 cargo fmt --check            # Check formatting without changes
 make check                   # Run test + lint + fmt check together
 
-# Canonical CLI name is bop (legacy binary path may still be jc)
-RUST_LOG=debug ./target/debug/jc dispatcher --once  # Debug dispatcher
+# Canonical CLI: bop
+RUST_LOG=debug ./target/debug/bop dispatcher --once  # Debug dispatcher
 ```
 
 ## Architecture
@@ -22,7 +22,7 @@ RUST_LOG=debug ./target/debug/jc dispatcher --once  # Debug dispatcher
 This is a **Rust Cargo workspace** with two active crates (two stubs exist but are not implemented):
 
 - **`crates/jobcard-core`** — shared library: `Meta` struct (job card state), `read_meta`/`write_meta`, `render_prompt` (template substitution with `{{spec}}`, `{{plan}}`, etc.), and the `realtime` module (feed validation types + tests).
-- **`crates/jc`** — legacy crate path for the main CLI binary (canonical command name: `bop`). All commands (`init`, `new`, `status`, `validate`, `dispatcher`, `merge-gate`) are implemented in a single `main.rs`. The dispatcher and merge-gate run as async loops using Tokio.
+- **`crates/jc`** — CLI binary (`bop` command). Crate directory is `crates/jc/` (rename pending). All commands (`init`, `new`, `status`, `validate`, `dispatcher`, `merge-gate`) are implemented in a single `main.rs`. The dispatcher and merge-gate run as async loops using Tokio.
 
 ### Job Card State Machine
 

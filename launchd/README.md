@@ -51,7 +51,7 @@ launchctl list | grep jobcard
 ## Configuration
 
 The plist files assume:
-- JobCard binary is installed at `/usr/local/bin/jc`
+- JobCard binary is installed at `/usr/local/bin/bop`
 - Working directory is `/Users/studio/gtfs`
 - Cards directory is `/Users/studio/gtfs/.cards`
 

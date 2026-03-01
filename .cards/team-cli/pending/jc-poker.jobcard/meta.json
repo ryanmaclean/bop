@@ -1,0 +1,80 @@
+{
+  "id": "jc-poker",
+  "created": "2026-03-01T00:00:00Z",
+  "glyph": "🂮",
+  "title": "jc poker — interactive planning poker",
+  "description": "Estimation ceremony: agents and humans secretly play a card, reveal simultaneously, outliers discuss, consensus commits the glyph to meta.json.",
+  "labels": [
+    {
+      "name": "CLI",
+      "kind": "scope"
+    },
+    {
+      "name": "Interactive",
+      "kind": "domain"
+    }
+  ],
+  "priority": 2,
+  "progress": 0,
+  "subtasks": [
+    {
+      "id": "meta-fields",
+      "title": "Add estimates + poker_round fields to Meta",
+      "done": false
+    },
+    {
+      "id": "open",
+      "title": "jc poker open <id> — start round, cards face-down",
+      "done": false
+    },
+    {
+      "id": "submit",
+      "title": "jc poker submit <id> — interactive card picker",
+      "done": false
+    },
+    {
+      "id": "reveal",
+      "title": "jc poker reveal <id> — flip all, show spread",
+      "done": false
+    },
+    {
+      "id": "consensus",
+      "title": "jc poker consensus <id> <glyph> — commit to glyph",
+      "done": false
+    },
+    {
+      "id": "joker",
+      "title": "🃏 joker = needs breakdown, blocks consensus",
+      "done": false
+    }
+  ],
+  "stage": "spec",
+  "stages": {
+    "spec": {
+      "status": "pending",
+      "agent": null
+    },
+    "plan": {
+      "status": "pending",
+      "agent": null
+    },
+    "implement": {
+      "status": "pending",
+      "agent": null
+    },
+    "qa": {
+      "status": "blocked",
+      "agent": null,
+      "blocked_by": "implement"
+    }
+  },
+  "acceptance_criteria": [
+    "cargo test",
+    "cargo clippy -- -D warnings",
+    "jc poker open jc-poker && jc poker submit jc-poker && jc poker reveal jc-poker"
+  ],
+  "provider_chain": [
+    "claude"
+  ],
+  "retry_count": 0
+}

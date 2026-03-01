@@ -8,7 +8,7 @@
   
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/local/bin/jc</string>
+    <string>/usr/local/bin/bop</string>
     <string>dispatcher</string>
     <string>--adapter</string>
     <string>adapters/mock.zsh</string>

@@ -1,0 +1,69 @@
+{
+  "id": "per-stage-dispatch",
+  "created": "2026-03-01T00:00:00Z",
+  "glyph": "🂫",
+  "title": "Per-stage dispatch: spec, plan, implement, qa as separate agent runs",
+  "description": "Currently all stages run inside one agent invocation. Split so each stage is a separate dispatch with optional human review gate between spec→plan.",
+  "labels": [
+    {
+      "name": "Dispatcher",
+      "kind": "domain"
+    },
+    {
+      "name": "Architecture",
+      "kind": "scope"
+    }
+  ],
+  "priority": 2,
+  "progress": 0,
+  "subtasks": [
+    {
+      "id": "stage-loop",
+      "title": "Dispatcher re-queues card after each stage completes",
+      "done": false
+    },
+    {
+      "id": "gate-hook",
+      "title": "decision_required after spec blocks until jc approve",
+      "done": false
+    },
+    {
+      "id": "prompt-per-stage",
+      "title": "Each stage uses its own prompt template",
+      "done": false
+    },
+    {
+      "id": "test",
+      "title": "Card progresses spec→plan→implement→qa with 4 dispatches",
+      "done": false
+    }
+  ],
+  "stage": "spec",
+  "stages": {
+    "spec": {
+      "status": "pending",
+      "agent": null
+    },
+    "plan": {
+      "status": "pending",
+      "agent": null
+    },
+    "implement": {
+      "status": "pending",
+      "agent": null
+    },
+    "qa": {
+      "status": "blocked",
+      "agent": null,
+      "blocked_by": "implement"
+    }
+  },
+  "acceptance_criteria": [
+    "cargo test",
+    "cargo clippy -- -D warnings"
+  ],
+  "provider_chain": [
+    "claude"
+  ],
+  "retry_count": 0
+}
