@@ -10,7 +10,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use clap::{Parser, Subcommand, ValueEnum};
-use jobcard_core::{write_meta, Meta};
+use jobcard_core::{write_meta, Meta, VcsEngine as CoreVcsEngine};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::convert::Infallible;
@@ -188,10 +188,10 @@ enum VcsEngine {
 }
 
 impl VcsEngine {
-    fn as_str(self) -> &'static str {
+    fn as_core(self) -> CoreVcsEngine {
         match self {
-            VcsEngine::GitGt => "git_gt",
-            VcsEngine::Jj => "jj",
+            VcsEngine::GitGt => CoreVcsEngine::GitGt,
+            VcsEngine::Jj => CoreVcsEngine::Jj,
         }
     }
 }
@@ -418,6 +418,104 @@ struct WorkspaceInfo {
     name: String,
     path: PathBuf,
     change_ref: Option<String>,
+}
+
+// ---------- changes.json types ----------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FileChange {
+    path: String,
+    status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DiffStats {
+    files_changed: usize,
+    insertions: usize,
+    deletions: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ChangesManifest {
+    branch: String,
+    files_changed: Vec<FileChange>,
+    stats: DiffStats,
+}
+
+/// Capture git diff summary and write `changes.json` into the card directory.
+async fn write_changes_json(card_dir: &Path, workdir: &Path, branch: &str) -> anyhow::Result<()> {
+    let name_status = TokioCommand::new("git")
+        .args(["diff", "--name-status", "HEAD~1"])
+        .current_dir(workdir)
+        .output()
+        .await
+        .context("failed to run git diff --name-status")?;
+
+    let ns_text = String::from_utf8_lossy(&name_status.stdout);
+    let mut files: Vec<FileChange> = Vec::new();
+    for line in ns_text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.splitn(2, '\t');
+        let status_code = parts.next().unwrap_or("").trim();
+        let path = parts.next().unwrap_or("").trim();
+        if path.is_empty() {
+            continue;
+        }
+        let status = match status_code.chars().next() {
+            Some('A') => "added",
+            Some('D') => "deleted",
+            Some('M') => "modified",
+            Some('R') => "renamed",
+            Some('C') => "copied",
+            _ => "modified",
+        };
+        files.push(FileChange {
+            path: path.to_string(),
+            status: status.to_string(),
+        });
+    }
+
+    let stat_output = TokioCommand::new("git")
+        .args(["diff", "--stat", "HEAD~1"])
+        .current_dir(workdir)
+        .output()
+        .await
+        .context("failed to run git diff --stat")?;
+
+    let stat_text = String::from_utf8_lossy(&stat_output.stdout);
+    let mut insertions: usize = 0;
+    let mut deletions: usize = 0;
+    if let Some(summary_line) = stat_text.lines().last() {
+        for part in summary_line.split(',') {
+            let part = part.trim();
+            if part.contains("insertion") {
+                if let Some(n) = part.split_whitespace().next() {
+                    insertions = n.parse().unwrap_or(0);
+                }
+            } else if part.contains("deletion") {
+                if let Some(n) = part.split_whitespace().next() {
+                    deletions = n.parse().unwrap_or(0);
+                }
+            }
+        }
+    }
+
+    let manifest = ChangesManifest {
+        branch: branch.to_string(),
+        files_changed: files.clone(),
+        stats: DiffStats {
+            files_changed: files.len(),
+            insertions,
+            deletions,
+        },
+    };
+
+    let json = serde_json::to_string_pretty(&manifest)?;
+    fs::write(card_dir.join("changes.json"), json)?;
+    Ok(())
 }
 
 fn validate_provider(name: &str, p: &Provider) -> anyhow::Result<()> {
@@ -3012,7 +3110,7 @@ fn persist_workspace_meta(
     ws: Option<&WorkspaceInfo>,
 ) {
     if let Some(m) = meta.as_mut() {
-        m.vcs_engine = Some(vcs_engine.as_str().to_string());
+        m.vcs_engine = Some(vcs_engine.as_core());
         if let Some(info) = ws {
             m.workspace_name = Some(info.name.clone());
             m.workspace_path = Some(info.path.to_string_lossy().to_string());
@@ -3754,6 +3852,10 @@ async fn run_merge_gate(
                     }
                 }
 
+                // Best-effort: capture file-change manifest for Quick Look
+                let branch = meta.change_ref.clone().unwrap_or_else(|| meta.id.clone());
+                let _ = write_changes_json(&card_dir, &workdir, &branch).await;
+
                 let _ = write_meta(&card_dir, &meta);
                 let _ = fs::rename(&card_dir, merged_dir.join(&name));
             }
@@ -4289,7 +4391,7 @@ fn cmd_worktree_create(root: &Path, id: &str) -> anyhow::Result<()> {
     {
         anyhow::bail!("jj workspace create failed: {}", e);
     }
-    meta.vcs_engine = Some(VcsEngine::Jj.as_str().to_string());
+    meta.vcs_engine = Some(CoreVcsEngine::Jj);
     meta.workspace_name = Some(ws_name);
     meta.workspace_path = Some(ws_path.to_string_lossy().to_string());
     meta.change_ref = jj_head_ref(&ws_path);
