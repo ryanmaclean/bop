@@ -1,394 +1,102 @@
-# bop (formerly gtfs/jc): Heterogeneous Agent Orchestrator
+# bop — Heterogeneous Agent Orchestrator
 
-A pluggable job system for parallel AI coding agents that uses APFS/Btrfs filesystem primitives as the control plane. Jobs are macOS directory bundles (UTI-registered "cards") navigable in Finder with Quick Look previews. The filesystem IS the state machine, the job queue, and the audit log.
+A pluggable job system for parallel AI coding agents. The filesystem IS the state machine: directory bundles (`.jobcard`) are navigable in Finder with Quick Look previews. No database. `mv` = state transition.
 
-Main operating plan for all agents: [`plan.md`](plan.md)
+**New agents:** read `plan.md` first, then `CLAUDE.md`.
 
-Naming decision:
-- Canonical product/CLI name is `bop`
-- Legacy command name `jc` remains temporarily for compatibility
-- Planned card-game verbs: `bop deal` (dispatch/create flow) and `bop bet` (estimation flow)
-
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
-# Build the project
 cargo build
-
-# Temporary shim: run bop using current jc binary until binary rename lands
-bop() { ./target/debug/jc "$@"; }
-
-# Initialize the job card system
-bop init
-
-# Create a new job from a template
-bop new implement my-feature
-
-# Run the dispatcher (processes pending jobs)
-bop dispatcher --max-workers 3
-
-# Run the merge gate (merges completed jobs)
-bop merge-gate
-
-# Check status
-bop status
+./target/debug/bop doctor        # verify tooling
+./target/debug/bop init           # create .cards/ structure
+./target/debug/bop new implement my-feature
+./target/debug/bop status
+./target/debug/bop dispatcher --once   # process one pending card
+./target/debug/bop merge-gate --once   # merge one done card
 ```
 
-## 🏗️ Architecture
+## Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│  Finder / Quick Look / Spotlight            │  ← FREE (macOS native)
-│  Vibe Kanban (optional web UI, Apache 2.0)  │  ← DON'T BUILD (fork if needed)
-└───────────────────┬─────────────────────────┘
-                    │ reads bundle state
-┌───────────────────▼─────────────────────────┐
-│  dispatcher (~250 LOC shell or Rust)        │  ← BUILD
-│  - FSEvents/inotifywait watcher             │
-│  - stage router                             │
-│  - provider failover                        │
-│  - dead worker reaper (launchd KeepAlive)   │
-└───────────────────┬─────────────────────────┘
-                    │ fork per job
-┌───────────────────▼─────────────────────────┐
-│  adapters/ (~20 LOC each)                   │  ← BUILD
-│  claude / codex / goose / aider / ollama    │
-└───────────────────┬─────────────────────────┘
-                    │ works inside
-┌───────────────────▼─────────────────────────┐
-│  .jobcard bundles (APFS clones)             │  ← BUILD (structure + UTI)
-│  each with git worktree                     │
-└─────────────────────────────────────────────┘
+Finder / Quick Look / Spotlight       ← FREE (macOS native)
+        │ reads bundle state
+        ▼
+dispatcher (~Rust binary)             ← bop dispatcher
+        │ fork per job
+        ▼
+adapters/ (~20 LOC shell each)        ← claude, codex, goose, aider, ollama, mock
+        │ works inside
+        ▼
+.cards/<state>/<id>.jobcard/          ← APFS COW clones
 ```
 
-## 📁 Directory Structure
+**State machine:** `pending/ → running/ → done/ → merged/` (or `failed/`)
 
-```
-.cards/
-├── templates/           # Job card templates
-│   ├── implement.jobcard/
-│   ├── refactor.jobcard/
-│   └── qa-only.jobcard/
-├── pending/            # Jobs waiting to be processed
-├── running/            # Currently executing jobs
-├── done/               # Completed jobs awaiting merge
-├── merged/             # Successfully merged jobs
-├── failed/             # Failed jobs
-└── providers.json      # Provider configuration
-```
-
-## 🎯 Design Principles
-
-1. **The filesystem is the database.** No SQLite, no JSONL parsing, no in-process state. Directory position = job status. `mv` = state transition. `ls` = dashboard.
-2. **Cards are bundles.** Each job is a macOS document bundle with a registered UTI. Finder, Spotlight, Quick Look treat it as a first-class object.
-3. **Agents are adapters.** Three functions per agent runtime: `exec`, `is_alive`, `resume`. ~20 LOC each. Claude, Codex, Goose, Aider, OpenCode, local Ollama.
-4. **Stages route to agents.** A single job flows through spec→plan→implement→QA. Each stage can target a different agent runtime and model tier.
-5. **COW clones for templates.** APFS `cp -c` / Btrfs reflink. Creating 50 jobs from a template costs zero disk.
-6. **Crash recovery is `mv failed/ pending/`.** No log replay. No state inference. Atomic rename.
-7. **No GC languages in the critical path.** Dispatcher in Rust or shell. Adapters in shell. Quick Look plugin in Swift.
-
-## 🔧 Installation
-
-### Prerequisites
-
-- macOS 12+ (for APFS COW clones and Quick Look integration)
-- Rust 1.70+ (for building the CLI)
-- Git (for worktree management)
-- Optional: Ollama (for local model support)
-
-### Build
+## CLI Commands
 
 ```bash
-# Clone the repository
-git clone <repository-url> bop
-cd bop
-
-# Build the CLI tool
-cargo build
-
-# Install to system (optional)
-sudo cp target/debug/jc /usr/local/bin/bop
-sudo ln -sf /usr/local/bin/bop /usr/local/bin/jc   # legacy compatibility
+bop new <template> <id>       # Clone template → pending/
+bop status                    # Board view across all states
+bop inspect <id>              # Show meta/spec/log summary
+bop dispatcher [--once]       # Run dispatcher (--once for single pass)
+bop merge-gate [--once]       # Run merge gate
+bop retry <id>                # Move card back to pending/
+bop kill <id>                 # SIGTERM running card → failed/
+bop logs <id> [--follow]      # Stream stdout/stderr
+bop approve <id>              # Mark done card as merge-ready
+bop poker open <id>           # Open estimation round
+bop poker submit <id> -n <who> <glyph>   # Submit estimate
+bop poker reveal <id>         # Flip all estimates
+bop poker consensus <id> <g>  # Lock consensus estimate
+bop policy check --staged     # Anti-slop gates on staged changes
+bop doctor                    # Verify local tooling
 ```
 
-### macOS Integration
+## Card Structure
+
+```
+my-feature.jobcard/
+├── meta.json          ← machine-readable state (glyph, stage, provider_chain)
+├── spec.md            ← what to build
+├── prompt.md          ← agent prompt with {{variables}}
+├── logs/              ← stdout.log, stderr.log, pid
+└── output/            ← diff.patch, qa_report.md
+```
+
+## Card Symbol Protocol
+
+Cards carry a `glyph` encoding team (suit) and priority (rank):
+
+| Suit | Team | Rank | Priority |
+|------|------|------|----------|
+| ♠ | CLI/runtime | A | P1 |
+| ♥ | Architecture | K/Q | P2 |
+| ♦ | QA/reliability | J | P3 |
+| ♣ | Platform | 2–10 | P4 |
+
+Joker (🃏) = emergency/breakdown needed. ASCII fallback: `S-A`, `H-K`, `D-7`, `JOKER`.
+
+## Adapters
+
+Shell scripts in `adapters/` — one per AI provider:
+
+```
+adapter.sh <workdir> <prompt_file> <stdout_log> <stderr_log>
+```
+
+Exit 75 = rate-limited (triggers provider rotation). Available: `claude`, `codex`, `goose`, `aider`, `opencode`, `ollama-local`, `mock`.
+
+## Build & Test
 
 ```bash
-# Install Quick Look plugin
-xcodebuild -project JobCardQuickLook/JobCardQuickLook.xcodeproj -scheme JobCardQuickLook
-
-# Register UTI (one-time)
-open JobCardType/JobCardType.app
-
-# Install launchd services (optional)
-cp launchd/*.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.yourorg.jobcard.dispatcher.plist
-launchctl load ~/Library/LaunchAgents/com.yourorg.jobcard.merge-gate.plist
+cargo build                  # Build all crates
+cargo test                   # Run all tests
+cargo clippy -- -D warnings  # Lint
+cargo fmt --check            # Format check
+make check                   # All three at once
 ```
 
-## 📋 CLI Commands
+## License
 
-```bash
-bop init                          # Create .cards/ structure in current repo
-bop new <template> <id>           # Clone template → pending/
-bop new implement feat-auth       # Example
-bop status                        # ls across all state directories
-bop status feat-auth              # Show meta.json for specific card
-bop validate <id>                 # Validate card structure
-bop dispatcher --vcs-engine git_gt   # Run dispatcher daemon (Graphite/Git lane)
-bop merge-gate --vcs-engine jj       # Run merge gate daemon (JJ lane)
-bop retry <id>                    # Move card back to pending/
-bop kill <id>                     # SIGTERM running card and move to failed/
-bop logs <id> --follow            # Stream stdout/stderr for a card
-bop inspect <id>                  # Show meta/spec/log summary
-bop policy check --staged         # Run anti-slop policy gates on staged changes
-bop policy check <id>             # Run policy gates for a specific card
-bop doctor                        # Verify required local tooling
-bop serve --port 8080             # Start REST API (default bind 127.0.0.1)
-bop serve --bind 0.0.0.0 --port 8080
-# WARNING: non-localhost --bind exposes unauthenticated job control endpoints.
-```
-
-REST API endpoints served by `bop serve`:
-- `GET /jobs`
-- `GET /jobs/:id`
-- `POST /jobs`
-- `POST /jobs/:id/retry`
-- `DELETE /jobs/:id`
-- `GET /jobs/:id/logs` (Server-Sent Events)
-- `GET /openapi.json`
-
-## 🤖 Supported AI Providers
-
-### Cloud Providers
-- **Claude** (`adapters/claude.zsh`) - Anthropic Claude API
-- **Codex** (`adapters/codex.zsh`) - OpenAI Codex API
-- **Goose** (`adapters/goose.zsh`) - Goose AI
-- **Aider** (`adapters/aider.zsh`) - Aider coding assistant
-- **OpenCode** (`adapters/opencode.zsh`) - OpenCode platform
-
-### Local Providers
-- **Ollama** (`adapters/ollama-local.zsh`) - Local Ollama models
-- **Mock** (`adapters/mock.zsh`) - Mock adapter for testing
-
-### Adding New Providers
-
-Create a new shell script in `adapters/` following this pattern:
-
-```zsh
-#!/usr/bin/env zsh
-set -euo pipefail
-
-workdir="$1"; prompt_file="$2"; stdout_log="$3"; stderr_log="$4"
-
-cd "$workdir" || exit 1
-
-# Your agent command here
-your-agent -p "$(cat "$prompt_file")" \
-  > "$stdout_log" 2> "$stderr_log"
-rc=$?
-
-# Detect rate limits (exit code 75 = EX_TEMPFAIL)
-if grep -qiE 'rate limit|429|too many requests' "$stderr_log"; then
-  exit 75
-fi
-
-exit $rc
-```
-
-## 🔄 Job Lifecycle
-
-1. **Create**: `bop new implement my-feature` clones template to `pending/`
-2. **Dispatch**: Dispatcher moves job to `running/` and executes adapter
-3. **Execute**: Agent processes the job in its workspace
-4. **Complete**: Successful jobs move to `done/`
-5. **Merge**: Merge gate validates acceptance criteria and merges to main
-6. **Archive**: Merged jobs move to `merged/`
-
-## 📊 Job Card Structure
-
-```
-my-feature.jobcard/                    ← macOS document bundle
-├── Info.plist                        ← UTI declaration, bundle metadata
-├── meta.json                        ← machine-readable job state
-├── spec.md                           ← what to build (human-authored)
-├── prompt.md                         ← agent prompt template with {{variables}}
-├── QuickLook/
-│   ├── Preview.html                  ← rendered card for Finder preview
-│   └── Thumbnail.png                 ← 512x512 card thumbnail
-├── workspace/                        ← VCS workspace checkout (created by dispatcher)
-├── logs/
-│   ├── stdout.log                    ← agent stdout
-│   ├── stderr.log
-│   └── pid                           ← agent process ID
-└── output/
-    ├── diff.patch                    ← final work product
-    └── qa_report.md                  ← QA findings
-```
-
-## 🎨 macOS Integration
-
-### Quick Look Preview
-Job cards appear as rich previews in Finder showing:
-- Job name and current stage
-- Progress indicator (spec ✓ → plan ✓ → implement ⟳ → qa ○)
-- Agent type and provider
-- Acceptance criteria
-- Recent activity logs
-
-### Spotlight Integration
-Search job cards with:
-```bash
-mdfind "kMDItemKind == 'Agent Job Card' && com_yourorg_jobcard_stage == 'failed'"
-```
-
-### UTI Registration
-`.jobcard` files are registered as `com.yourorg.jobcard` conforming to:
-- `com.apple.package` (treated as bundles)
-- `public.composite-content` (contain multiple files)
-
-## 🔧 Configuration
-
-### Provider Configuration (`.cards/providers.json`)
-
-```json
-{
-  "providers": {
-    "claude": {
-      "command": "adapters/claude.zsh",
-      "rate_limit_exit": 75
-    },
-    "ollama-local": {
-      "command": "adapters/ollama-local.zsh", 
-      "rate_limit_exit": 75
-    }
-  }
-}
-```
-
-### Template Configuration
-Templates define job structure and default settings:
-- Provider chain (which agents to try in order)
-- Default stage (spec, plan, implement, qa)
-- Acceptance criteria templates
-- Prompt templates with variable substitution
-
-### Model Lookup System
-
-JobCard includes intelligent model selection based on task complexity, required capabilities, and cost constraints. Models are configured in `.cards/models.json`. See [MODEL_LOOKUP.md](MODEL_LOOKUP.md) for the full design.
-
-## 🚦 Process Supervision
-
-### Launchd Services (macOS)
-
-```bash
-# Start services
-launchctl start com.yourorg.jobcard.dispatcher
-launchctl start com.yourorg.jobcard.merge-gate
-
-# Check status
-launchctl list | grep jobcard
-
-# View logs
-tail -f /tmp/jobcard-dispatcher.log
-tail -f /tmp/jobcard-merge-gate.log
-```
-
-### Systemd Services (Linux)
-
-```bash
-# Install services
-sudo cp systemd/*.service /etc/systemd/system/
-sudo systemctl enable jobcard-dispatcher
-sudo systemctl enable jobcard-merge-gate
-
-# Start services
-sudo systemctl start jobcard-dispatcher
-sudo systemctl start jobcard-merge-gate
-```
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-1. **Jobs stuck in `running/`**: Check if agent process is alive
-   ```bash
-   ps aux | grep -i agent
-   # Or use reaper: dispatcher will automatically move dead jobs back to pending/
-   ```
-
-2. **Rate limiting**: Check provider cooldowns
-   ```bash
-   bop providers  # Shows provider status and cooldowns
-   ```
-
-3. **Merge conflicts**: Jobs fail during merge gate
-   ```bash
-   # Check conflict reports
-   cat .cards/failed/job-name/output/conflicts.diff
-   ```
-
-4. **Missing templates**: Ensure templates directory exists
-   ```bash
-   bop init  # Creates default templates
-   ```
-
-### Debug Mode
-
-```bash
-# Run dispatcher with verbose output
-RUST_LOG=debug ./target/debug/jc dispatcher --once
-# (or, if installed)
-RUST_LOG=debug bop dispatcher --once
-
-# Test individual adapter
-zsh adapters/claude.zsh /path/to/workdir /path/to/prompt /tmp/stdout /tmp/stderr
-```
-
-## 📚 Documentation
-
-| File | Description |
-|------|-------------|
-| [ROADMAP.md](ROADMAP.md) | Version milestones and planned features |
-| [MODEL_LOOKUP.md](MODEL_LOOKUP.md) | Model selection system design |
-| [PORTABLE_ADAPTERS.md](PORTABLE_ADAPTERS.md) | Cross-platform adapter guide |
-| [IDEATION.md](IDEATION.md) | System vision and philosophy |
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Add your adapter or improvement
-4. Test with the mock adapter first
-5. Submit a pull request
-
-### Development Setup
-
-```bash
-# Install development dependencies
-cargo install cargo-watch
-
-# Run with auto-reload
-cargo watch -x 'run -p jc -- dispatcher --once'
-
-# Run tests
-cargo test
-```
-
-## 📄 License
-
-MIT License - see LICENSE file for details.
-
-## 🙏 Acknowledgments
-
-Inspired by:
-- Gas Town's crash-recovery-via-externalized-state
-- Auto-Claude's spec→plan→implement→QA pipeline
-- HyperCard's card-as-tangible-object metaphor
-- Vibe Kanban's pluggable executor architecture
-
-## 🔗 Related Projects
-
-- [Gas Town](https://github.com/gas-town) - Multi-agent orchestration system
-- [Auto-Claude](https://github.com/auto-claude) - Automated coding pipeline
-- [Vibe Kanban](https://github.com/vibe-kanban) - Pluggable task executor
+MIT

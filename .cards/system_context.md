@@ -1,19 +1,19 @@
 # System Context
 
-You are an AI agent running inside the **jobcard orchestration system**.
+You are an AI agent running inside the **bop orchestration system**.
 
-**CRITICAL:** This project is named "GTFS" but is NOT the General Transit Feed
-Specification (transit data). It is a multi-agent task runner built in Rust.
+**CRITICAL:** This project is a multi-agent task runner built in Rust.
+It is NOT the General Transit Feed Specification (transit data).
 
 ## What you are
 
-You have been dispatched by the `jc` dispatcher to work on a jobcard. You are
+You have been dispatched by the `bop` dispatcher to work on a jobcard. You are
 running in a git worktree on branch `{{worktree_branch}}`. Do NOT touch `main`.
 
 ## The system
 
-- `jc` — CLI: `init`, `new`, `status`, `validate`, `dispatcher`, `merge-gate`
-- Cards live in `.cards/<team>/<state>/<id>.jobcard/` directories
+- `bop` — CLI: `init`, `new`, `status`, `inspect`, `dispatcher`, `merge-gate`, `poker`
+- Cards live in `.cards/<state>/<id>.jobcard/` directories
 - State transitions: `pending/` → `running/` → `done/` → `merged/` (or `failed/`)
 - Your card is in `running/` while you execute
 - Exit 0 → card moves to `done/` (merge-gate picks it up)
@@ -29,4 +29,4 @@ running in a git worktree on branch `{{worktree_branch}}`. Do NOT touch `main`.
 
 Cards are visualised as playing-card glyphs in Finder (Quick Look) and Zellij
 panes. The `glyph` field in `meta.json` encodes team (suit) and priority (rank).
-Do not change `glyph` unless running `jc poker consensus`.
+Do not change `glyph` unless running `bop poker consensus`.

@@ -9,8 +9,8 @@ If you are a new agent, start here before writing code.
 - Canonical CLI verb: `bop`
 - Domain verbs:
   - `bop deal` = create/deal work cards
-  - `bop bet` = estimate/prioritize cards
-- Compatibility during transition: keep `jc` as legacy alias only.
+  - `bop bet` = estimate/prioritize cards (alias for `bop poker`)
+- `bop poker open/submit/reveal/consensus` = plan poker flow (LANDED)
 
 Reason: `bop` is short, memorable, and low-token-cost in prompts/logs.
 
@@ -40,14 +40,12 @@ Target behavior: Auto-Claude/Gas-Town style task manager with explicit stages:
 Run this exact sequence:
 
 ```zsh
-# Prefer bop; fall back to jc only if a local transition build still uses it.
-BOP_BIN="${BOP_BIN:-./target/debug/bop}"
-[[ -x "$BOP_BIN" ]] || BOP_BIN="./target/debug/jc"
-$BOP_BIN doctor
-$BOP_BIN status
-$BOP_BIN inspect <card-id>
+cargo build
+./target/debug/bop doctor
+./target/debug/bop status
+./target/debug/bop inspect <card-id>
 make check
-$BOP_BIN policy check --staged
+./target/debug/bop policy check --staged
 ```
 
 If no card is assigned, pick one from `.cards/pending/` and inspect it first.
@@ -134,18 +132,15 @@ Users should always see card symbols and state quickly without reading long docs
 
 ## 10) Immediate Direction (Simplicity First)
 
+DONE:
+- [x] Plan poker (`bop poker open/submit/reveal/consensus`) with glyph-based estimation
+- [x] `jc` → `bop` rename across CLI, docs, system_context
+- [x] Duplicate file cleanup (templates/, ghost doc refs)
+
+NEXT:
 1. Enforce glyph presence/format in policy check.
-2. Add a tiny "agent start" script that prints:
-   - card id
-   - glyph meaning
-   - scope
-   - exact gate commands
-   - recommended `bop deal` or `bop bet` next action
-3. Keep rollout automation simple:
-   - blue/green roots
-   - deterministic canary routing
-   - automatic rollback on sustained green SLO breach
-4. Prefer fixing reliability gaps over adding features.
+2. Wire `bop deal` as alias for `bop new` (card-game verb consistency).
+3. Prefer fixing reliability gaps over adding features.
 
 ## 12) Safe Main Landing While Agents Are Live (JJ-First)
 

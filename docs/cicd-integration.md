@@ -1,6 +1,6 @@
 # CI/CD Integration
 
-JobCard integrates with GitHub Actions and GitLab CI via a lightweight REST API server. Jobs run on a self-hosted runner; your CI pipeline creates jobs and polls for completion.
+bop integrates with GitHub Actions and GitLab CI via a lightweight REST API server. Jobs run on a self-hosted runner; your CI pipeline creates jobs and polls for completion.
 
 ## Architecture
 
@@ -11,29 +11,29 @@ CI Pipeline (GitHub / GitLab)
         ▼
 Self-hosted runner
   ┌─────────────────────────┐
-  │  jc serve               │  ← REST API server
-  │  jc dispatcher          │  ← picks up jobs, runs agents
+  │  bop serve               │  ← REST API server
+  │  bop dispatcher          │  ← picks up jobs, runs agents
   │  .cards/ filesystem     │  ← state machine
   └─────────────────────────┘
 ```
 
 ## Starting the API Server
 
-On your self-hosted runner, start the JobCard API server alongside the dispatcher:
+On your self-hosted runner, start the bop API server alongside the dispatcher:
 
 ```bash
 # Start the REST API server (default: localhost:8765)
-jc serve --bind 127.0.0.1 --port 8765 &
+bop serve --bind 127.0.0.1 --port 8765 &
 
 # Start the dispatcher
-jc dispatcher --adapter adapters/claude.sh &
+bop dispatcher --adapter adapters/claude.sh &
 ```
 
 > **Security**: The API server has no authentication. Keep `--bind 127.0.0.1` (loopback-only) unless you add a reverse proxy with authentication in front.
 
 ## REST API Reference
 
-All endpoints are on the base URL provided to `jc serve`.
+All endpoints are on the base URL provided to `bop serve`.
 
 ### `POST /jobs`
 
@@ -215,7 +215,7 @@ ai-coding:
 
 | Variable | Default | Description |
 |---|---|---|
-| `JOBCARD_API_URL` | `http://127.0.0.1:8765` | JobCard API server URL |
+| `JOBCARD_API_URL` | `http://127.0.0.1:8765` | bop API server URL |
 | `JOBCARD_POLL_INTERVAL` | `15` | Seconds between status polls |
 | `JOBCARD_TIMEOUT_MINUTES` | `60` | Maximum wait time |
 
@@ -226,13 +226,13 @@ ai-coding:
 ### GitHub Actions
 
 1. Register a self-hosted runner in your repo settings
-2. Install the `jc` binary on the runner
-3. Create a launchd/systemd service for `jc serve` and `jc dispatcher`
+2. Install the `bop` binary on the runner
+3. Create a launchd/systemd service for `bop serve` and `bop dispatcher`
 4. Set `runs-on: self-hosted` in your workflow
 
 ### GitLab CI
 
 1. Register a GitLab Runner with the `shell` executor on your machine
-2. Ensure `jc`, `jq`, and `curl` are available in the runner's PATH
-3. Start `jc serve` and `jc dispatcher` as background services
+2. Ensure `bop`, `jq`, and `curl` are available in the runner's PATH
+3. Start `bop serve` and `bop dispatcher` as background services
 4. Set `JOBCARD_API_URL` in your GitLab CI/CD variables
