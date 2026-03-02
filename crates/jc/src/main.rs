@@ -1330,6 +1330,15 @@ const FACTORY_LABELS: [(&str, &str); 2] = [
     ("sh.bop.merge-gate", "merge-gate"),
 ];
 
+fn zellij_plugin_src(repo_root: &Path) -> PathBuf {
+    repo_root.join("crates/jc-zellij-plugin/target/wasm32-wasip1/release/jc_zellij_plugin.wasm")
+}
+
+fn zellij_plugin_dest() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_default();
+    Path::new(&home).join(".config/zellij/plugins/bop.wasm")
+}
+
 fn launchd_dir() -> PathBuf {
     PathBuf::from(std::env::var("HOME").expect("HOME not set")).join("Library/LaunchAgents")
 }
@@ -1494,6 +1503,23 @@ fn cmd_factory_install(cards_root: &Path) -> anyhow::Result<()> {
         }
     }
 
+    // Zellij plugin
+    let wasm_src = zellij_plugin_src(&repo_root);
+    if wasm_src.exists() {
+        let dest = zellij_plugin_dest();
+        if let Some(parent) = dest.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        match fs::copy(&wasm_src, &dest) {
+            Ok(_) => println!("✓ zellij plugin installed: {}", dest.display()),
+            Err(e) => eprintln!("  zellij plugin copy failed: {}", e),
+        }
+    } else {
+        println!(
+            "  (zellij plugin wasm not built — skipping)\n  build with: cargo build --manifest-path crates/jc-zellij-plugin/Cargo.toml --target wasm32-wasip1 --release"
+        );
+    }
+
     println!("\nFactory services installed. Run `bop factory status` to verify.");
     Ok(())
 }
@@ -1586,6 +1612,15 @@ fn cmd_factory_status() -> anyhow::Result<()> {
 fn cmd_factory_uninstall() -> anyhow::Result<()> {
     // Icons watcher travels with factory
     let _ = cmd_icons_uninstall();
+
+    // Zellij plugin
+    let zj_dest = zellij_plugin_dest();
+    if zj_dest.exists() {
+        let _ = fs::remove_file(&zj_dest);
+        println!("✓ removed zellij plugin: {}", zj_dest.display());
+    } else {
+        println!("  (zellij plugin not installed)");
+    }
 
     for (label, _) in &FACTORY_LABELS {
         let dest = plist_path(label);
