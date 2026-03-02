@@ -66,7 +66,7 @@ pub struct Subtask {
     pub done: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct Meta {
     pub id: String,
     pub created: DateTime<Utc>,
@@ -166,6 +166,15 @@ pub struct Meta {
     /// participant name → playing-card glyph (e.g. "alice" → "🂻")
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub estimates: BTreeMap<String, String>,
+
+    /// Zellij session name for live attach (e.g. "bop-feat-auth").
+    /// Set by bop_bop.zsh before dispatch; cleared on merge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zellij_session: Option<String>,
+
+    /// Zellij pane ID within the session (for direct focus).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zellij_pane: Option<String>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -294,5 +303,25 @@ mod tests {
 
         let rendered = render_prompt("Memory:\n{{memory}}\n", &ctx);
         assert_eq!(rendered, "Memory:\nk: v\n");
+    }
+
+    #[test]
+    fn meta_zellij_session_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = Meta {
+            id: "z1".into(),
+            created: chrono::Utc::now(),
+            stage: "implement".into(),
+            provider_chain: vec![],
+            stages: Default::default(),
+            acceptance_criteria: vec![],
+            zellij_session: Some("bop-z1".into()),
+            zellij_pane: Some("3".into()),
+            ..Default::default()
+        };
+        write_meta(dir.path(), &m).unwrap();
+        let back = read_meta(dir.path()).unwrap();
+        assert_eq!(back.zellij_session.as_deref(), Some("bop-z1"));
+        assert_eq!(back.zellij_pane.as_deref(), Some("3"));
     }
 }

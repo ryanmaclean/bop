@@ -866,6 +866,8 @@ fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
             subtasks: vec![],
             poker_round: None,
             estimates: Default::default(),
+            zellij_session: None,
+            zellij_pane: None,
         };
         write_meta(&implement, &meta)?;
 
@@ -952,6 +954,8 @@ fn create_card(
         subtasks: vec![],
         poker_round: None,
         estimates: Default::default(),
+        zellij_session: None,
+        zellij_pane: None,
     });
 
     meta.id = id.to_string();
