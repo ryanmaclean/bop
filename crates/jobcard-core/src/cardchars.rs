@@ -70,6 +70,29 @@ pub fn is_trump(ch: char) -> bool {
     cp >= TRUMP_FOOL as u32 && cp <= TRUMP_MAX as u32
 }
 
+// ── Trump BMP tokens ────────────────────────────────────────────────────────
+
+/// Return the (glyph, token) pair for a trump card by rank (0=Fool .. 21=World).
+///
+/// Glyph is the SMP character (U+1F0E0+rank).
+/// Token is a circled number in the BMP for terminal/filename display:
+///   rank 0  → ⓪ U+24FF
+///   rank 1–20 → ①–⑳ U+2460–U+2473
+///   rank 21 → ㉑ U+3251
+pub fn trump_glyph_and_token(rank: u32) -> Option<(char, char)> {
+    if rank > 21 {
+        return None;
+    }
+    let glyph = char::from_u32(0x1F0E0 + rank)?;
+    let token = match rank {
+        0 => '\u{24FF}',                              // ⓪
+        1..=20 => char::from_u32(0x245F + rank)?,     // ①–⑳
+        21 => '\u{3251}',                              // ㉑
+        _ => unreachable!(),
+    };
+    Some((glyph, token))
+}
+
 // ── Auto-assignment ──────────────────────────────────────────────────────────
 
 /// Return the first unused (glyph, token) pair for `team`.
@@ -316,6 +339,43 @@ mod tests {
         assert!(is_trump('\u{1F0E5}')); // Trump V
         assert!(!is_trump('\u{1F0A1}')); // Ace of Spades is not a trump
         assert!(!is_trump('\u{1F0F6}')); // Past the end of trumps
+    }
+
+    #[test]
+    fn trump_glyph_and_token_fool() {
+        let (glyph, token) = trump_glyph_and_token(0).unwrap();
+        assert_eq!(glyph, TRUMP_FOOL);
+        assert_eq!(token, '\u{24FF}'); // ⓪
+    }
+
+    #[test]
+    fn trump_glyph_and_token_magician() {
+        let (glyph, token) = trump_glyph_and_token(1).unwrap();
+        assert_eq!(glyph as u32, 0x1F0E1);
+        assert_eq!(token, '\u{2460}'); // ①
+    }
+
+    #[test]
+    fn trump_glyph_and_token_world() {
+        let (glyph, token) = trump_glyph_and_token(21).unwrap();
+        assert_eq!(glyph, TRUMP_MAX);
+        assert_eq!(token, '\u{3251}'); // ㉑
+    }
+
+    #[test]
+    fn trump_glyph_and_token_all_22() {
+        for rank in 0..22 {
+            let (glyph, token) = trump_glyph_and_token(rank).unwrap();
+            assert_eq!(glyph as u32, 0x1F0E0 + rank);
+            // All tokens must be BMP (< U+10000)
+            assert!((token as u32) < 0x10000, "rank {rank} token not BMP");
+        }
+    }
+
+    #[test]
+    fn trump_glyph_and_token_out_of_range() {
+        assert!(trump_glyph_and_token(22).is_none());
+        assert!(trump_glyph_and_token(100).is_none());
     }
 
     #[test]

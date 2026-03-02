@@ -225,6 +225,18 @@ fileprivate struct JobCardPreview: View {
         }
     }
 
+    /// Pick font for a card glyph: use bundled Noto Sans Symbols 2 for the
+    /// trump range (U+1F0E0–U+1F0F5) which has no macOS system font coverage;
+    /// fall back to the system font for everything else (Apple Symbols covers
+    /// the suit cards).
+    private func glyphFont(for glyph: String) -> Font {
+        if let scalar = glyph.unicodeScalars.first,
+           scalar.value >= 0x1F0E0, scalar.value <= 0x1F0F5 {
+            return .custom("Noto Sans Symbols 2", size: 108)
+        }
+        return .system(size: 108)
+    }
+
     @ViewBuilder
     private func cardBody(_ m: JobCardMeta) -> some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -232,7 +244,7 @@ fileprivate struct JobCardPreview: View {
             // Header: Checkbox + Title
             HStack(alignment: .top, spacing: 16) {
                 Text(m.glyph ?? "🂠")
-                    .font(.system(size: 108))
+                    .font(glyphFont(for: m.glyph ?? "🂠"))
                     .fixedSize()
                     .offset(y: -36)
                 
