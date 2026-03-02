@@ -672,3 +672,45 @@ cat .cards/pending/*test-arch-card*/meta.json | grep -E '"glyph"|"token"'
 git add -A
 git commit -m "chore: integration test fixups for cardchars"
 ```
+
+---
+
+## Future: Trump Cards as Agent Personas
+
+The Unicode trump cards (U+1F0E0..U+1F0F5) map to Tarot major arcana.
+These are ideal as agent persona glyphs — shown in Zellij pane titles,
+`bop list` agent column, and dispatcher logs.
+
+| Codepoint | Glyph | Tarot Name | Agent Role |
+|-----------|-------|------------|------------|
+| U+1F0E0 | 🃠 | The Fool | Explorer / brainstormer |
+| U+1F0E1 | 🃡 | The Magician | Implementer |
+| U+1F0E2 | 🃢 | The High Priestess | Spec reviewer |
+| U+1F0E3 | 🃣 | The Empress | Code quality reviewer |
+| U+1F0E4 | 🃤 | The Emperor | Architect / tech lead |
+| U+1F0E5 | 🃥 | The Hierophant | Documentation writer |
+| U+1F0E6 | 🃦 | The Lovers | Integration tester |
+| U+1F0E7 | 🃧 | The Chariot | Dispatcher |
+| U+1F0E8 | 🃨 | Strength | Debugger |
+| U+1F0E9 | 🃩 | The Hermit | Deep researcher |
+| U+1F0EA | 🃪 | Wheel of Fortune | Retry / failover handler |
+| U+1F0EB | 🃫 | Justice | Policy checker |
+| U+1F0EC | 🃬 | The Hanged Man | Blocked-task reviewer |
+| U+1F0ED | 🃭 | Death | Dead code hunter / cleanup |
+| U+1F0EE | 🃮 | Temperance | Refactorer (balance) |
+| U+1F0EF | 🃯 | The Devil | Security auditor |
+| U+1F0F0 | 🃰 | The Tower | Breaking change handler |
+| U+1F0F1 | 🃱 | The Star | Performance optimizer |
+| U+1F0F2 | 🃲 | The Moon | Edge case finder |
+| U+1F0F3 | 🃳 | The Sun | Test writer |
+| U+1F0F4 | 🃴 | Judgement | Final reviewer |
+| U+1F0F5 | 🃵 | The World | Release manager |
+
+### Implementation sketch (future PR)
+
+1. Add `Persona` enum to `cardchars.rs` with `trump_glyph()` method
+2. Dispatcher assigns persona to `agent_type` based on stage
+3. `bop list` shows persona glyph in an agent column
+4. Zellij pane title: `🃡 implement feat-auth` instead of `agent: implement`
+
+Constants already exist in `cardchars.rs` (`TRUMP_FOOL` through `TRUMP_MAX`).
