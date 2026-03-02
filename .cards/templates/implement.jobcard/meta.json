@@ -1,13 +1,31 @@
 {
-  "id": "template-implement",
-  "created": "2026-02-28T00:00:00Z",
+  "id": "REPLACE_ID",
+  "created": null,
   "agent_type": null,
   "stage": "implement",
   "priority": null,
-  "provider_chain": ["claude", "codex", "goose"],
-  "stages": {},
-  "acceptance_criteria": [],
-  "worktree_branch": "job/template-implement",
+  "glyph": null,
+  "token": null,
+  "stage_chain": ["implement", "qa"],
+  "stage_models": {
+    "implement": "opus",
+    "qa": "sonnet"
+  },
+  "stage_providers": {
+    "implement": "claude",
+    "qa": "claude"
+  },
+  "stage_budgets": {
+    "implement": 32000,
+    "qa": 8000
+  },
+  "provider_chain": ["claude", "codex", "ollama-local"],
+  "acceptance_criteria": [
+    "cargo test",
+    "cargo clippy -- -D warnings"
+  ],
+  "worktree_branch": "job/REPLACE_ID",
+  "timeout_seconds": 3600,
   "retry_count": 0,
   "failure_reason": null
 }

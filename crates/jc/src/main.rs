@@ -5,7 +5,7 @@ use jobcard_core::{write_meta, Meta, StageStatus, VcsEngine as CoreVcsEngine};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 use std::time::Duration;
@@ -23,6 +23,9 @@ struct Cli {
 }
 
 const DEFAULT_MEMORY_TTL_SECONDS: i64 = 60 * 60 * 24 * 30;
+const LEASE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+const LEASE_STALE_FLOOR: Duration = Duration::from_secs(30);
+const DISPATCHER_LOCK_REL: &str = ".locks/dispatcher.lock";
 
 #[derive(Subcommand, Debug)]
 enum Command {
@@ -220,6 +223,219 @@ enum MemoryOutputValue {
     },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RunLease {
+    run_id: String,
+    pid: i32,
+    pid_start_time: DateTime<Utc>,
+    started_at: DateTime<Utc>,
+    heartbeat_at: DateTime<Utc>,
+    host: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DispatcherLockOwner {
+    pid: i32,
+    host: String,
+    started_at: DateTime<Utc>,
+}
+
+#[derive(Debug)]
+struct DispatcherLockGuard {
+    path: PathBuf,
+}
+
+impl Drop for DispatcherLockGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+fn lock_owner_path(lock_dir: &Path) -> PathBuf {
+    lock_dir.join("owner.json")
+}
+
+fn lease_path(card_dir: &Path) -> PathBuf {
+    card_dir.join("logs").join("lease.json")
+}
+
+fn host_name() -> String {
+    std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("COMPUTERNAME"))
+        .unwrap_or_else(|_| "unknown-host".to_string())
+}
+
+fn next_run_id(pid: Option<u32>) -> String {
+    let ts = Utc::now()
+        .timestamp_nanos_opt()
+        .unwrap_or_else(|| Utc::now().timestamp_micros() * 1000);
+    format!("{}-{}", ts, pid.unwrap_or(0))
+}
+
+fn pid_is_alive_sync(pid: i32) -> bool {
+    StdCommand::new("kill")
+        .arg("-0")
+        .arg(pid.to_string())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn acquire_dispatcher_lock(cards_dir: &Path) -> anyhow::Result<DispatcherLockGuard> {
+    let lock_dir = cards_dir.join(DISPATCHER_LOCK_REL);
+    if let Some(parent) = lock_dir.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let owner = DispatcherLockOwner {
+        pid: std::process::id() as i32,
+        host: host_name(),
+        started_at: Utc::now(),
+    };
+    let owner_json = serde_json::to_vec_pretty(&owner)?;
+
+    for _ in 0..2 {
+        match fs::create_dir(&lock_dir) {
+            Ok(()) => {
+                if let Err(err) = fs::write(lock_owner_path(&lock_dir), &owner_json) {
+                    let _ = fs::remove_dir_all(&lock_dir);
+                    return Err(err.into());
+                }
+                return Ok(DispatcherLockGuard { path: lock_dir });
+            }
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+                let lock_owner = fs::read(lock_owner_path(&lock_dir))
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice::<DispatcherLockOwner>(&bytes).ok());
+
+                let stale = lock_owner
+                    .as_ref()
+                    .map(|o| !pid_is_alive_sync(o.pid))
+                    .unwrap_or(true);
+                if stale {
+                    let _ = fs::remove_dir_all(&lock_dir);
+                    continue;
+                }
+
+                if let Some(owner) = lock_owner {
+                    anyhow::bail!(
+                        "dispatcher lock already held by pid {} on {} (started {})",
+                        owner.pid,
+                        owner.host,
+                        owner.started_at
+                    );
+                }
+                anyhow::bail!(
+                    "dispatcher lock already exists at {}; remove stale lock if no dispatcher is running",
+                    lock_dir.display()
+                );
+            }
+            Err(err) => return Err(err.into()),
+        }
+    }
+
+    anyhow::bail!(
+        "failed to acquire dispatcher lock at {}",
+        lock_dir.display()
+    )
+}
+
+fn write_run_lease(card_dir: &Path, lease: &RunLease) -> anyhow::Result<()> {
+    let path = lease_path(card_dir);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, serde_json::to_vec_pretty(lease)?)?;
+    Ok(())
+}
+
+fn read_run_lease(card_dir: &Path) -> Option<RunLease> {
+    let bytes = fs::read(lease_path(card_dir)).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn lease_is_stale(lease: &RunLease, stale_after: ChronoDuration) -> bool {
+    Utc::now().signed_duration_since(lease.heartbeat_at) > stale_after
+}
+
+fn find_repo_script(start: &Path, script_rel: &str) -> Option<PathBuf> {
+    start.ancestors().find_map(|dir| {
+        let candidate = dir.join(script_rel);
+        if candidate.exists() {
+            Some(candidate)
+        } else {
+            None
+        }
+    })
+}
+
+fn render_card_thumbnail(card_dir: &Path) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let meta = card_dir.join("meta.json");
+    if !meta.exists() {
+        return;
+    }
+    let ql_dir = card_dir.join("QuickLook");
+    let _ = fs::create_dir_all(&ql_dir);
+    let out = ql_dir.join("Thumbnail.png");
+    let Some(script) = find_repo_script(card_dir, "scripts/render_card_thumbnail.swift") else {
+        return;
+    };
+
+    let _ = StdCommand::new("swift")
+        .arg(script)
+        .arg(meta)
+        .arg(out)
+        .status();
+}
+
+fn maybe_hfs_compress_card(card_dir: &Path) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let enabled = std::env::var("BOP_HFS_COMPRESS_MERGED")
+        .map(|v| matches!(v.as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+    if !enabled {
+        return;
+    }
+
+    let Some(name) = card_dir.file_name().and_then(|s| s.to_str()) else {
+        return;
+    };
+    let Some(parent) = card_dir.parent() else {
+        return;
+    };
+    let compressed = parent.join(format!("{}.hfs.tmp", name));
+    let backup = parent.join(format!("{}.bak.tmp", name));
+    let _ = fs::remove_dir_all(&compressed);
+    let _ = fs::remove_dir_all(&backup);
+
+    let status = StdCommand::new("ditto")
+        .arg("--clone")
+        .arg("--hfsCompression")
+        .arg(card_dir)
+        .arg(&compressed)
+        .status();
+    if !matches!(status, Ok(s) if s.success()) {
+        let _ = fs::remove_dir_all(&compressed);
+        return;
+    }
+
+    if fs::rename(card_dir, &backup).is_err() {
+        let _ = fs::remove_dir_all(&compressed);
+        return;
+    }
+    if fs::rename(&compressed, card_dir).is_err() {
+        let _ = fs::rename(&backup, card_dir);
+        let _ = fs::remove_dir_all(&compressed);
+        return;
+    }
+    let _ = fs::remove_dir_all(&backup);
+}
+
 fn ensure_cards_layout(root: &Path) -> anyhow::Result<()> {
     for dir in [
         "templates",
@@ -241,8 +457,17 @@ fn clone_template(src: &Path, dst: &Path) -> anyhow::Result<()> {
         fs::create_dir_all(parent)?;
     }
 
-    // Try APFS COW clone on macOS
+    // Prefer APFS clone semantics on macOS (ditto --clone), then cp -c.
     if cfg!(target_os = "macos") {
+        let status = StdCommand::new("ditto")
+            .arg("--clone")
+            .arg(src)
+            .arg(dst)
+            .status();
+        if matches!(status, Ok(s) if s.success()) {
+            return Ok(());
+        }
+
         let status = StdCommand::new("cp")
             .arg("-c") // COW clone on APFS
             .arg("-R") // Recursive
@@ -487,7 +712,10 @@ async fn reap_orphans(
     pending_dir: &Path,
     failed_dir: &Path,
     max_retries: u32,
+    stale_lease_after: Duration,
 ) -> anyhow::Result<()> {
+    let stale_after_chrono = ChronoDuration::from_std(stale_lease_after)
+        .unwrap_or_else(|_| ChronoDuration::seconds(30));
     let entries = match fs::read_dir(running_dir) {
         Ok(e) => e,
         Err(_) => return Ok(()),
@@ -503,21 +731,43 @@ async fn reap_orphans(
         }
 
         let pid = read_pid(&card_dir).await?;
-        let Some(pid) = pid else {
-            continue;
+        let pid_dead = match pid {
+            Some(pid) => !is_alive(pid).await?,
+            None => false,
         };
-
-        if is_alive(pid).await? {
+        let lease = read_run_lease(&card_dir);
+        let lease_stale = lease
+            .as_ref()
+            .map(|l| lease_is_stale(l, stale_after_chrono))
+            .unwrap_or(false);
+        if !pid_dead && !lease_stale {
             continue;
         }
 
         let mut meta = jobcard_core::read_meta(&card_dir).ok();
         let retry_count = meta.as_ref().and_then(|m| m.retry_count).unwrap_or(0);
         let next_retry = retry_count.saturating_add(1);
+        let move_to_failed = next_retry > max_retries;
         if let Some(ref mut m) = meta {
             m.retry_count = Some(next_retry);
-            if next_retry > max_retries {
+            if move_to_failed {
                 m.failure_reason = Some("max_retries_exceeded".to_string());
+            } else {
+                m.failure_reason = None;
+            }
+            for stage in m.stages.values_mut() {
+                if stage.status == StageStatus::Running {
+                    stage.status = if move_to_failed {
+                        StageStatus::Failed
+                    } else {
+                        StageStatus::Pending
+                    };
+                    stage.agent = None;
+                    stage.provider = None;
+                    stage.duration_s = None;
+                    stage.started = None;
+                    stage.blocked_by = None;
+                }
             }
             let _ = write_meta(&card_dir, m);
         }
@@ -526,12 +776,13 @@ async fn reap_orphans(
             Some(n) => n.to_string(),
             None => continue,
         };
-        let target = if next_retry > max_retries {
+        let target = if move_to_failed {
             failed_dir.join(&name)
         } else {
             pending_dir.join(&name)
         };
         let _ = fs::rename(&card_dir, &target);
+        render_card_thumbnail(&target);
     }
 
     Ok(())
@@ -718,6 +969,8 @@ fn create_card(
     if let Some(spec) = spec_override {
         fs::write(card_dir.join("spec.md"), spec)?;
     }
+
+    render_card_thumbnail(&card_dir);
 
     Ok(card_dir)
 }
@@ -1614,11 +1867,16 @@ async fn run_dispatcher(
     ensure_cards_layout(cards_dir)?;
     seed_providers(cards_dir)?;
     ensure_mock_provider_command(cards_dir, adapter)?;
+    let _dispatcher_lock = acquire_dispatcher_lock(cards_dir)?;
 
     let pending_dir = cards_dir.join("pending");
     let running_dir = cards_dir.join("running");
     let done_dir = cards_dir.join("done");
     let failed_dir = cards_dir.join("failed");
+    let stale_lease_after = std::cmp::max(
+        LEASE_STALE_FLOOR,
+        Duration::from_millis(reap_ms.saturating_mul(3)),
+    );
 
     let mut last_reap = std::time::Instant::now()
         .checked_sub(Duration::from_millis(reap_ms))
@@ -1626,7 +1884,14 @@ async fn run_dispatcher(
 
     loop {
         if !no_reap && last_reap.elapsed() >= Duration::from_millis(reap_ms) {
-            reap_orphans(&running_dir, &pending_dir, &failed_dir, max_retries).await?;
+            reap_orphans(
+                &running_dir,
+                &pending_dir,
+                &failed_dir,
+                max_retries,
+                stale_lease_after,
+            )
+            .await?;
             last_reap = std::time::Instant::now();
         }
 
@@ -1664,6 +1929,7 @@ async fn run_dispatcher(
                     if fs::rename(&pending_path, &running_path).is_err() {
                         continue;
                     }
+                    render_card_thumbnail(&running_path);
 
                     let mut meta = jobcard_core::read_meta(&running_path).ok();
                     let card_id = meta
@@ -1684,7 +1950,9 @@ async fn run_dispatcher(
                                 m.failure_reason = Some(format!("workspace_prepare_failed: {err}"));
                                 let _ = write_meta(&running_path, m);
                             }
-                            let _ = fs::rename(&running_path, failed_dir.join(&name));
+                            let failed_path = failed_dir.join(&name);
+                            let _ = fs::rename(&running_path, &failed_path);
+                            render_card_thumbnail(&failed_path);
                             continue;
                         }
                     };
@@ -1710,7 +1978,9 @@ async fn run_dispatcher(
                         match select_provider(cards_dir, meta.as_mut(), &stage)? {
                             Some(v) => v,
                             None => {
-                                let _ = fs::rename(&running_path, pending_dir.join(&name));
+                                let pending_path = pending_dir.join(&name);
+                                let _ = fs::rename(&running_path, &pending_path);
+                                render_card_thumbnail(&pending_path);
                                 continue;
                             }
                         };
@@ -1771,6 +2041,7 @@ async fn run_dispatcher(
                     };
 
                     let _ = fs::rename(&running_path, &target);
+                    render_card_thumbnail(&target);
                     if exit_code == 0 && !validation_triggered_fail {
                         spawn_child_cards(cards_dir, &target);
                     }
@@ -1980,37 +2251,49 @@ async fn run_card(
         .spawn()
         .with_context(|| format!("failed to spawn adapter: {}", adapter))?;
 
-    if let Some(pid) = child.id() {
-        let pid_str = pid.to_string();
-        let _ = fs::write(card_dir.join("logs").join("pid"), &pid_str);
-        let _ = TokioCommand::new("xattr")
-            .arg("-w")
-            .arg("com.yourorg.agent-pid")
-            .arg(&pid_str)
-            .arg(card_dir)
-            .status()
-            .await;
-    }
+    let timeout_seconds = meta
+        .as_ref()
+        .and_then(|m| m.timeout_seconds)
+        .unwrap_or(3600);
+    let pid = child
+        .id()
+        .map(|v| v as i32)
+        .with_context(|| "spawned adapter without a child PID")?;
+    let pid_str = pid.to_string();
+    let _ = fs::write(card_dir.join("logs").join("pid"), &pid_str);
+    let _ = TokioCommand::new("xattr")
+        .arg("-w")
+        .arg("com.yourorg.agent-pid")
+        .arg(&pid_str)
+        .arg(card_dir)
+        .status()
+        .await;
 
-    let status_result = tokio::time::timeout(
-        tokio::time::Duration::from_secs(
-            meta.as_ref()
-                .and_then(|m| m.timeout_seconds)
-                .unwrap_or(3600),
-        ),
-        child.wait(),
-    )
-    .await;
-    let status = match status_result {
-        Ok(res) => res?,
-        Err(_) => {
+    let mut lease = RunLease {
+        run_id: next_run_id(child.id()),
+        pid,
+        pid_start_time: started_at,
+        started_at,
+        heartbeat_at: started_at,
+        host: host_name(),
+    };
+    let _ = write_run_lease(card_dir, &lease);
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_seconds);
+    let status = loop {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
             let _ = child.kill().await;
-            anyhow::bail!(
-                "adapter timed out after {} seconds",
-                meta.as_ref()
-                    .and_then(|m| m.timeout_seconds)
-                    .unwrap_or(3600)
-            );
+            anyhow::bail!("adapter timed out after {} seconds", timeout_seconds);
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        let wait_slice = std::cmp::min(LEASE_HEARTBEAT_INTERVAL, remaining);
+        match tokio::time::timeout(wait_slice, child.wait()).await {
+            Ok(res) => break res?,
+            Err(_) => {
+                lease.heartbeat_at = Utc::now();
+                let _ = write_run_lease(card_dir, &lease);
+            }
         }
     };
     let exit_code = status.code().unwrap_or(1);
@@ -2170,7 +2453,9 @@ async fn run_merge_gate(
                 let mut meta = match jobcard_core::read_meta(&card_dir) {
                     Ok(m) => m,
                     Err(_) => {
-                        let _ = fs::rename(&card_dir, failed_dir.join(&name));
+                        let failed_path = failed_dir.join(&name);
+                        let _ = fs::rename(&card_dir, &failed_path);
+                        render_card_thumbnail(&failed_path);
                         continue;
                     }
                 };
@@ -2246,7 +2531,9 @@ async fn run_merge_gate(
                     );
                     let _ = fs::write(card_dir.join("output").join("qa_report.md"), report);
                     let _ = write_meta(&card_dir, &meta);
-                    let _ = fs::rename(&card_dir, failed_dir.join(&name));
+                    let failed_path = failed_dir.join(&name);
+                    let _ = fs::rename(&card_dir, &failed_path);
+                    render_card_thumbnail(&failed_path);
                     continue;
                 }
 
@@ -2258,7 +2545,9 @@ async fn run_merge_gate(
                         format!("policy violation: {err}\n"),
                     );
                     let _ = write_meta(&card_dir, &meta);
-                    let _ = fs::rename(&card_dir, failed_dir.join(&name));
+                    let failed_path = failed_dir.join(&name);
+                    let _ = fs::rename(&card_dir, &failed_path);
+                    render_card_thumbnail(&failed_path);
                     continue;
                 }
                 meta.policy_result = Some("pass".to_string());
@@ -2277,7 +2566,9 @@ async fn run_merge_gate(
                                 meta.failure_reason = Some("git_root_not_found".to_string());
                                 meta.policy_result = Some("failed".to_string());
                                 let _ = write_meta(&card_dir, &meta);
-                                let _ = fs::rename(&card_dir, failed_dir.join(&name));
+                                let failed_path = failed_dir.join(&name);
+                                let _ = fs::rename(&card_dir, &failed_path);
+                                render_card_thumbnail(&failed_path);
                                 continue;
                             };
 
@@ -2390,7 +2681,9 @@ async fn run_merge_gate(
                         meta.failure_reason = Some("vcs_publish_failed".to_string());
                         meta.policy_result = Some("failed".to_string());
                         let _ = write_meta(&card_dir, &meta);
-                        let _ = fs::rename(&card_dir, failed_dir.join(&name));
+                        let failed_path = failed_dir.join(&name);
+                        let _ = fs::rename(&card_dir, &failed_path);
+                        render_card_thumbnail(&failed_path);
                         continue;
                     }
                 }
@@ -2400,7 +2693,10 @@ async fn run_merge_gate(
                 let _ = write_changes_json(&card_dir, &workdir, &branch).await;
 
                 let _ = write_meta(&card_dir, &meta);
-                let _ = fs::rename(&card_dir, merged_dir.join(&name));
+                let merged_path = merged_dir.join(&name);
+                let _ = fs::rename(&card_dir, &merged_path);
+                maybe_hfs_compress_card(&merged_path);
+                render_card_thumbnail(&merged_path);
             }
         }
 
@@ -2474,6 +2770,7 @@ fn retry_card(root: &Path, id: &str) -> anyhow::Result<String> {
     let target = root.join("pending").join(format!("{}.jobcard", id));
     fs::rename(&card, &target)
         .with_context(|| format!("failed to move card to pending/: {}", id))?;
+    render_card_thumbnail(&target);
     Ok(format!("retrying: {} -> pending/", id))
 }
 
@@ -2530,6 +2827,7 @@ async fn kill_card(root: &Path, id: &str) -> anyhow::Result<String> {
     let target = failed_dir.join(format!("{}.jobcard", id));
     fs::rename(&card, &target)
         .with_context(|| format!("failed to move card to failed/: {}", id))?;
+    render_card_thumbnail(&target);
 
     if was_running {
         Ok(format!("killed pid {} and moved '{}' to failed/", pid, id))

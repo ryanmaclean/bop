@@ -1,15 +1,19 @@
+{{system_context}}
+
+---
+
+{{stage_instructions}}
+
+---
+
+Card: {{id}} {{glyph}}
+Stage: {{stage}} ({{stage_index}} of {{stage_count}})
+
+---
+
 {{spec}}
 
-Project memory:
-{{memory}}
+{{prior_stage_output}}
 
 Acceptance criteria:
 {{acceptance_criteria}}
-
-Please implement the requirements above. Focus on:
-1. Writing clean, maintainable code
-2. Adding appropriate tests
-3. Updating documentation
-4. Following the project's coding standards
-
-When complete, provide a summary of changes made.

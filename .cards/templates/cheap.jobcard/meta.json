@@ -2,28 +2,27 @@
   "id": "REPLACE_ID",
   "created": null,
   "agent_type": null,
-  "stage": "qa",
+  "stage": "implement",
   "priority": null,
   "glyph": null,
   "token": null,
-  "stage_chain": ["qa"],
+  "stage_chain": ["implement"],
   "stage_models": {
-    "qa": "sonnet"
+    "implement": "local"
   },
   "stage_providers": {
-    "qa": "claude"
+    "implement": "ollama-local"
   },
   "stage_budgets": {
-    "qa": 8000
+    "implement": 4000
   },
-  "provider_chain": ["claude", "codex"],
+  "provider_chain": ["ollama-local"],
   "acceptance_criteria": [
     "cargo test",
-    "cargo clippy -- -D warnings",
-    "cargo fmt --check"
+    "cargo clippy -- -D warnings"
   ],
   "worktree_branch": "job/REPLACE_ID",
-  "timeout_seconds": 1800,
+  "timeout_seconds": 600,
   "retry_count": 0,
   "failure_reason": null
 }

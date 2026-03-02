@@ -1,16 +1,19 @@
-# QA Review Task Template
+# QA-Only Template — Example Spec
 
-## Overview
-Describe what needs to be reviewed and tested here.
+> This template runs only the QA stage — no implementation.
+> Use for code review, audit, or post-merge verification.
+
+## Review Target
+Describe what branch, commit, or card output needs review.
 
 ## Review Focus
 - Code quality and standards
-- Test coverage
+- Test coverage gaps
 - Security considerations
 - Performance implications
 
 ## Acceptance Criteria
-- [ ] Code review completed
+- [ ] Code review completed, findings in `output/result.md`
 - [ ] All tests pass
-- [ ] No security vulnerabilities
-- [ ] Documentation is accurate
+- [ ] No security vulnerabilities identified (or documented)
+- [ ] Lint and format checks pass
