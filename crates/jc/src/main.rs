@@ -868,6 +868,10 @@ fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
             estimates: Default::default(),
             zellij_session: None,
             zellij_pane: None,
+            stage_chain: vec![],
+            stage_models: Default::default(),
+            stage_providers: Default::default(),
+            stage_budgets: Default::default(),
         };
         write_meta(&implement, &meta)?;
 
@@ -956,6 +960,10 @@ fn create_card(
         estimates: Default::default(),
         zellij_session: None,
         zellij_pane: None,
+        stage_chain: vec![],
+        stage_models: Default::default(),
+        stage_providers: Default::default(),
+        stage_budgets: Default::default(),
     });
 
     meta.id = id.to_string();
@@ -1280,13 +1288,17 @@ fn command_available(name: &str) -> bool {
 }
 
 fn cmd_doctor(cards_root: &Path) -> anyhow::Result<()> {
-    println!("jc doctor");
+    println!("bop doctor");
+
+    // ── core tools ──────────────────────────────────────────────────────────
+    println!("\n── tools ──");
     let checks = [
         ("git", command_available("git")),
         ("gt", command_available("gt")),
         ("jj", command_available("jj")),
         ("gh", command_available("gh")),
         ("zsh", command_available("zsh")),
+        ("zellij", command_available("zellij")),
     ];
 
     let mut failed = 0;
@@ -1299,12 +1311,94 @@ fn cmd_doctor(cards_root: &Path) -> anyhow::Result<()> {
         }
     }
 
+    // ── adapters ────────────────────────────────────────────────────────────
+    println!("\n── adapters ──");
+    let adapters_dir = cards_root.parent().unwrap_or(cards_root).join("adapters");
+
+    // Map adapter name → CLI binary it requires
+    let adapter_cli_map: &[(&str, &str)] = &[
+        ("claude", "claude"),
+        ("codex", "codex"),
+        ("ollama-local", "ollama"),
+        ("goose", "goose"),
+        ("aider", "aider"),
+        ("opencode", "opencode"),
+        ("mock", "true"), // mock always works
+    ];
+
+    if adapters_dir.is_dir() {
+        for (adapter, cli) in adapter_cli_map {
+            let script = adapters_dir.join(format!("{}.zsh", adapter));
+            if !script.exists() {
+                continue; // adapter not installed, skip
+            }
+            let cli_ok = command_available(cli);
+            if cli_ok {
+                println!("ok\t{}\t({})", adapter, cli);
+            } else {
+                println!("missing\t{}\t({} not found)", adapter, cli);
+                // Adapter missing is a warning, not a hard failure —
+                // the system works with any subset of adapters
+            }
+        }
+    } else {
+        println!("warn\tadapters/ directory not found");
+    }
+
+    // ── cards layout ────────────────────────────────────────────────────────
+    println!("\n── cards ──");
     let policy = cards_root.join("policy.toml");
     if policy.exists() {
         println!("ok\t{}", policy.display());
     } else {
         println!("missing\t{}", policy.display());
         failed += 1;
+    }
+
+    let system_ctx = cards_root.join("system_context.md");
+    if system_ctx.exists() {
+        println!("ok\tsystem_context.md");
+    } else {
+        println!("missing\tsystem_context.md");
+    }
+
+    let stages_dir = cards_root.join("stages");
+    if stages_dir.is_dir() {
+        let n_stages = fs::read_dir(&stages_dir)
+            .map(|rd| {
+                rd.filter(|e| {
+                    e.as_ref()
+                        .map(|e| e.path().extension().map(|x| x == "md").unwrap_or(false))
+                        .unwrap_or(false)
+                })
+                .count()
+            })
+            .unwrap_or(0);
+        println!("ok\tstages/ ({} files)", n_stages);
+    } else {
+        println!("missing\tstages/");
+    }
+
+    let templates_dir = cards_root.join("templates");
+    if templates_dir.is_dir() {
+        let n_templates = fs::read_dir(&templates_dir)
+            .map(|rd| {
+                rd.filter(|e| {
+                    e.as_ref()
+                        .map(|e| {
+                            e.path()
+                                .extension()
+                                .map(|x| x == "jobcard")
+                                .unwrap_or(false)
+                        })
+                        .unwrap_or(false)
+                })
+                .count()
+            })
+            .unwrap_or(0);
+        println!("ok\ttemplates/ ({} templates)", n_templates);
+    } else {
+        println!("missing\ttemplates/");
     }
 
     if failed > 0 {
@@ -2051,6 +2145,7 @@ async fn run_dispatcher(
                     let _ = fs::rename(&running_path, &target);
                     render_card_thumbnail(&target);
                     if exit_code == 0 && !validation_triggered_fail {
+                        maybe_advance_stage(cards_dir, &target);
                         spawn_child_cards(cards_dir, &target);
                     }
                 }
@@ -2064,6 +2159,110 @@ async fn run_dispatcher(
     }
 
     Ok(())
+}
+
+// ── stage auto-progression ────────────────────────────────────────────────────
+
+/// If the completed card has a `stage_chain` with a next stage, create a
+/// next-stage card in `pending/` inheriting spec, glyph, pipeline config,
+/// and prior stage output.
+fn maybe_advance_stage(cards_dir: &Path, done_card_dir: &Path) {
+    let Ok(meta) = jobcard_core::read_meta(done_card_dir) else {
+        return;
+    };
+    if meta.stage_chain.is_empty() {
+        return;
+    }
+
+    let current_idx = match meta.stage_chain.iter().position(|s| s == &meta.stage) {
+        Some(i) => i,
+        None => return,
+    };
+
+    // If this is the final stage, nothing to advance
+    if current_idx + 1 >= meta.stage_chain.len() {
+        return;
+    }
+
+    let next_stage = &meta.stage_chain[current_idx + 1];
+    let next_id = format!("{}-{}", meta.id, next_stage);
+
+    let pending_dir = cards_dir.join("pending");
+    let _ = fs::create_dir_all(&pending_dir);
+    let next_card_dir = pending_dir.join(format!("{}.jobcard", next_id));
+    if next_card_dir.exists() {
+        return; // don't overwrite existing card
+    }
+
+    let _ = fs::create_dir_all(next_card_dir.join("logs"));
+    let _ = fs::create_dir_all(next_card_dir.join("output"));
+
+    // Determine provider for next stage
+    let next_provider = meta
+        .stage_providers
+        .get(next_stage)
+        .cloned()
+        .unwrap_or_else(|| meta.provider_chain.first().cloned().unwrap_or_default());
+    let provider_chain = if next_provider.is_empty() {
+        meta.provider_chain.clone()
+    } else {
+        // Put stage-specific provider first, rest as fallback
+        let mut chain = vec![next_provider];
+        for p in &meta.provider_chain {
+            if !chain.contains(p) {
+                chain.push(p.clone());
+            }
+        }
+        chain
+    };
+
+    let next_meta = Meta {
+        id: next_id.clone(),
+        created: Utc::now(),
+        stage: next_stage.clone(),
+        glyph: meta.glyph.clone(),
+        title: meta.title.clone(),
+        description: meta.description.clone(),
+        labels: meta.labels.clone(),
+        provider_chain,
+        acceptance_criteria: meta.acceptance_criteria.clone(),
+        worktree_branch: Some(format!("job/{}", next_id)),
+        template_namespace: meta.template_namespace.clone(),
+        stage_chain: meta.stage_chain.clone(),
+        stage_models: meta.stage_models.clone(),
+        stage_providers: meta.stage_providers.clone(),
+        stage_budgets: meta.stage_budgets.clone(),
+        timeout_seconds: meta.timeout_seconds,
+        ..Default::default()
+    };
+    let _ = write_meta(&next_card_dir, &next_meta);
+
+    // Copy spec.md from parent
+    let spec_src = done_card_dir.join("spec.md");
+    if spec_src.exists() {
+        let _ = fs::copy(&spec_src, next_card_dir.join("spec.md"));
+    }
+
+    // Copy prompt.md template from parent
+    let prompt_src = done_card_dir.join("prompt.md");
+    if prompt_src.exists() {
+        let _ = fs::copy(&prompt_src, next_card_dir.join("prompt.md"));
+    }
+
+    // Carry prior stage output: copy done card's output/result.md → next card's output/prior_result.md
+    let result_src = done_card_dir.join("output").join("result.md");
+    if result_src.exists() {
+        let _ = fs::copy(
+            &result_src,
+            next_card_dir.join("output").join("prior_result.md"),
+        );
+    }
+
+    render_card_thumbnail(&next_card_dir);
+    eprintln!(
+        "[stage-advance] {} ({}) → {} ({})",
+        meta.id, meta.stage, next_id, next_stage
+    );
 }
 
 // ── child-card-pipeline ───────────────────────────────────────────────────────

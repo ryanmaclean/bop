@@ -175,6 +175,24 @@ pub struct Meta {
     /// Zellij pane ID within the session (for direct focus).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zellij_pane: Option<String>,
+
+    // ── stage pipeline (factory engine) ─────────────────────────────────────
+    /// Ordered stage pipeline this card progresses through.
+    /// Example: `["implement", "qa"]` or `["spec", "plan", "implement", "qa"]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stage_chain: Vec<String>,
+
+    /// Model tier per stage. Example: `{"implement": "opus", "qa": "sonnet"}`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub stage_models: BTreeMap<String, String>,
+
+    /// Adapter/provider per stage. Example: `{"implement": "claude", "qa": "codex"}`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub stage_providers: BTreeMap<String, String>,
+
+    /// Max token budget per stage. Example: `{"implement": 32000, "qa": 8000}`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub stage_budgets: BTreeMap<String, u64>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -225,6 +243,14 @@ pub struct PromptContext {
     /// Prepended verbatim before the template. Load from `.cards/system_context.md`.
     pub system_context: String,
     pub worktree_branch: String,
+    /// Stage-specific instructions loaded from `.cards/stages/<stage>.md`.
+    pub stage_instructions: String,
+    /// 1-based index of current stage in the `stage_chain`.
+    pub stage_index: String,
+    /// Total number of stages in the `stage_chain`.
+    pub stage_count: String,
+    /// Output from the previous stage (`output/result.md` of prior card).
+    pub prior_stage_output: String,
 }
 
 impl PromptContext {
@@ -238,14 +264,42 @@ impl PromptContext {
             meta.acceptance_criteria.join("\n")
         };
 
-        // Walk up from card_dir to find .cards/system_context.md
-        let system_context = card_dir
-            .ancestors()
-            .find_map(|p| {
-                let candidate = p.join("system_context.md");
-                fs::read_to_string(&candidate).ok()
-            })
-            .unwrap_or_default();
+        // Walk up from card_dir to find .cards/system_context.md and .cards/stages/
+        let mut system_context = String::new();
+        let mut stage_instructions = String::new();
+        for ancestor in card_dir.ancestors() {
+            if system_context.is_empty() {
+                if let Ok(sc) = fs::read_to_string(ancestor.join("system_context.md")) {
+                    system_context = sc;
+                }
+            }
+            if stage_instructions.is_empty() {
+                let stage_file = ancestor.join("stages").join(format!("{}.md", meta.stage));
+                if let Ok(si) = fs::read_to_string(&stage_file) {
+                    stage_instructions = si;
+                }
+            }
+            if !system_context.is_empty() && !stage_instructions.is_empty() {
+                break;
+            }
+        }
+
+        // Stage index/count from stage_chain
+        let (stage_index, stage_count) = if meta.stage_chain.is_empty() {
+            ("1".to_string(), "1".to_string())
+        } else {
+            let idx = meta
+                .stage_chain
+                .iter()
+                .position(|s| s == &meta.stage)
+                .map(|i| i + 1)
+                .unwrap_or(1);
+            (idx.to_string(), meta.stage_chain.len().to_string())
+        };
+
+        // Prior stage output: look for output/result.md in card dir
+        let prior_stage_output =
+            fs::read_to_string(card_dir.join("output").join("prior_result.md")).unwrap_or_default();
 
         Ok(Self {
             spec,
@@ -257,6 +311,10 @@ impl PromptContext {
             memory: String::new(),
             system_context,
             worktree_branch: meta.worktree_branch.clone().unwrap_or_default(),
+            stage_instructions,
+            stage_index,
+            stage_count,
+            prior_stage_output,
         })
     }
 }
@@ -276,6 +334,10 @@ pub fn render_prompt(template: &str, ctx: &PromptContext) -> String {
     out = out.replace("{{agent}}", &ctx.agent);
     out = out.replace("{{memory}}", &ctx.memory);
     out = out.replace("{{worktree_branch}}", &ctx.worktree_branch);
+    out = out.replace("{{stage_instructions}}", &ctx.stage_instructions);
+    out = out.replace("{{stage_index}}", &ctx.stage_index);
+    out = out.replace("{{stage_count}}", &ctx.stage_count);
+    out = out.replace("{{prior_stage_output}}", &ctx.prior_stage_output);
     if ctx.system_context.is_empty() {
         out
     } else {
@@ -299,10 +361,40 @@ mod tests {
             memory: "k: v".to_string(),
             system_context: String::new(),
             worktree_branch: String::new(),
+            stage_instructions: String::new(),
+            stage_index: "1".to_string(),
+            stage_count: "1".to_string(),
+            prior_stage_output: String::new(),
         };
 
         let rendered = render_prompt("Memory:\n{{memory}}\n", &ctx);
         assert_eq!(rendered, "Memory:\nk: v\n");
+    }
+
+    #[test]
+    fn render_prompt_replaces_stage_pipeline_vars() {
+        let ctx = PromptContext {
+            spec: "build auth".to_string(),
+            plan: String::new(),
+            stage: "qa".to_string(),
+            acceptance_criteria: "cargo test".to_string(),
+            provider: "claude".to_string(),
+            agent: String::new(),
+            memory: String::new(),
+            system_context: String::new(),
+            worktree_branch: "job/feat-auth".to_string(),
+            stage_instructions: "You are reviewing code.".to_string(),
+            stage_index: "2".to_string(),
+            stage_count: "2".to_string(),
+            prior_stage_output: "Implemented auth module.".to_string(),
+        };
+
+        let template = "{{stage_instructions}}\nCard stage: {{stage}} ({{stage_index}} of {{stage_count}})\n{{spec}}\n{{prior_stage_output}}";
+        let rendered = render_prompt(template, &ctx);
+        assert!(rendered.contains("You are reviewing code."));
+        assert!(rendered.contains("(2 of 2)"));
+        assert!(rendered.contains("build auth"));
+        assert!(rendered.contains("Implemented auth module."));
     }
 
     #[test]
@@ -323,5 +415,57 @@ mod tests {
         let back = read_meta(dir.path()).unwrap();
         assert_eq!(back.zellij_session.as_deref(), Some("bop-z1"));
         assert_eq!(back.zellij_pane.as_deref(), Some("3"));
+    }
+
+    #[test]
+    fn meta_stage_pipeline_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut models = BTreeMap::new();
+        models.insert("implement".into(), "opus".into());
+        models.insert("qa".into(), "sonnet".into());
+        let mut providers = BTreeMap::new();
+        providers.insert("implement".into(), "claude".into());
+        providers.insert("qa".into(), "codex".into());
+        let mut budgets = BTreeMap::new();
+        budgets.insert("implement".into(), 32000u64);
+        budgets.insert("qa".into(), 8000u64);
+
+        let m = Meta {
+            id: "pipe1".into(),
+            created: chrono::Utc::now(),
+            stage: "implement".into(),
+            stage_chain: vec!["implement".into(), "qa".into()],
+            stage_models: models.clone(),
+            stage_providers: providers.clone(),
+            stage_budgets: budgets.clone(),
+            ..Default::default()
+        };
+        write_meta(dir.path(), &m).unwrap();
+        let back = read_meta(dir.path()).unwrap();
+        assert_eq!(back.stage_chain, vec!["implement", "qa"]);
+        assert_eq!(back.stage_models, models);
+        assert_eq!(back.stage_providers, providers);
+        assert_eq!(back.stage_budgets, budgets);
+    }
+
+    #[test]
+    fn meta_empty_stage_pipeline_omitted_in_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = Meta {
+            id: "no-pipe".into(),
+            created: chrono::Utc::now(),
+            stage: "implement".into(),
+            ..Default::default()
+        };
+        write_meta(dir.path(), &m).unwrap();
+        let raw = fs::read_to_string(meta_path(dir.path())).unwrap();
+        // Empty vecs/maps should be skipped by serde
+        assert!(!raw.contains("stage_chain"));
+        assert!(!raw.contains("stage_models"));
+        assert!(!raw.contains("stage_providers"));
+        assert!(!raw.contains("stage_budgets"));
+        // But should still round-trip fine
+        let back = read_meta(dir.path()).unwrap();
+        assert!(back.stage_chain.is_empty());
     }
 }

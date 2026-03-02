@@ -3,8 +3,13 @@
   "created": "2026-03-01T00:00:00Z",
   "stage": "implement",
   "glyph": "🂻",
+  "token": "♠",
   "title": "Running Feature",
   "description": "An agent is actively working on this card inside a zellij session.",
+  "stage_chain": ["implement", "qa"],
+  "stage_models": { "implement": "opus", "qa": "sonnet" },
+  "stage_providers": { "implement": "claude", "qa": "claude" },
+  "stage_budgets": { "implement": 32000, "qa": 8000 },
   "provider_chain": ["claude"],
   "stages": {
     "implement": {
@@ -14,10 +19,11 @@
       "started": "2026-03-01T01:00:00Z"
     }
   },
-  "acceptance_criteria": ["make check"],
+  "acceptance_criteria": ["cargo test", "cargo clippy -- -D warnings"],
   "zellij_session": "bop-running-feat",
   "zellij_pane": "1",
   "worktree_branch": "job/running-feat",
+  "timeout_seconds": 3600,
   "labels": [{"name": "example", "kind": "scope"}, {"name": "in-flight", "kind": "effort"}],
   "subtasks": [
     {"id": "s1", "title": "Write failing test", "done": true},
