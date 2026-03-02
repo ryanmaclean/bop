@@ -2470,6 +2470,16 @@ fn prepare_workspace(
                 .as_ref()
                 .and_then(|m| m.worktree_branch.clone())
                 .unwrap_or_else(|| format!("job/{}", card_id));
+            let ws_name = branch.replace('/', "-");
+            let stable_ws = git_root.join(".worktrees").join(&ws_name);
+            let legacy_ws = card_dir.join("workspace");
+            let ws_path = if stable_ws.exists() {
+                stable_ws
+            } else if legacy_ws.exists() {
+                legacy_ws
+            } else {
+                stable_ws
+            };
             let status = if git_branch_exists(&git_root, &branch) {
                 StdCommand::new("git")
                     .args([
