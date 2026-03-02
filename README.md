@@ -37,6 +37,8 @@ adapters/ (~20 LOC shell each)        ← claude, codex, goose, aider, ollama, m
 
 **State machine:** `pending/ → running/ → done/ → merged/` (or `failed/`)
 
+Storage contract: see `docs/format-storage-contract.md`.
+
 ## Filesystem Safety Rules
 
 - State transitions are atomic `rename` operations.
@@ -66,7 +68,7 @@ bop doctor                    # Verify local tooling
 
 macOS maintenance:
 ```bash
-scripts/macos_cards_maintenance.zsh            # refresh merged card thumbnails
+scripts/macos_cards_maintenance.zsh            # refresh terminal-state card thumbnails
 scripts/macos_cards_maintenance.zsh --compress # + HFS/APFS compression
 ```
 
@@ -107,7 +109,7 @@ adapter.sh <workdir> <prompt_file> <stdout_log> <stderr_log>
 Exit 75 = rate-limited (triggers provider rotation). Available: `claude`, `codex`, `goose`, `aider`, `opencode`, `ollama-local`, `mock`.
 
 Template cloning on macOS prefers `ditto --clone` (APFS COW), with `cp -c` fallback.
-Optional merged-card compression is gated by `BOP_HFS_COMPRESS_MERGED=1`.
+Terminal-state card compression uses `ditto --hfsCompression` (macOS only).
 
 ## Build & Test
 
