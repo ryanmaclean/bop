@@ -1486,6 +1486,14 @@ fn cmd_factory_install(cards_root: &Path) -> anyhow::Result<()> {
         }
     }
 
+    // Icons watcher: default on, same lifecycle as factory
+    if cfg!(target_os = "macos") {
+        match cmd_icons_install(cards_root) {
+            Ok(_) => {}
+            Err(e) => eprintln!("⚠ icon watcher: {}", e),
+        }
+    }
+
     println!("\nFactory services installed. Run `bop factory status` to verify.");
     Ok(())
 }
@@ -1522,6 +1530,7 @@ fn cmd_factory_stop() -> anyhow::Result<()> {
 
 fn cmd_factory_status() -> anyhow::Result<()> {
     println!("── factory services ──");
+    factory_status_one(ICONS_LABEL, "icons");
     for (label, subcmd) in &FACTORY_LABELS {
         let dest = plist_path(label);
         let installed = dest.exists();
@@ -1575,6 +1584,9 @@ fn cmd_factory_status() -> anyhow::Result<()> {
 }
 
 fn cmd_factory_uninstall() -> anyhow::Result<()> {
+    // Icons watcher travels with factory
+    let _ = cmd_icons_uninstall();
+
     for (label, _) in &FACTORY_LABELS {
         let dest = plist_path(label);
 
@@ -1593,6 +1605,22 @@ fn cmd_factory_uninstall() -> anyhow::Result<()> {
     }
     println!("\nFactory services uninstalled.");
     Ok(())
+}
+
+fn factory_status_one(label: &str, name: &str) {
+    let dest = plist_path(label);
+    let installed = dest.exists();
+    let out = StdCommand::new("launchctl")
+        .args(["list", label])
+        .output()
+        .ok();
+    let loaded = out.as_ref().map(|o| o.status.success()).unwrap_or(false);
+    let status_str = match (installed, loaded) {
+        (true, true) => "● active",
+        (true, false) => "○ installed (not loaded)",
+        (false, _) => "□ not installed",
+    };
+    println!("  {} {}: {}", name, label, status_str);
 }
 
 // ── icons ─────────────────────────────────────────────────────────────────────
