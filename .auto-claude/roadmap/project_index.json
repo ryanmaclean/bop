@@ -1,10 +1,10 @@
 {
-  "project_root": "/Users/studio/gtfs",
+  "project_root": "/Users/studio/bop",
   "project_type": "single",
   "services": {
     "main": {
       "name": "main",
-      "path": "/Users/studio/gtfs",
+      "path": "/Users/studio/bop",
       "language": "Rust",
       "framework": null,
       "type": "unknown",

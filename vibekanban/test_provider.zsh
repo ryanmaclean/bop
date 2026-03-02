@@ -13,7 +13,8 @@ printf '{"id":"card-xyz","title":"Running card","stage":"test"}' \
   > "$tmp/team-cli/running/card-xyz.jobcard/meta.json"
 
 # Run provider
-out=$(CARDS_DIR="$tmp" /Users/studio/gtfs/vibekanban/jobcard-provider.zsh)
+SCRIPT_DIR="${0:A:h}"
+out=$(CARDS_DIR="$tmp" "$SCRIPT_DIR/jobcard-provider.zsh")
 echo "Provider output: $out"
 
 # Validate: must be a JSON array with 2 items

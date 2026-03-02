@@ -4,10 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Skills
 
-Three skills provide orientation for this repo — invoke before working:
+Four skills provide orientation for this repo — invoke before working:
 - `jobcard-system` — what `bop` is (legacy alias: `jc`), card lifecycle, GTFS disambiguation
 - `vibekanban` — Quick Look cards, Zellij plugin, glyph system, SwiftUI card anatomy
 - `unicode-glyphs` — playing card encoding, BMP/SMP safety, font recommendations
+- `bop-team` — dogfood rule: every unit of work on bop = a bop card
 
 ## System context for dispatched agents
 
