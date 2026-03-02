@@ -3,41 +3,40 @@
 This is the canonical operating plan for `main`.
 If you are a new agent, start here before writing code.
 
+---
+
 ## 0) Naming Lock (Do Not Re-Litigate)
 
-- Product/repo name: `bop`
-- Canonical CLI verb: `bop`
-- Domain verbs:
-  - `bop deal` = create/deal work cards
-  - `bop bet` = estimate/prioritize cards (alias for `bop poker`)
-- `bop poker open/submit/reveal/consensus` = plan poker flow (LANDED)
+| Role | Name |
+|------|------|
+| CLI binary | **`bop`** |
+| Quick Look bundle | `sh.bop.ql` |
+| Host app bundle | `sh.bop` |
+| Card UTI | `sh.bop.card` |
+| launchd labels | `sh.bop.dispatcher`, `sh.bop.merge-gate` |
 
-Reason: `bop` is short, memorable, and low-token-cost in prompts/logs.
+Domain verbs: `bop new`, `bop status`, `bop inspect`, `bop poker`, `bop kill`, `bop approve`.
 
 ## 1) Mission
 
-Build a low-latency, low-overhead software factory where:
+A multi-agent software factory where:
 - filesystem cards are the source of truth,
 - `bop` is the only writer of state transitions,
-- UIs (Finder/Quick Look/vibekanban/zellij) are read and action surfaces,
+- UIs (Finder/Quick Look/Zellij) are read+action surfaces,
 - reliability and cost control beat feature sprawl.
 
-Target behavior: Auto-Claude/Gas-Town style task manager with explicit stages:
-`spec -> plan -> implement -> qa -> merged|failed`.
+Target: Auto-Claude/Gas-Town style manager with explicit stages:
+`spec → plan → implement → qa → merged|failed`.
 
 ## 2) Non-Negotiables
 
-- Keep architecture simple: no new control-plane database for v1.
-- Keep one binary (`bop`) as the canonical command.
-- Every transition is a folder move by `bop`, never by UI direct write.
-- Every change must pass both:
-  - `make check`
-  - `bop policy check --staged` (or `scripts/policy_check.zsh --staged --cards-dir .cards`)
-- No hidden magic: behavior must be visible in files.
+- No new control-plane database for v1.
+- One binary (`bop`) is the canonical command.
+- Every transition is a folder move by `bop`, never by UI.
+- Every landing passes: `make check` + `bop policy check --staged`.
+- No hidden magic: behavior is visible in files.
 
 ## 3) 60-Second Start For Any Agent
-
-Run this exact sequence:
 
 ```zsh
 cargo build
@@ -45,131 +44,394 @@ cargo build
 ./target/debug/bop status
 ./target/debug/bop inspect <card-id>
 make check
-./target/debug/bop policy check --staged
 ```
 
-If no card is assigned, pick one from `.cards/pending/` and inspect it first.
+No card assigned? Pick one from `.cards/pending/` and inspect it first.
 
-## 4) Card Symbol Protocol (Mandatory)
+## 4) Card Symbol Protocol
 
-Cards must carry a `glyph` in `meta.json` so priority/team are obvious instantly.
+Cards carry a `glyph` in `meta.json` — priority+team in 1 token.
 
-Team by suit:
-- `spade` = CLI/runtime
-- `heart` = architecture/decisions
-- `diamond` = QA/reliability
-- `club` = platform/integration
+| Suit | Team | BMP Token |
+|------|------|-----------|
+| ♠ Spade | CLI/runtime | ♠ |
+| ♥ Heart | Architecture | ♥ |
+| ♦ Diamond | QA/reliability | ♦ |
+| ♣ Club | Platform | ♣ |
 
-Priority by rank:
-- `A` = P1
-- `K/Q` = P2
-- `J/N` = P3
-- `10..2` = P4
-- joker = incident/emergency
+| Rank | Priority |
+|------|----------|
+| Ace | P1 |
+| King/Queen | P2 |
+| Jack | P3 |
+| 2–10 | P4 |
+| Joker | Emergency |
 
-ASCII fallback for unicode-weak terminals:
-- `S-A`, `H-A`, `D-K`, `C-7`, `JOKER`
+Rule: if glyph is missing, add it before work starts.
 
-Rule: if glyph is missing, add it before implementation work starts.
+## 5) Agent Working Loop
 
-## 5) Universal Shortcut (Low-Lift, Works For Any Agent)
-
-Agent working loop:
-
-1. Inspect card and constraints (`meta.json`, `spec.md`, `decision.md` if required).
+1. Inspect card (`meta.json`, `spec.md`).
 2. Work only inside declared scope.
-3. Run gates (`make check`, policy check).
+3. Run gates (`make check`).
 4. Let dispatcher/merge-gate move card state.
 
-No agent should invent a new workflow when this loop already works.
+No agent invents a new workflow when this loop already works.
 
-## 6) Skill Strategy (How We Skill-Up Every Agent)
+---
 
-Use one shared repo skill contract so any model behaves like a task manager.
+## 6) What's Built (Current State)
 
-Required repo skills to add/maintain:
-- `ace-of-hearts`: architecture/P1 mode, forces decision record quality.
-- `implement-card`: scoped implementation with minimal churn.
-- `qa-gatekeeper`: acceptance + policy + failure reason hygiene.
-- `release-operator`: blue/green, canary, rollback and promotion gates.
+### By tender-vaughan (factory engine layer)
 
-Each skill must enforce:
-- read card first,
-- respect `policy_scope`,
-- update only required files,
-- pass local gates before done.
+| Artifact | Location | Purpose |
+|----------|----------|---------|
+| Stage instruction files | `.cards/stages/{spec,plan,implement,qa}.md` | ~50 tokens each, injected into agent prompts per stage |
+| Template: implement | `.cards/templates/implement.jobcard/` | 2-stage (implement→qa), opus→sonnet |
+| Template: full | `.cards/templates/full.jobcard/` | 4-stage pipeline, tiered models |
+| Template: cheap | `.cards/templates/cheap.jobcard/` | 1-stage, ollama-local only, 600s timeout |
+| Template: qa-only | `.cards/templates/qa-only.jobcard/` | Review/audit, no implementation |
+| Factory design doc | `docs/plans/2026-03-01-autonomous-factory-design.md` | Full architecture for stage auto-progression |
+| land_safe.zsh | `scripts/land_safe.zsh` | JJ/git safe-landing script |
+| RunLease + dispatcher lock | `crates/jc/src/main.rs` | Filesystem lease heartbeat, stale lock reclaim |
 
-## 7) Codex CLI Integration (Keep It Thin)
+### By Windsurf (UX + reliability layer)
 
-Use `adapters/codex.zsh` as the execution bridge.
-Do not couple control plane to Codex internals.
-Adapter contract remains:
+| Artifact | Location | Purpose |
+|----------|----------|---------|
+| Zellij Meta fields | `crates/jobcard-core/src/lib.rs` | `zellij_session`, `zellij_pane` on Meta struct |
+| 7-pane Zellij layout | `layouts/bop.kdl` | Board/spec/qa/stdout/stderr/inspector/shell |
+| bop_focus.zsh | `scripts/bop_focus.zsh` | Pane navigator, `--auto` sweeps all |
+| bop_bop.zsh | `scripts/bop_bop.zsh` | Goal→card→zellij session bootstrap |
+| Format examples | `examples/{pending,running,done}-feat.jobcard/` | What cards look like at each lifecycle state |
+| bop:// URL scheme | `macos/JobCardHost/` | Quick Look "Attach" → Zellij session |
+| Quick Look redesign | `macos/bop/PreviewViewController.swift` | Stage pipeline view, full palette |
+| Log colorization | `crates/jc/src/main.rs` | Tailspin-style color for `bop logs` |
+| Dispatcher harness | `crates/jc/tests/dispatcher_harness.rs` | Integration test scaffold |
+| Maintenance scripts | `scripts/` | Thumbnail refresh, cold card compression |
 
-`adapter.sh <workdir> <prompt_file> <stdout_log> <stderr_log> [timeout]`
+---
 
-Exit `75` means rate-limit and must trigger retry/failover logic.
+## 7) What's Missing (The Bridge)
 
-## 8) MCP Policy (Optional, Not Required For Core)
+These are the gaps between the two agents' work. **Highest-value next tasks.**
+
+### 7a) Meta struct needs factory fields ★
+
+Templates declare `stage_chain`, `stage_models`, `stage_providers`, `stage_budgets`.
+The Rust `Meta` struct does NOT have them — serde silently drops them on deser.
+
+Add to `crates/jobcard-core/src/lib.rs` → `Meta`:
+
+```rust
+/// Ordered stage pipeline. Example: ["implement", "qa"]
+#[serde(default, skip_serializing_if = "Vec::is_empty")]
+pub stage_chain: Vec<String>,
+
+/// Model tier per stage. Example: {"implement": "opus", "qa": "sonnet"}
+#[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+pub stage_models: BTreeMap<String, String>,
+
+/// Adapter per stage. Example: {"implement": "claude", "qa": "codex"}
+#[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+pub stage_providers: BTreeMap<String, String>,
+
+/// Max token budget per stage. Example: {"implement": 32000, "qa": 8000}
+#[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+pub stage_budgets: BTreeMap<String, u64>,
+```
+
+Add a round-trip test (follow the `meta_zellij_session_round_trips` pattern).
+
+**Effort:** Small. **Files:** `lib.rs` only.
+
+### 7b) render_prompt needs new template variables ★
+
+`{{system_context}}` works (prepended). These do NOT yet substitute:
+
+| Variable | Source |
+|----------|--------|
+| `{{stage_instructions}}` | `.cards/stages/<stage>.md` |
+| `{{stage_index}}` | Position in `stage_chain` (e.g. "2") |
+| `{{stage_count}}` | Length of `stage_chain` (e.g. "4") |
+| `{{prior_stage_output}}` | Previous card's `output/result.md` |
+
+Add fields to `PromptContext`, load stage file in `from_files`, add `.replace()` calls.
+
+**Effort:** Small. **Files:** `lib.rs` only.
+
+### 7c) Dispatcher stage auto-progression
+
+When a card finishes (exit 0), dispatcher reads `stage_chain`:
+1. Find current stage index
+2. If next stage exists → create child card in `pending/` inheriting spec + glyph + prior output
+3. If final stage → normal done/ flow for merge-gate
+
+See `docs/plans/2026-03-01-autonomous-factory-design.md` for full spec.
+
+**Effort:** Medium. **Files:** `main.rs`.
+
+### 7d) Update format examples with factory fields
+
+Windsurf's `examples/` cards predate the factory fields. Update them to include
+`stage_chain`, `stage_models`, etc. so new users see the full picture.
+
+**Effort:** Small. **Files:** `examples/` JSON files.
+
+### 7e) bop doctor adapter checks
+
+`cmd_doctor` checks git/jj/gh/zsh but NOT adapter binaries.
+For each adapter in `adapters/`, check if the underlying CLI exists
+(`claude`, `codex`, `ollama`) and report functional vs missing.
+
+**Effort:** Small. **Files:** `main.rs`.
+
+### 7f) bop factory launchd lifecycle
+
+Old plists in `launchd/` have wrong paths. Build `bop factory install/start/stop/status/uninstall`
+that generates plists from repo root with labels `sh.bop.dispatcher`, `sh.bop.merge-gate`.
+
+**Effort:** Medium. **Files:** `main.rs`, `launchd/`.
+
+### Implementation order
+
+Items 1–2 are prerequisites for 3. Items 4–6 are independent.
+
+```
+[7a] Meta fields ──┐
+                    ├──→ [7c] Stage auto-progression
+[7b] Prompt vars ──┘
+                        [7d] Update examples (independent)
+                        [7e] Doctor checks (independent)
+                        [7f] Factory launchd (independent)
+```
+
+---
+
+## 8) How to Create Your Own Template
+
+Templates live in `.cards/templates/`. Each is a `.jobcard/` directory bundle.
+
+### Step 1: Copy an existing template
+
+```zsh
+cp -c -R .cards/templates/implement.jobcard .cards/templates/my-thing.jobcard
+```
+
+(`-c` = APFS clone on macOS, zero-cost copy)
+
+### Step 2: Edit meta.json
+
+This is the only file you MUST customize. Annotated reference:
+
+```jsonc
+{
+  // ── Identity (bop new fills these) ────────────────────
+  "id": "REPLACE_ID",
+  "created": null,
+  "glyph": null,          // playing card, set after poker or manually
+  "token": null,           // BMP symbol for terminals/filenames
+
+  // ── Stage Pipeline (the factory recipe) ───────────────
+  "stage": "implement",   // starting stage (first in chain)
+  "stage_chain": ["implement", "qa"],
+
+  // ── Model Routing (which model per stage) ─────────────
+  // Options: "opus", "sonnet", "haiku", "local"
+  "stage_models": {
+    "implement": "opus",
+    "qa": "sonnet"
+  },
+
+  // ── Provider Routing (which adapter per stage) ────────
+  // Must match a filename in adapters/ (minus .zsh)
+  "stage_providers": {
+    "implement": "claude",
+    "qa": "claude"
+  },
+
+  // ── Budget (max tokens per stage) ─────────────────────
+  "stage_budgets": {
+    "implement": 32000,
+    "qa": 8000
+  },
+
+  // ── Failover (if primary hits exit 75) ────────────────
+  "provider_chain": ["claude", "codex", "ollama-local"],
+
+  // ── Gates (all must exit 0 to merge) ──────────────────
+  "acceptance_criteria": [
+    "cargo test",
+    "cargo clippy -- -D warnings"
+  ],
+
+  // ── Limits ────────────────────────────────────────────
+  "timeout_seconds": 3600,
+  "worktree_branch": "job/REPLACE_ID"
+}
+```
+
+### Step 3: Edit spec.md
+
+Write what this template is for. `bop new` copies it; the human fills in real requirements.
+
+```markdown
+# My Template — Example Spec
+
+> When to use this template and what it does.
+
+## Overview
+What needs to be done.
+
+## Acceptance Criteria
+- [ ] What "done" looks like
+```
+
+### Step 4: prompt.md (usually leave as-is)
+
+The default works for most templates:
+
+```
+{{system_context}}
+---
+{{stage_instructions}}
+---
+Card: {{id}} {{glyph}}
+Stage: {{stage}} ({{stage_index}} of {{stage_count}})
+---
+{{spec}}
+{{prior_stage_output}}
+Acceptance criteria:
+{{acceptance_criteria}}
+```
+
+Only customize if you need extra context injection or a different structure.
+
+### Step 5: Use it
+
+```zsh
+bop new my-thing feat-auth
+# Edit .cards/pending/feat-auth.jobcard/spec.md
+bop dispatcher --once
+```
+
+### Shipped Templates
+
+| Template | Stages | Models | Cost | Use When |
+|----------|--------|--------|------|----------|
+| **implement** | implement → qa | opus → sonnet | $$ | Requirements are clear |
+| **full** | spec → plan → implement → qa | sonnet → sonnet → opus → sonnet | $$$ | Complex/ambiguous work |
+| **cheap** | implement | ollama-local | free | Small fix, local model |
+| **qa-only** | qa | sonnet | $ | Code review, audit |
+
+### Ideas for Custom Templates
+
+| Name | Chain | Why |
+|------|-------|-----|
+| `hotfix` | `[implement]` claude/opus, 900s | Fast cloud fix, trust gates |
+| `research` | `[spec]` sonnet | Spec only, human reviews |
+| `duo` | `[implement, qa]` codex→claude | Cheap impl, expensive review |
+| `gauntlet` | `[implement, qa, qa]` claude→codex→ollama | Triple-reviewed |
+
+---
+
+## 9) Stage Instruction Files
+
+Live in `.cards/stages/`. One per stage. ~50 tokens each.
+
+| File | Agent's job |
+|------|------------|
+| `spec.md` | Write a spec under 500 words. No code. |
+| `plan.md` | Read spec, produce ordered steps under 800 words. |
+| `implement.md` | Write code, run tests, exit 0 when green. |
+| `qa.md` | Review as a different agent. Be skeptical. |
+
+**Adding a custom stage:**
+1. Create `.cards/stages/security-review.md`
+2. Add `"security-review"` to your template's `stage_chain`
+3. Add entries in `stage_models`, `stage_providers`, `stage_budgets`
+
+---
+
+## 10) Context Window Architecture
+
+Every token earns its slot:
+
+```
+┌─────────────────────────────────────────┐
+│ system_context.md        ~150 tokens    │  domain fix
+├─────────────────────────────────────────┤
+│ stages/<stage>.md        ~50 tokens     │  stage behavior
+├─────────────────────────────────────────┤
+│ card header              ~20 tokens     │  id + glyph + stage
+├─────────────────────────────────────────┤
+│ spec.md                  variable       │  the work
+├─────────────────────────────────────────┤
+│ prior_stage_output       variable       │  previous stage result
+├─────────────────────────────────────────┤
+│ acceptance_criteria      ~10 tokens     │  shell gates
+└─────────────────────────────────────────┘
+```
+
+Glyph compresses priority+team into 1 token: 🂡 = Ace of Spades = P1/CLI.
+
+---
+
+## 11) Zellij Integration
+
+| Artifact | What |
+|----------|------|
+| `layouts/bop.kdl` | 7-pane layout: board, spec, qa, stdout, stderr, inspector, shell |
+| `scripts/bop_focus.zsh` | Navigate panes by card id, `--auto` sweeps all |
+| `scripts/bop_bop.zsh` | Goal→card→Zellij session bootstrap |
+| `bop://` URL scheme | Quick Look "Attach" button opens Zellij session |
+| Meta fields | `zellij_session`, `zellij_pane` track running card's pane |
+
+Launch: `zellij --layout layouts/bop.kdl`
+
+---
+
+## 12) Safe Landing (JJ-First)
+
+1. Every agent works in its own workspace. Never touch `main`.
+2. One integrator workspace lands to `main`.
+3. Gates: `make check` + `bop policy check --staged`.
+4. If gates fail → card to `failed/` with reason.
+5. Push JJ→Git only after green.
+
+Script: `scripts/land_safe.zsh`
+
+---
+
+## 13) Adapter Contract
+
+```
+adapter.zsh <workdir> <prompt_file> <stdout_log> <stderr_log> [timeout]
+```
+
+| Exit | Meaning | Action |
+|------|---------|--------|
+| 0 | Success | → done/ |
+| 75 | Rate-limited | → pending/, rotate provider |
+| other | Failure | → failed/ |
+
+Adapters: `claude.zsh`, `codex.zsh`, `ollama-local.zsh`, `goose.zsh`, `aider.zsh`, `opencode.zsh`, `mock.zsh`.
+
+---
+
+## 14) MCP Policy
 
 MCPs are optional accelerators, not dependencies.
+Card lifecycle must work without MCP.
+Use for: GitHub PR actions, observability, dashboards.
 
-Use MCP only when needed for external systems:
-- GitHub PR metadata/actions,
-- observability and incident integrations,
-- optional dashboards.
+---
 
-Do not make card lifecycle depend on MCP availability.
-If MCP is down, filesystem workflow must still function.
-
-## 9) User Surface Clarity
-
-Keep user mental model obvious:
-- Finder + Quick Look: primary visual board for card state.
-- vibekanban-cli: board view over `.cards` with no alternate state store.
-- zellij: operator console for dispatcher/merge-gate visibility.
-
-Users should always see card symbols and state quickly without reading long docs.
-
-## 10) Immediate Direction (Simplicity First)
-
-DONE:
-- [x] Plan poker (`bop poker open/submit/reveal/consensus`) with glyph-based estimation
-- [x] `jc` → `bop` rename across CLI, docs, system_context
-- [x] Duplicate file cleanup (templates/, ghost doc refs)
-
-NEXT:
-1. Enforce glyph presence/format in policy check.
-2. Wire `bop deal` as alias for `bop new` (card-game verb consistency).
-3. Prefer fixing reliability gaps over adding features.
-
-## 12) Safe Main Landing While Agents Are Live (JJ-First)
-
-Goal: avoid branch collisions and partial merges while multiple agents are actively writing code.
-
-Operating model:
-1. Every agent works in its own JJ workspace. No direct work on shared `main`.
-2. One integrator workspace performs all landings to `main`.
-3. Git is transport; JJ is coordination.
-
-Fast safe-landing checklist:
-1. In integrator workspace, pull latest and rebase/squash candidate changes.
-2. Verify tree is clean (`git status --short` must be empty before landing).
-3. Run hard gates:
-   - `make check`
-   - `./target/debug/bop policy check --staged`
-4. If either gate fails, do not land. Route card back to `pending/` or `failed/` with reason.
-5. Land smallest safe slice first (especially during renames/refactors).
-6. Push from JJ to Git only after gates are green.
-
-TRIZ rationale:
-- Separate competing changes by workspace (segmentation).
-- Use an integrator as intermediary for conflict control.
-- Land only with immediate gate feedback, not intuition.
-
-## 11) Definition Of "Good"
+## 15) Definition of Done
 
 The system is good when:
-- a new agent can start in under 2 minutes,
-- card intent/priority is obvious from glyph + files,
-- policy catches out-of-scope churn before merge,
-- operational workflow keeps running without heroics.
+- A new agent starts in under 2 minutes.
+- Card intent is obvious from glyph + spec (no docs needed).
+- Users create templates by copying + editing one JSON file.
+- Stage auto-progression works end to end.
+- `bop factory start` runs unattended.
