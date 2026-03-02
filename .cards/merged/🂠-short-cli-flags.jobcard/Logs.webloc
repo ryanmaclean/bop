@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
   <key>URL</key>
-  <string>bop://card/short-cli-flags/tail</string>
+  <string>bop://card/short-cli-flags/logs</string>
 </dict>
 </plist>

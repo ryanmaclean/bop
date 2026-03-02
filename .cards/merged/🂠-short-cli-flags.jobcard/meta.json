@@ -10,7 +10,11 @@
   ],
   "stages": {
     "implement": {
-      "status": "pending"
+      "status": "done",
+      "agent": "adapters/claude.zsh",
+      "provider": "claude",
+      "duration_s": 62,
+      "started": "2026-03-02T04:41:24.679898Z"
     }
   },
   "acceptance_criteria": [
@@ -25,7 +29,16 @@
   "workspace_name": "ws-short-cli-flags-1772426307522",
   "workspace_path": ".cards/running/🂠-short-cli-flags.jobcard/workspace",
   "change_ref": "@  oxytouxrmltl\n│\n~",
+  "policy_result": "pass",
   "retry_count": 0,
+  "validation_summary": {
+    "total": 0,
+    "valid": 0,
+    "invalid": 0,
+    "alert_count": 1,
+    "critical_alerts": 1,
+    "health": "down"
+  },
   "stage_chain": [
     "implement"
   ],
