@@ -403,7 +403,124 @@ Use for: GitHub PR actions, observability, dashboards.
 
 ---
 
-## 15) Definition of Done
+## 15) macOS Integration Roadmap (from 2026-03-01 session)
+
+Ideas explored and validated but NOT yet implemented. Each is independent.
+
+### §15a — Finder Tags on Cards ⬅ DO NEXT (~2 lines)
+Add to `set_card_icon.swift` after line 145 (after `setIcon`):
+```swift
+let tags = [state, "bop"] as NSArray
+try? (targetURL as NSURL).setResourceValue(tags, forKey: .tagNamesKey)
+```
+This lights up Smart Folders (already created in `~/Library/Saved Searches/bop *.savedSearch`)
+and gives Shortcuts/Hazel/Alfred a query surface over card state.
+
+**Limitation:** `mdfind` won't see tags on bundles without a Spotlight importer (§15e).
+NSURL API + Finder read them fine.
+
+### §15b — Finder Comments on Cards (~5 lines)
+Set `kMDItemFinderComment` via NSURL to show card summary in Finder Get Info / column view:
+```swift
+let comment = "\(meta.id) — \(state) — \(meta.glyph ?? "🂠")"
+try? (targetURL as NSURL).setResourceValue(comment, forKey: .localizedNameKey)
+```
+Shows human-readable card identity without opening anything.
+
+### §15c — Notification Center for decision_required (~20 lines)
+When a card has `decision_required: true`, fire:
+```zsh
+osascript -e 'display notification "Card needs approval: feat-auth 🂫" with title "bop"'
+```
+Or use `UserNotifications` framework for actionable notifications with approve/reject buttons.
+Wire into merge-gate or FSEvents watcher.
+
+### §15d — Folder Actions as Alternative to FSEvents (~50 lines)
+macOS Folder Actions attach scripts to directories. Could supplement/replace the FSEvents watcher:
+- When a card appears in `done/`, trigger notification
+- When a card appears in `failed/`, trigger alert
+Lower overhead than a polling loop for simple triggers.
+
+### §15e — Spotlight Importer for sh.bop.card (~200 lines Swift)
+A `.mdimporter` bundle that teaches `mdfind` to parse `meta.json`:
+- Expose `kMDItemBopStage`, `kMDItemBopPriority`, `kMDItemBopTeam`, etc.
+- Enable: `mdfind "kMDItemBopStage == 'running'"`
+- Makes Smart Folders (§15a) work via `mdfind` too, not just NSURL
+- Ships alongside Quick Look extension in `macos/macos.xcodeproj`
+**Biggest unlock** for macOS-native card queries.
+
+### §15f — Smart Folder Generation in `bop factory install` (~30 lines Rust)
+`bop factory install` should also create the 5 Smart Folders in `~/Library/Saved Searches/`.
+Already have the `.savedSearch` plist format validated. Just needs plist generation in Rust
+alongside the launchd plist generation.
+
+### §15g — Custom xattr Metadata Bags (~10 lines Swift)
+Write card metadata as `com.apple.metadata:com_bop_*` xattr keys.
+These auto-appear in Spotlight index. Combined with §15e, enables rich queries.
+```swift
+// In set_card_icon.swift, after reading meta.json:
+try? targetURL.setExtendedAttribute(name: "com.apple.metadata:com_bop_stage", value: state)
+try? targetURL.setExtendedAttribute(name: "com.apple.metadata:com_bop_priority", value: priority)
+```
+
+---
+
+## 16) Design Debt (TRIZ Analysis, 2026-03-01 session)
+
+Contradictions identified. Solutions proposed but NOT implemented.
+
+### §16a — Meta God Struct (37 fields, 21 Option<T>)
+**Contradiction #6:** Schema flexibility vs integrity.
+**Proposed solution:** OpenLineage facet pattern — tiny identity core + facet bags.
+```rust
+// Target: 6 core fields + extensible facets
+pub struct Meta {
+    pub id: String,
+    pub created: DateTime<Utc>,
+    pub stage: String,
+    pub glyph: String,     // "🂠" default (card back)
+    pub token: String,     // "▦" default (crosshatch)
+    pub facets: BTreeMap<String, serde_json::Value>,
+}
+```
+**Migration:** backwards-compatible — read old flat fields, write as facets.
+Needs: schema version field, migration fn in jobcard-core.
+
+### §16b — stage vs stages Dual Source of Truth
+**Contradiction #7:** `meta.stage` (current) vs `meta.stages` (dict with status per stage).
+**Proposed solution:** `stage` becomes derived from `stages` — find the first non-done stage.
+Remove top-level `stage` writes, keep as read-only accessor.
+
+### §16c — team-* Namespace Confusion
+**Contradiction #8:** `team-*` directories vs the state machine (pending/running/done/failed/merged).
+Are they a separate namespace? A filter? The dispatcher doesn't look at them.
+**Proposed solution:** Teams are a label, not a directory. Cards live in state dirs.
+Team membership via `meta.team` field or Finder tag.
+
+### §16d — Card Back Defaults (🂠/▦)
+**Status:** `set_card_icon.swift` already uses 🂠 as default glyph when none set.
+**Remaining:**
+- `bop new` should set `glyph: "🂠"` and `token: "▦"` as defaults
+- Cards stay "face down" until poker consensus or manual assignment
+- `▦` (U+25A6 crosshatch) confirmed as BMP-safe filename token
+
+### §16e — Acceptance Criteria Portability
+**Contradiction #9:** Hardcoded paths in acceptance_criteria.
+**Status:** template-fixer agent was asked to clean `/Users/studio/gtfs` → relative paths.
+**Remaining:** Lint rule in `bop doctor` to flag absolute paths in acceptance_criteria.
+
+### §16f — Three-Surface Card Identity
+Every card has three visual surfaces:
+1. **Filename token** (BMP) — `▦` default, custom after poker
+2. **Finder icon** (custom NSColor + SMP glyph) — via `set_card_icon.swift`
+3. **Finder tag** (state string) — via §15a
+
+All three should be set atomically on card state transitions.
+Wire into dispatcher's `fs::rename` + icon update path.
+
+---
+
+## 17) Definition of Done
 
 The system is good when:
 - A new agent starts in under 2 minutes.

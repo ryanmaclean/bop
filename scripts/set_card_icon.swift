@@ -143,6 +143,11 @@ image.unlockFocus()
 // MARK: - Set icon
 
 let ok = NSWorkspace.shared.setIcon(image, forFile: targetPath, options: [])
+
+// Set Finder tags for Smart Folder queries and automation tools
+let tags: [String] = isCard ? [state, "bop"] : [state, "bop", "dir"]
+try? (targetURL as NSURL).setResourceValue(tags as NSArray, forKey: .tagNamesKey)
+
 if ok {
     let label = isCard
         ? "\(state)/\(targetURL.lastPathComponent)"
