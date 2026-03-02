@@ -10,3 +10,5 @@ qa_fixer	qa	context7,graphiti-memory,auto-claude	linear,electron,puppeteer
 pr_reviewer	utility	context7	-
 analysis	utility	context7	-
 roadmap_discovery	ideation	context7	-
+roadmap_features	roadmap	context7	-
+pr_fixer	pr-fix	context7,graphiti-memory,auto-claude	linear

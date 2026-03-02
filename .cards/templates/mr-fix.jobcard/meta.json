@@ -2,23 +2,23 @@
   "id": "REPLACE_ID",
   "created": "2026-03-01T00:00:00Z",
   "agent_type": null,
-  "stage": "implement",
-  "workflow_mode": "default-feature",
+  "stage": "mr-fix",
+  "workflow_mode": "mr-fix",
   "step_index": 1,
   "priority": null,
   "glyph": null,
   "token": null,
-  "stage_chain": ["implement", "qa"],
+  "stage_chain": ["mr-fix", "qa"],
   "stage_models": {
-    "implement": "opus",
+    "mr-fix": "opus",
     "qa": "sonnet"
   },
   "stage_providers": {
-    "implement": "claude",
-    "qa": "claude"
+    "mr-fix": "claude",
+    "qa": "codex"
   },
   "stage_budgets": {
-    "implement": 32000,
+    "mr-fix": 32000,
     "qa": 8000
   },
   "provider_chain": ["claude", "codex", "ollama-local"],

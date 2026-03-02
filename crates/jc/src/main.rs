@@ -109,6 +109,11 @@ enum Command {
     Inspect {
         id: String,
     },
+    /// Safely mutate selected meta fields with schema validation.
+    Meta {
+        #[command(subcommand)]
+        action: MetaAction,
+    },
     /// Run policy gates.
     Policy {
         #[command(subcommand)]
@@ -213,6 +218,26 @@ enum PolicyAction {
         /// Check staged changes in the current git index.
         #[arg(long)]
         staged: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum MetaAction {
+    /// Update workflow routing fields in meta.json.
+    Set {
+        id: String,
+        /// Workflow mode label (for stage routing / skill mapping).
+        #[arg(long)]
+        workflow_mode: Option<String>,
+        /// 1-based workflow step index.
+        #[arg(long)]
+        step_index: Option<u32>,
+        /// Clear workflow mode (also clears step index).
+        #[arg(long)]
+        clear_workflow_mode: bool,
+        /// Clear step index.
+        #[arg(long)]
+        clear_step_index: bool,
     },
 }
 
@@ -405,7 +430,90 @@ fn find_repo_script(start: &Path, script_rel: &str) -> Option<PathBuf> {
     })
 }
 
+fn card_state_from_path(card_dir: &Path) -> Option<String> {
+    card_dir
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_string())
+}
+
+fn infer_card_id_from_path(card_dir: &Path) -> Option<String> {
+    let name = card_dir.file_name()?.to_str()?;
+    let base = name.strip_suffix(".jobcard").unwrap_or(name);
+    Some(base.to_string())
+}
+
+fn write_webloc(path: &Path, target_url: &str) -> anyhow::Result<()> {
+    let body = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>URL</key>
+  <string>{target_url}</string>
+</dict>
+</plist>
+"#
+    );
+    fs::write(path, body)?;
+    Ok(())
+}
+
+fn sync_card_action_links(card_dir: &Path) {
+    let meta = jobcard_core::read_meta(card_dir).ok();
+    let id = meta
+        .as_ref()
+        .map(|m| m.id.clone())
+        .or_else(|| infer_card_id_from_path(card_dir))
+        .unwrap_or_default();
+    if id.trim().is_empty() {
+        return;
+    }
+
+    let state = card_state_from_path(card_dir).unwrap_or_else(|| "unknown".to_string());
+    let done_like = matches!(state.as_str(), "done" | "merged");
+    let logs_action = if done_like { "logs" } else { "tail" };
+    let logs_url = format!("bop://card/{id}/{logs_action}");
+    let logs_label = if done_like { "Open logs" } else { "Tail logs" };
+    let logs_cmd = if done_like {
+        format!("bop logs {id}")
+    } else {
+        format!("bop logs {id} --follow")
+    };
+
+    let session = meta
+        .as_ref()
+        .and_then(|m| m.zellij_session.as_ref())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    let mut links_md = String::from("# Card Links\n\n");
+    links_md.push_str(&format!("- Logs: [{logs_label}]({logs_url})\n"));
+    links_md.push_str(&format!("- Logs command: `{logs_cmd}`\n"));
+
+    let session_webloc = card_dir.join("Session.webloc");
+    if state == "running" {
+        if let Some(session) = session {
+            let session_url = format!("bop://card/{id}/session");
+            links_md.push_str(&format!("- Session: [Attach zellij]({session_url})\n"));
+            links_md.push_str(&format!("- Session command: `zellij attach {session}`\n"));
+            let _ = write_webloc(&session_webloc, &session_url);
+        } else {
+            let _ = fs::remove_file(&session_webloc);
+        }
+    } else {
+        let _ = fs::remove_file(&session_webloc);
+    }
+
+    let _ = fs::write(card_dir.join("links.md"), links_md);
+    let _ = write_webloc(&card_dir.join("Logs.webloc"), &logs_url);
+}
+
 fn render_card_thumbnail(card_dir: &Path) {
+    sync_card_action_links(card_dir);
+
     if !cfg!(target_os = "macos") {
         return;
     }
@@ -884,6 +992,8 @@ fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
             created: Utc::now(),
             agent_type: None,
             stage: "implement".to_string(),
+            workflow_mode: Some("default-feature".to_string()),
+            step_index: Some(1),
             priority: None,
             provider_chain: vec![],
             stages: Default::default(),
@@ -976,6 +1086,8 @@ fn create_card(
         created: Utc::now(),
         agent_type: None,
         stage: "spec".to_string(),
+        workflow_mode: None,
+        step_index: None,
         priority: None,
         provider_chain: vec![],
         stages: Default::default(),
@@ -1016,6 +1128,12 @@ fn create_card(
     meta.template_namespace = Some(template.to_string());
     meta.retry_count = Some(0);
     meta.failure_reason = None;
+    meta.workflow_mode = Some(
+        meta.workflow_mode
+            .clone()
+            .unwrap_or_else(|| workflow_mode_for_template(template).to_string()),
+    );
+    meta.step_index = Some(current_stage_step_index(&meta));
 
     write_meta(&card_dir, &meta)?;
 
@@ -1217,6 +1335,69 @@ fn append_log_line(path: &Path, line: &str) -> anyhow::Result<()> {
         .append(true)
         .open(path)?;
     writeln!(file, "{}", line)?;
+    Ok(())
+}
+
+fn workflow_mode_for_template(template: &str) -> &'static str {
+    match template {
+        "full" => "full-spec",
+        "qa-only" => "qa-only",
+        "ideation" => "ideation",
+        "roadmap" => "roadmap",
+        "pr-fix" => "pr-fix",
+        "mr-fix" => "mr-fix",
+        _ => "default-feature",
+    }
+}
+
+fn current_stage_step_index(meta: &Meta) -> u32 {
+    if let Some(idx) = meta
+        .stage_chain
+        .iter()
+        .position(|stage| stage == &meta.stage)
+        .map(|i| i + 1)
+    {
+        idx as u32
+    } else {
+        meta.step_index.unwrap_or(1).max(1)
+    }
+}
+
+fn unique_failed_path(failed_dir: &Path, name: &str) -> PathBuf {
+    let direct = failed_dir.join(name);
+    if !direct.exists() {
+        return direct;
+    }
+    let stem = name.strip_suffix(".jobcard").unwrap_or(name);
+    let ts = Utc::now().timestamp_millis();
+    failed_dir.join(format!("{stem}-rejected-{ts}.jobcard"))
+}
+
+fn quarantine_invalid_pending_card(
+    pending_path: &Path,
+    failed_dir: &Path,
+    reason: &str,
+) -> anyhow::Result<()> {
+    let name = pending_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .with_context(|| format!("invalid card path: {}", pending_path.display()))?;
+    let failed_path = unique_failed_path(failed_dir, name);
+    fs::rename(pending_path, &failed_path).with_context(|| {
+        format!(
+            "failed moving invalid pending card {} to failed/",
+            pending_path.display()
+        )
+    })?;
+    fs::create_dir_all(failed_path.join("logs"))?;
+    fs::create_dir_all(failed_path.join("output"))?;
+    let marker = format!("[{}] dispatcher rejected card: {}\n", Utc::now(), reason);
+    append_log_line(
+        &failed_path.join("logs").join("rejected.log"),
+        marker.trim_end(),
+    )?;
+    let _ = fs::write(failed_path.join("output").join("qa_report.md"), marker);
+    render_card_thumbnail(&failed_path);
     Ok(())
 }
 
@@ -2143,6 +2324,22 @@ async fn main() -> anyhow::Result<()> {
         Command::Approve { id } => cmd_approve(&root, &id),
         Command::Logs { id, follow } => cmd_logs(&root, &id, follow).await,
         Command::Inspect { id } => cmd_inspect(&root, &id),
+        Command::Meta { action } => match action {
+            MetaAction::Set {
+                id,
+                workflow_mode,
+                step_index,
+                clear_workflow_mode,
+                clear_step_index,
+            } => cmd_meta_set(
+                &root,
+                &id,
+                workflow_mode.as_deref(),
+                step_index,
+                clear_workflow_mode,
+                clear_step_index,
+            ),
+        },
         Command::Policy { action } => match action {
             PolicyAction::Check { id, staged } => cmd_policy_check(&root, id.as_deref(), staged),
         },
@@ -2655,6 +2852,23 @@ async fn run_dispatcher(
                         None => continue,
                     };
 
+                    let mut meta = match jobcard_core::read_meta(&pending_path) {
+                        Ok(m) => Some(m),
+                        Err(err) => {
+                            let reason = format!("invalid_meta: {err}");
+                            eprintln!(
+                                "[dispatcher] rejecting invalid pending card {}: {}",
+                                name, err
+                            );
+                            let _ = quarantine_invalid_pending_card(
+                                &pending_path,
+                                &failed_dir,
+                                &reason,
+                            );
+                            continue;
+                        }
+                    };
+
                     let running_path = running_dir.join(&name);
                     // Count before rename so the current card is not included in the tally
                     let active = count_running_cards(cards_dir);
@@ -2663,7 +2877,6 @@ async fn run_dispatcher(
                     }
                     render_card_thumbnail(&running_path);
 
-                    let mut meta = jobcard_core::read_meta(&running_path).ok();
                     let card_id = meta
                         .as_ref()
                         .map(|m| m.id.clone())
@@ -2850,6 +3063,8 @@ fn maybe_advance_stage(cards_dir: &Path, done_card_dir: &Path) {
         id: next_id.clone(),
         created: Utc::now(),
         stage: next_stage.clone(),
+        workflow_mode: meta.workflow_mode.clone(),
+        step_index: Some((current_idx + 2) as u32),
         glyph: meta.glyph.clone(),
         title: meta.title.clone(),
         description: meta.description.clone(),
@@ -3923,6 +4138,59 @@ fn cmd_inspect(root: &Path, id: &str) -> anyhow::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn cmd_meta_set(
+    root: &Path,
+    id: &str,
+    workflow_mode: Option<&str>,
+    step_index: Option<u32>,
+    clear_workflow_mode: bool,
+    clear_step_index: bool,
+) -> anyhow::Result<()> {
+    if clear_workflow_mode && workflow_mode.is_some() {
+        anyhow::bail!("cannot set and clear workflow_mode in the same command");
+    }
+    if clear_step_index && step_index.is_some() {
+        anyhow::bail!("cannot set and clear step_index in the same command");
+    }
+    if workflow_mode.is_none() && step_index.is_none() && !clear_workflow_mode && !clear_step_index
+    {
+        anyhow::bail!("no changes requested; use --workflow-mode/--step-index or clear flags");
+    }
+
+    let card = find_card(root, id).with_context(|| format!("card not found: {}", id))?;
+    let mut meta = jobcard_core::read_meta(&card)?;
+
+    if clear_workflow_mode {
+        meta.workflow_mode = None;
+        meta.step_index = None;
+    }
+    if let Some(mode) = workflow_mode {
+        let mode = mode.trim();
+        if mode.is_empty() {
+            anyhow::bail!("workflow_mode cannot be empty");
+        }
+        meta.workflow_mode = Some(mode.to_string());
+        if meta.step_index.is_none() {
+            meta.step_index = Some(1);
+        }
+    }
+    if clear_step_index {
+        meta.step_index = None;
+    }
+    if let Some(idx) = step_index {
+        meta.step_index = Some(idx);
+    }
+
+    write_meta(&card, &meta)?;
+    println!(
+        "updated {}: workflow_mode={:?} step_index={:?}",
+        id, meta.workflow_mode, meta.step_index
+    );
     Ok(())
 }
 

@@ -105,6 +105,14 @@ pub struct Meta {
 
     pub stage: String,
 
+    /// High-level workflow family used for stage routing and agent behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_mode: Option<String>,
+
+    /// 1-based step index inside a workflow plan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_index: Option<u32>,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -206,6 +214,23 @@ impl Meta {
         }
         if self.stage.trim().is_empty() {
             return Err(JobCardError::Invalid("meta.stage is empty".to_string()));
+        }
+        if let Some(mode) = self.workflow_mode.as_ref() {
+            if mode.trim().is_empty() {
+                return Err(JobCardError::Invalid(
+                    "meta.workflow_mode is empty".to_string(),
+                ));
+            }
+        }
+        if self.step_index == Some(0) {
+            return Err(JobCardError::Invalid(
+                "meta.step_index must be >= 1".to_string(),
+            ));
+        }
+        if self.step_index.is_some() && self.workflow_mode.is_none() {
+            return Err(JobCardError::Invalid(
+                "meta.step_index requires meta.workflow_mode".to_string(),
+            ));
         }
         Ok(())
     }
@@ -467,5 +492,34 @@ mod tests {
         // But should still round-trip fine
         let back = read_meta(dir.path()).unwrap();
         assert!(back.stage_chain.is_empty());
+    }
+
+    #[test]
+    fn meta_workflow_fields_validate_and_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut m = Meta {
+            id: "wf-1".into(),
+            created: chrono::Utc::now(),
+            stage: "implement".into(),
+            workflow_mode: Some("default-feature".into()),
+            step_index: Some(1),
+            ..Default::default()
+        };
+
+        write_meta(dir.path(), &m).unwrap();
+        let back = read_meta(dir.path()).unwrap();
+        assert_eq!(back.workflow_mode.as_deref(), Some("default-feature"));
+        assert_eq!(back.step_index, Some(1));
+
+        m.workflow_mode = Some("   ".into());
+        assert!(write_meta(dir.path(), &m).is_err());
+
+        m.workflow_mode = None;
+        m.step_index = Some(1);
+        assert!(write_meta(dir.path(), &m).is_err());
+
+        m.workflow_mode = Some("default-feature".into());
+        m.step_index = Some(0);
+        assert!(write_meta(dir.path(), &m).is_err());
     }
 }

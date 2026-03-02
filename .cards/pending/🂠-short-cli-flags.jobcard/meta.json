@@ -1,0 +1,33 @@
+{
+  "id": "short-cli-flags",
+  "created": "2026-03-02T04:18:12.548589Z",
+  "stage": "implement",
+  "workflow_mode": "default-feature",
+  "step_index": 1,
+  "timeout_seconds": 3600,
+  "provider_chain": [
+    "claude"
+  ],
+  "acceptance_criteria": [
+    "cargo build",
+    "cargo clippy -- -D warnings",
+    "./target/debug/bop dispatcher -v j --help 2>&1 | grep -q vcs",
+    "jj log -r 'main..@-' | grep -q ."
+  ],
+  "worktree_branch": "job/short-cli-flags",
+  "template_namespace": "implement",
+  "retry_count": 0,
+  "stage_chain": [
+    "implement"
+  ],
+  "stage_models": {
+    "implement": "sonnet"
+  },
+  "stage_providers": {
+    "implement": "claude"
+  },
+  "stage_budgets": {
+    "implement": 32000
+  },
+  "failure_reason": null
+}

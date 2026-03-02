@@ -81,6 +81,121 @@ fn init_cards(cards: &Path) {
     assert!(status.success());
 }
 
+// ── meta set ──────────────────────────────────────────────────────────────────
+
+#[test]
+fn meta_set_updates_workflow_fields() {
+    build_jc();
+    let td = tempfile::tempdir().unwrap();
+    let cards = td.path().join(".cards");
+    init_cards(&cards);
+    make_card(&cards, "pending", "m1");
+
+    let status = Command::new(jc_bin())
+        .args([
+            "--cards-dir",
+            cards.to_str().unwrap(),
+            "meta",
+            "set",
+            "m1",
+            "--workflow-mode",
+            "ideation",
+            "--step-index",
+            "3",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let meta_raw =
+        fs::read_to_string(cards.join("pending").join("m1.jobcard").join("meta.json")).unwrap();
+    let meta: serde_json::Value = serde_json::from_str(&meta_raw).unwrap();
+    assert_eq!(
+        meta.get("workflow_mode").and_then(|v| v.as_str()),
+        Some("ideation")
+    );
+    assert_eq!(meta.get("step_index").and_then(|v| v.as_u64()), Some(3));
+}
+
+#[test]
+fn meta_set_clear_workflow_mode_also_clears_step_index() {
+    build_jc();
+    let td = tempfile::tempdir().unwrap();
+    let cards = td.path().join(".cards");
+    init_cards(&cards);
+    make_card(&cards, "pending", "m2");
+
+    let status = Command::new(jc_bin())
+        .args([
+            "--cards-dir",
+            cards.to_str().unwrap(),
+            "meta",
+            "set",
+            "m2",
+            "--workflow-mode",
+            "roadmap",
+            "--step-index",
+            "2",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let status = Command::new(jc_bin())
+        .args([
+            "--cards-dir",
+            cards.to_str().unwrap(),
+            "meta",
+            "set",
+            "m2",
+            "--clear-workflow-mode",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let meta_raw =
+        fs::read_to_string(cards.join("pending").join("m2.jobcard").join("meta.json")).unwrap();
+    let meta: serde_json::Value = serde_json::from_str(&meta_raw).unwrap();
+    assert!(
+        meta.get("workflow_mode").is_none()
+            || meta
+                .get("workflow_mode")
+                .and_then(|v| v.as_null())
+                .is_some()
+    );
+    assert!(
+        meta.get("step_index").is_none()
+            || meta.get("step_index").and_then(|v| v.as_null()).is_some()
+    );
+}
+
+#[test]
+fn meta_set_rejects_step_index_without_workflow_mode() {
+    build_jc();
+    let td = tempfile::tempdir().unwrap();
+    let cards = td.path().join(".cards");
+    init_cards(&cards);
+    make_card(&cards, "pending", "m3");
+
+    let status = Command::new(jc_bin())
+        .args([
+            "--cards-dir",
+            cards.to_str().unwrap(),
+            "meta",
+            "set",
+            "m3",
+            "--step-index",
+            "2",
+        ])
+        .status()
+        .unwrap();
+    assert!(
+        !status.success(),
+        "step_index without workflow_mode should fail validation"
+    );
+}
+
 // ── retry ─────────────────────────────────────────────────────────────────────
 
 #[test]

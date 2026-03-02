@@ -2,32 +2,29 @@
   "id": "REPLACE_ID",
   "created": "2026-03-01T00:00:00Z",
   "agent_type": null,
-  "stage": "implement",
-  "workflow_mode": "default-feature",
+  "stage": "roadmap",
+  "workflow_mode": "roadmap",
   "step_index": 1,
   "priority": null,
   "glyph": null,
   "token": null,
-  "stage_chain": ["implement", "qa"],
+  "stage_chain": ["roadmap", "qa"],
   "stage_models": {
-    "implement": "opus",
+    "roadmap": "sonnet",
     "qa": "sonnet"
   },
   "stage_providers": {
-    "implement": "claude",
-    "qa": "claude"
+    "roadmap": "claude",
+    "qa": "codex"
   },
   "stage_budgets": {
-    "implement": 32000,
-    "qa": 8000
+    "roadmap": 12000,
+    "qa": 4000
   },
   "provider_chain": ["claude", "codex", "ollama-local"],
-  "acceptance_criteria": [
-    "cargo test",
-    "cargo clippy -- -D warnings"
-  ],
+  "acceptance_criteria": [],
   "worktree_branch": "job/REPLACE_ID",
-  "timeout_seconds": 3600,
+  "timeout_seconds": 1800,
   "retry_count": 0,
   "failure_reason": null
 }

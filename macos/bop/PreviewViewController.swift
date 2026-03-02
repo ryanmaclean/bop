@@ -193,9 +193,36 @@ fileprivate struct JobCardPreview: View {
         meta?.title ?? meta?.id ?? url?.lastPathComponent ?? "JobCard"
     }
 
+    private var cardState: String {
+        guard let url else { return "unknown" }
+        return url.deletingLastPathComponent().lastPathComponent
+    }
+
     private var isRunning: Bool {
+        if cardState == "running" { return true }
         guard let m = meta else { return false }
         return m.stages?[m.stage]?.status == "running"
+    }
+
+    private var isDoneLike: Bool {
+        cardState == "done" || cardState == "merged"
+    }
+
+    private var logsAction: String { isDoneLike ? "logs" : "tail" }
+
+    private var logsURL: URL? {
+        guard let id = meta?.id else { return nil }
+        return URL(string: "bop://card/\(id)/\(logsAction)")
+    }
+
+    private var logsButtonText: String { isDoneLike ? "Logs" : "Tail" }
+
+    private var logsHelpText: String {
+        guard let id = meta?.id else { return "" }
+        if isDoneLike {
+            return "Open logs: bop logs \(id)"
+        }
+        return "Live tail: bop logs \(id) --follow"
     }
     
     private func priorityText(_ p: Int) -> String {
@@ -311,7 +338,7 @@ fileprivate struct JobCardPreview: View {
                     case .subtasks:
                         subtasksTab(m)
                     case .logs:
-                        logsTab(m.id)
+                        logsTab()
                     case .files:
                         filesTab()
                     }
@@ -332,13 +359,12 @@ fileprivate struct JobCardPreview: View {
                 
                 Spacer()
                 
-                if !logs.isEmpty,
-                   let tailURL = URL(string: "bop://card/\(m.id)/logs") {
-                    Link(destination: tailURL) {
+                if let logsURL {
+                    Link(destination: logsURL) {
                         HStack(spacing: 6) {
                             Image(systemName: "scroll")
                                 .font(.system(size: 11))
-                            Text("Tail")
+                            Text(logsButtonText)
                                 .font(.system(size: 13, weight: .bold))
                         }
                         .foregroundColor(.tailText)
@@ -347,7 +373,7 @@ fileprivate struct JobCardPreview: View {
                         .background(Color.tailBg)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
-                    .help("Live tail: bop logs \(m.id) --follow")
+                    .help(logsHelpText)
                 }
                 if isRunning, let session = m.zellijSession,
                    let url = URL(string: "bop://card/\(m.id)/session") {
@@ -499,7 +525,7 @@ fileprivate struct JobCardPreview: View {
     }
     
     @ViewBuilder
-    private func logsTab(_ id: String) -> some View {
+    private func logsTab() -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if !logs.isEmpty {
                 Text(logs)
@@ -513,18 +539,19 @@ fileprivate struct JobCardPreview: View {
                 Text("No logs yet.")
                     .foregroundColor(.textMuted)
             }
-            if let tailURL = URL(string: "bop://card/\(id)/logs") {
-                Link(destination: tailURL) {
+            if let logsURL = logsURL {
+                Link(destination: logsURL) {
                     HStack(spacing: 6) {
                         Image(systemName: "scroll").font(.system(size: 12))
-                        Text("Open live tail →").font(.system(size: 13, weight: .medium))
+                        Text(isDoneLike ? "Open logs →" : "Open live tail →")
+                            .font(.system(size: 13, weight: .medium))
                     }
                     .foregroundColor(.tailText)
                     .padding(.horizontal, 14).padding(.vertical, 7)
                     .background(Color.tailBg)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
-                .help("bop logs \(id) --follow")
+                .help(logsHelpText)
             }
         }
     }
