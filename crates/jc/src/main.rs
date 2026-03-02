@@ -992,6 +992,9 @@ fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
             created: Utc::now(),
             agent_type: None,
             stage: "implement".to_string(),
+            card_type: None,
+            metadata_source: None,
+            metadata_key: None,
             workflow_mode: Some("default-feature".to_string()),
             step_index: Some(1),
             priority: None,
@@ -1026,6 +1029,7 @@ fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
             stage_models: Default::default(),
             stage_providers: Default::default(),
             stage_budgets: Default::default(),
+            ..Default::default()
         };
         write_meta(&implement, &meta)?;
 
@@ -1086,6 +1090,9 @@ fn create_card(
         created: Utc::now(),
         agent_type: None,
         stage: "spec".to_string(),
+        card_type: None,
+        metadata_source: None,
+        metadata_key: None,
         workflow_mode: None,
         step_index: None,
         priority: None,
@@ -1120,6 +1127,7 @@ fn create_card(
         stage_models: Default::default(),
         stage_providers: Default::default(),
         stage_budgets: Default::default(),
+        ..Default::default()
     });
 
     meta.id = id.to_string();
@@ -4137,7 +4145,56 @@ fn cmd_inspect(root: &Path, id: &str) -> anyhow::Result<()> {
         }
     }
 
+    // Cost summary from stdout.log JSON result line
+    let stdout_log = card.join("logs").join("stdout.log");
+    if stdout_log.exists() {
+        let content = fs::read_to_string(&stdout_log)?;
+        let json_line = content
+            .lines()
+            .rev()
+            .find_map(|line| serde_json::from_str::<serde_json::Value>(line).ok());
+        if let Some(v) = json_line {
+            if let Some(usage) = v.get("usage") {
+                let cache_read = usage
+                    .get("cache_read_input_tokens")
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(0);
+                let cache_create = usage
+                    .get("cache_creation_input_tokens")
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(0);
+                let output = usage
+                    .get("output_tokens")
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(0);
+                let cost = v
+                    .get("total_cost_usd")
+                    .and_then(|x| x.as_f64())
+                    .unwrap_or(0.0);
+                let turns = v.get("num_turns").and_then(|x| x.as_u64()).unwrap_or(0);
+                println!(
+                    "\nCost  ${:.2}  |  cache_read {}  cache_create {}  output {}  |  {} turns",
+                    cost,
+                    fmt_tokens(cache_read),
+                    fmt_tokens(cache_create),
+                    fmt_tokens(output),
+                    turns,
+                );
+            }
+        }
+    }
+
     Ok(())
+}
+
+fn fmt_tokens(n: u64) -> String {
+    if n >= 10_000 {
+        format!("{}k", n / 1000)
+    } else if n >= 1_000 {
+        format!("{:.1}k", n as f64 / 1000.0)
+    } else {
+        format!("{}", n)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

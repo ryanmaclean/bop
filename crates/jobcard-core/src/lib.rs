@@ -265,7 +265,11 @@ fn value_as_non_empty_string(v: Option<&Value>) -> Option<String> {
 }
 
 fn normalize_roadmap_status(raw: &str) -> Option<String> {
-    let key = raw.trim().to_lowercase().replace('-', "_").replace(' ', "_");
+    let key = raw
+        .trim()
+        .to_lowercase()
+        .replace('-', "_")
+        .replace(' ', "_");
     match key.as_str() {
         "under_review" | "review" | "underreview" => Some("under_review".to_string()),
         "planned" | "plan" => Some("planned".to_string()),
@@ -276,7 +280,11 @@ fn normalize_roadmap_status(raw: &str) -> Option<String> {
 }
 
 fn roadmap_priority_to_rank(raw: &str) -> Option<i64> {
-    let key = raw.trim().to_lowercase().replace('-', "_").replace(' ', "_");
+    let key = raw
+        .trim()
+        .to_lowercase()
+        .replace('-', "_")
+        .replace(' ', "_");
     match key.as_str() {
         "must" | "must_have" | "critical" => Some(1),
         "should" | "should_have" | "important" => Some(2),
@@ -391,12 +399,16 @@ fn hydrate_roadmap_feature_from_json(meta: &mut Meta, json: &Value) {
                     name: status.clone(),
                     kind: Some("status".to_string()),
                 });
-                if matches!(meta.stage.as_str(), "roadmap" | "roadmap_feature" | "feature") {
+                if matches!(
+                    meta.stage.as_str(),
+                    "roadmap" | "roadmap_feature" | "feature"
+                ) {
                     meta.stage = status;
                 }
             }
         }
-        if let Some(phase) = value_as_non_empty_string(fo.get("phase").or_else(|| fo.get("phase_id")))
+        if let Some(phase) =
+            value_as_non_empty_string(fo.get("phase").or_else(|| fo.get("phase_id")))
         {
             labels.push(Label {
                 name: phase,
@@ -725,5 +737,117 @@ mod tests {
         m.workflow_mode = Some("default-feature".into());
         m.step_index = Some(0);
         assert!(write_meta(dir.path(), &m).is_err());
+    }
+
+    #[test]
+    fn meta_card_type_serializes_to_type_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = Meta {
+            id: "roadmap-1".into(),
+            created: chrono::Utc::now(),
+            stage: "roadmap".into(),
+            card_type: Some("roadmap".into()),
+            metadata_source: Some("roadmap.json".into()),
+            ..Default::default()
+        };
+
+        write_meta(dir.path(), &m).unwrap();
+        let raw = fs::read_to_string(meta_path(dir.path())).unwrap();
+        assert!(raw.contains("\"type\""));
+        assert!(!raw.contains("\"card_type\""));
+    }
+
+    #[test]
+    fn read_meta_hydrates_roadmap_type_from_roadmap_json() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("roadmap.json"),
+            r#"{
+  "project_name": "Auto-Tundra",
+  "vision": "AI orchestration for software teams"
+}"#,
+        )
+        .unwrap();
+
+        let m = Meta {
+            id: "roadmap-root".into(),
+            created: chrono::Utc::now(),
+            stage: "roadmap".into(),
+            card_type: Some("roadmap".into()),
+            metadata_source: Some("roadmap.json".into()),
+            ..Default::default()
+        };
+        write_meta(dir.path(), &m).unwrap();
+
+        let back = read_meta(dir.path()).unwrap();
+        assert_eq!(back.title.as_deref(), Some("Auto-Tundra"));
+        assert_eq!(
+            back.description.as_deref(),
+            Some("AI orchestration for software teams")
+        );
+        assert_eq!(back.workflow_mode.as_deref(), Some("roadmap"));
+    }
+
+    #[test]
+    fn read_meta_hydrates_roadmap_feature_type_from_output_json() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("output")).unwrap();
+        fs::write(
+            dir.path().join("output").join("roadmap.json"),
+            r#"{
+  "features": [
+    {
+      "id": "feat-auth",
+      "title": "API Authentication & Authorization System",
+      "description": "Secure all API endpoints",
+      "priority": "must",
+      "status": "in progress",
+      "phase": "Production Foundation",
+      "acceptance_criteria": [
+        "All API endpoints enforce authentication by default",
+        "Role-based access control is supported"
+      ]
+    }
+  ]
+}"#,
+        )
+        .unwrap();
+
+        let m = Meta {
+            id: "job-auth-impl".into(),
+            created: chrono::Utc::now(),
+            stage: "roadmap_feature".into(),
+            card_type: Some("roadmap_feature".into()),
+            metadata_key: Some("feat-auth".into()),
+            ..Default::default()
+        };
+        write_meta(dir.path(), &m).unwrap();
+
+        let back = read_meta(dir.path()).unwrap();
+        assert_eq!(
+            back.title.as_deref(),
+            Some("API Authentication & Authorization System")
+        );
+        assert_eq!(
+            back.description.as_deref(),
+            Some("Secure all API endpoints")
+        );
+        assert_eq!(back.priority, Some(1));
+        assert_eq!(back.stage, "in_progress");
+        assert_eq!(back.workflow_mode.as_deref(), Some("roadmap"));
+        assert_eq!(back.acceptance_criteria.len(), 2);
+
+        assert!(back
+            .labels
+            .iter()
+            .any(|l| l.kind.as_deref() == Some("priority") && l.name == "must"));
+        assert!(back
+            .labels
+            .iter()
+            .any(|l| l.kind.as_deref() == Some("status") && l.name == "in_progress"));
+        assert!(back
+            .labels
+            .iter()
+            .any(|l| l.kind.as_deref() == Some("phase") && l.name == "Production Foundation"));
     }
 }
