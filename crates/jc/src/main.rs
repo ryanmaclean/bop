@@ -131,6 +131,11 @@ enum Command {
         #[command(subcommand)]
         action: FactoryAction,
     },
+    /// Keep Finder folder icons in sync with card state.
+    Icons {
+        #[command(subcommand)]
+        action: IconsAction,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -166,6 +171,18 @@ enum FactoryAction {
     /// Show whether dispatcher + merge-gate services are loaded/running.
     Status,
     /// Unload and remove the launchd plist files.
+    Uninstall,
+}
+
+#[derive(Subcommand, Debug)]
+enum IconsAction {
+    /// Set icons on every .jobcard in .cards/ right now (batch).
+    Sync,
+    /// Watch .cards/ with FSEvents and update icons as cards move (foreground).
+    Watch,
+    /// Install a launchd WatchPaths agent that runs `bop icons sync` on changes.
+    Install,
+    /// Unload and remove the icon-watcher launchd agent.
     Uninstall,
 }
 
@@ -1578,6 +1595,208 @@ fn cmd_factory_uninstall() -> anyhow::Result<()> {
     Ok(())
 }
 
+// ── icons ─────────────────────────────────────────────────────────────────────
+
+const ICONS_LABEL: &str = "sh.bop.iconwatcher";
+
+/// Run set_card_icon.swift on a single card dir (best-effort, silent on failure).
+fn set_card_icon(card_dir: &Path) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    if let Some(script) = find_repo_script(card_dir, "scripts/set_card_icon.swift") {
+        let _ = StdCommand::new("swift").arg(script).arg(card_dir).status();
+    }
+}
+
+/// Batch: update icons for every .jobcard under .cards/.
+fn cmd_icons_sync(root: &Path) -> anyhow::Result<()> {
+    if !cfg!(target_os = "macos") {
+        println!("icons: macOS only");
+        return Ok(());
+    }
+    let mut n = 0usize;
+    for state in &["pending", "running", "done", "merged", "failed"] {
+        let dir = root.join(state);
+        if !dir.exists() {
+            continue;
+        }
+        for entry in fs::read_dir(&dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("jobcard") && path.is_dir() {
+                set_card_icon(&path);
+                n += 1;
+            }
+        }
+    }
+    // Also handle team-* subdirs
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let team = entry.path();
+        if !team.is_dir()
+            || !team
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with("team-"))
+                .unwrap_or(false)
+        {
+            continue;
+        }
+        for state in &["pending", "running", "done", "merged", "failed"] {
+            let dir = team.join(state);
+            if !dir.exists() {
+                continue;
+            }
+            for e in fs::read_dir(&dir)? {
+                let path = e?.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("jobcard") && path.is_dir() {
+                    set_card_icon(&path);
+                    n += 1;
+                }
+            }
+        }
+    }
+    println!("✓ icons synced: {} cards", n);
+    Ok(())
+}
+
+/// FSEvents watcher (foreground): update icon immediately when any .jobcard dir moves.
+fn cmd_icons_watch(root: &Path) -> anyhow::Result<()> {
+    use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+
+    if !cfg!(target_os = "macos") {
+        println!("icons watch: macOS only");
+        return Ok(());
+    }
+
+    let cards_dir = root.to_path_buf();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut watcher = RecommendedWatcher::new(tx, Config::default())?;
+    watcher.watch(&cards_dir, RecursiveMode::Recursive)?;
+
+    println!(
+        "bop icons watch — watching {} for card moves",
+        cards_dir.display()
+    );
+    println!("Ctrl+C to stop\n");
+
+    for res in rx {
+        let event = match res {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("watch error: {}", e);
+                continue;
+            }
+        };
+
+        // Only care about create/rename events on .jobcard directories
+        let is_relevant = matches!(
+            event.kind,
+            EventKind::Create(_) | EventKind::Modify(notify::event::ModifyKind::Name(_))
+        );
+        if !is_relevant {
+            continue;
+        }
+
+        for path in &event.paths {
+            if path.extension().and_then(|e| e.to_str()) == Some("jobcard") && path.is_dir() {
+                set_card_icon(path);
+                println!(
+                    "  icon updated: {}",
+                    path.file_name().unwrap_or_default().to_string_lossy()
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Install a launchd WatchPaths agent: fires `bop icons sync` whenever .cards/ changes.
+fn cmd_icons_install(root: &Path) -> anyhow::Result<()> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        println!("icons install: macOS only");
+        return Ok(());
+    }
+
+    let bop_bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("/usr/local/bin/bop"));
+    let cards_dir = root.to_string_lossy().to_string();
+
+    let plist = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{label}</string>
+
+  <key>WatchPaths</key>
+  <array>
+    <string>{cards}</string>
+  </array>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>{bop}</string>
+    <string>--cards-root</string>
+    <string>{cards}</string>
+    <string>icons</string>
+    <string>sync</string>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/bop-iconwatcher.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/bop-iconwatcher.err</string>
+</dict>
+</plist>
+"#,
+        label = ICONS_LABEL,
+        cards = cards_dir,
+        bop = bop_bin.display(),
+    );
+
+    let dest = plist_path(ICONS_LABEL);
+    fs::write(&dest, &plist)?;
+
+    let _ = StdCommand::new("launchctl")
+        .args(["unload", "-w"])
+        .arg(&dest)
+        .output();
+    let status = StdCommand::new("launchctl")
+        .args(["load", "-w"])
+        .arg(&dest)
+        .status()?;
+
+    if status.success() {
+        println!("✓ icon watcher installed: {}", dest.display());
+        println!("  Fires `bop icons sync` whenever .cards/ changes.");
+        println!("  Logs: /tmp/bop-iconwatcher.log");
+        println!("\n  To remove: bop icons uninstall");
+    } else {
+        anyhow::bail!("launchctl load failed");
+    }
+    Ok(())
+}
+
+fn cmd_icons_uninstall() -> anyhow::Result<()> {
+    let dest = plist_path(ICONS_LABEL);
+    let _ = StdCommand::new("launchctl")
+        .args(["unload", "-w"])
+        .arg(&dest)
+        .output();
+    if dest.exists() {
+        fs::remove_file(&dest)?;
+        println!("✓ removed {}", dest.display());
+    } else {
+        println!("  (not installed)");
+    }
+    Ok(())
+}
+
 fn command_available(name: &str) -> bool {
     StdCommand::new(name)
         .arg("--version")
@@ -1868,6 +2087,12 @@ async fn main() -> anyhow::Result<()> {
             FactoryAction::Stop => cmd_factory_stop(),
             FactoryAction::Status => cmd_factory_status(),
             FactoryAction::Uninstall => cmd_factory_uninstall(),
+        },
+        Command::Icons { action } => match action {
+            IconsAction::Sync => cmd_icons_sync(&root),
+            IconsAction::Watch => cmd_icons_watch(&root),
+            IconsAction::Install => cmd_icons_install(&root),
+            IconsAction::Uninstall => cmd_icons_uninstall(),
         },
     }
 }

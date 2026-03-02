@@ -15,6 +15,7 @@ walkdir.workspace = true
 jobcard-core = { path = "../jobcard-core" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process"] }
 serde.workspace = true
+notify = "6"
 
 [dev-dependencies]
 tempfile = "3"
