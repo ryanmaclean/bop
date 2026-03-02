@@ -79,6 +79,12 @@ pub fn squash_workspace(ws_path: &Path) -> Result<()> {
 /// Forget (deregister) the workspace. Call from repo_root after squashing.
 /// jj does not delete the directory — that's the caller's responsibility.
 pub fn forget_workspace(repo_root: &Path, ws_name: &str) -> Result<()> {
+    // Heal stale working copies before attempting workspace forget.
+    let _ = std::process::Command::new("jj")
+        .args(["workspace", "update-stale"])
+        .current_dir(repo_root)
+        .output();
+
     let out = std::process::Command::new("jj")
         .args(["workspace", "forget", ws_name])
         .current_dir(repo_root)
