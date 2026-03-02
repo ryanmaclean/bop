@@ -1,9 +1,0 @@
-step_id	goal	bop_stage	bop_commands	primary_artifacts
-1	Discover card stage/status/workflow	any	bop inspect <id>	meta.json,spec.md,logs/
-2	Create card for mode/template	entry	bop new <template> <id>	meta.json,spec.md,prompt.md
-3	Process pending stage	current stage	bop dispatcher --once	logs/stdout.log,logs/stderr.log
-4	Review running/failed execution	current stage	bop logs <id> | bop inspect <id>	logs/,meta.json
-5	Handle approval gate when required	current stage	bop approve <id>	meta.json decision fields
-6	Finalize done cards	post-qa	bop merge-gate --once	output/,changes.json,merged state
-7	Iterate after failed QA/PR/MR fixes	implement|qa	bop retry <id> | bop dispatcher --once	failed reason cleared,new logs
-8	Stamp workflow routing metadata	entry	bop meta set <id> --workflow-mode <mode> --step-index <n>	meta.workflow_mode,meta.step_index
