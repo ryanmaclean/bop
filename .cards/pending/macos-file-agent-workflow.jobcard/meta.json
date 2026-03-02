@@ -1,10 +1,9 @@
 {
   "id": "macos-file-agent-workflow",
+  "created": "2026-03-01T23:32:49.628199Z",
+  "glyph": "\ud83c\udcdd",
   "title": "macOS file-agent workflow in renamed bop repo",
   "description": "Resurrect GTFS-era card work and produce a unified macOS filesystem-agent workflow plan with renamed-path hardening.",
-  "glyph": "🃝",
-  "token": "⚁",
-  "priority": 2,
   "labels": [
     {
       "name": "macOS",
@@ -42,31 +41,16 @@
       "done": false
     }
   ],
-  "created": "2026-03-01T23:32:49.628199Z",
   "stage": "plan",
+  "priority": 2,
   "provider_chain": [
     "claude",
     "codex",
     "goose"
   ],
   "stages": {
-    "spec": {
-      "status": "done",
-      "agent": "human"
-    },
     "plan": {
-      "status": "pending",
-      "agent": null
-    },
-    "implement": {
-      "status": "blocked",
-      "agent": null,
-      "blocked_by": "plan"
-    },
-    "qa": {
-      "status": "blocked",
-      "agent": null,
-      "blocked_by": "implement"
+      "status": "pending"
     }
   },
   "acceptance_criteria": [
@@ -76,5 +60,6 @@
   ],
   "worktree_branch": "job/macos-file-agent-workflow",
   "template_namespace": "implement",
-  "retry_count": 0
+  "retry_count": 0,
+  "failure_reason": "workspace_prepare_failed: jj workspace add failed: Error: Cannot access /Users/studio/bop/.workspaces/ws-macos-file-agent-workflow-1772427061201\nCaused by: No such file or directory (os error 2)\n"
 }

@@ -2715,7 +2715,9 @@ fn prepare_workspace(
             jobcard_core::worktree::ensure_jj_repo(&repo_root)?;
             let ws_name = next_workspace_name(card_id);
             // Stable path outside the card bundle so it survives card state renames
-            let stable_ws = repo_root.join(".workspaces").join(&ws_name);
+            let workspaces_dir = repo_root.join(".workspaces");
+            std::fs::create_dir_all(&workspaces_dir)?;
+            let stable_ws = workspaces_dir.join(&ws_name);
             let legacy_ws = card_dir.join("workspace");
             let ws_path = if stable_ws.exists() {
                 stable_ws

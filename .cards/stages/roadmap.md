@@ -1,6 +1,7 @@
-# Stage: Roadmap
+# Stage: Roadmap (Legacy)
 
-You are producing a delivery roadmap for this card.
+This legacy stage is equivalent to the newer `generate` stage in the roadmap
+pipeline.
 
 Produce `output/result.md` with:
 - Milestones and ordering

@@ -2,23 +2,29 @@
   "id": "REPLACE_ID",
   "created": "2026-03-01T00:00:00Z",
   "agent_type": null,
-  "stage": "roadmap",
+  "stage": "analyze",
   "workflow_mode": "roadmap",
   "step_index": 1,
   "priority": null,
   "glyph": null,
   "token": null,
-  "stage_chain": ["roadmap", "qa"],
+  "stage_chain": ["analyze", "discover", "generate", "qa"],
   "stage_models": {
-    "roadmap": "sonnet",
+    "analyze": "sonnet",
+    "discover": "sonnet",
+    "generate": "sonnet",
     "qa": "sonnet"
   },
   "stage_providers": {
-    "roadmap": "claude",
+    "analyze": "claude",
+    "discover": "claude",
+    "generate": "claude",
     "qa": "codex"
   },
   "stage_budgets": {
-    "roadmap": 12000,
+    "analyze": 8000,
+    "discover": 12000,
+    "generate": 12000,
     "qa": 4000
   },
   "provider_chain": ["claude", "codex", "ollama-local"],

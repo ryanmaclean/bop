@@ -36,6 +36,26 @@ tail -f /tmp/bop-merge-gate.log   # merge-gate stdout
 tail -f /tmp/bop-merge-gate.err   # merge-gate stderr
 ```
 
+## Optional: Roadmap Hot Folder Trigger
+
+Use a filesystem drop folder to enqueue roadmap cards without typing `bop new`:
+
+```zsh
+scripts/install_roadmap_hotfolder_launchd.zsh \
+  --inbox "$(pwd)/examples/roadmap-inbox/drop" \
+  --cards-dir "$(pwd)/.cards"
+```
+
+Then drop any `.roadmap` / `.md` / `.txt` / `.json` request file into
+`examples/roadmap-inbox/drop`. The ingest agent creates `🂠-*.jobcard` in
+`.cards/pending/` using the roadmap template and APFS clone-safe copy rules.
+
+Remove it with:
+
+```zsh
+scripts/install_roadmap_hotfolder_launchd.zsh --uninstall
+```
+
 ## Legacy Plists
 
 The `.plist` files in this directory are **deprecated reference copies**.

@@ -1,0 +1,33 @@
+{
+  "id": "token-cost-in-inspect",
+  "created": "2026-03-01T21:00:00Z",
+  "stage": "implement",
+  "provider_chain": [
+    "claude"
+  ],
+  "stages": {
+    "implement": {
+      "status": "pending"
+    }
+  },
+  "acceptance_criteria": [
+    "cargo build",
+    "cargo clippy -- -D warnings",
+    "./target/debug/bop inspect short-cli-flags 2>&1 | grep -qi 'cost'",
+    "jj log -r 'main..@-' | grep -q ."
+  ],
+  "vcs_engine": "jj",
+  "failure_reason": "workspace_prepare_failed: jj workspace add failed: Error: Cannot access /Users/studio/bop/.workspaces/ws-token-cost-in-inspect-1772427053073\nCaused by: No such file or directory (os error 2)\n",
+  "stage_chain": [
+    "implement"
+  ],
+  "stage_models": {
+    "implement": "sonnet"
+  },
+  "stage_providers": {
+    "implement": "claude"
+  },
+  "stage_budgets": {
+    "implement": 32000
+  }
+}

@@ -9,6 +9,9 @@ fileprivate struct JobCardMeta: Codable {
     let title: String?
     let description: String?
     let stage: String
+    let workflowMode: String?
+    let stepIndex: Int?
+    let stageChain: [String]?
     let priority: Int?
     let created: String?
     let labels: [MetaLabel]?
@@ -23,6 +26,9 @@ fileprivate struct JobCardMeta: Codable {
     enum CodingKeys: String, CodingKey {
         case id, title, description, stage, priority, created, labels, progress, subtasks, stages
         case glyph
+        case workflowMode = "workflow_mode"
+        case stepIndex = "step_index"
+        case stageChain = "stage_chain"
         case acceptanceCriteria = "acceptance_criteria"
         case zellijSession = "zellij_session"
         case zellijPane = "zellij_pane"
@@ -79,12 +85,36 @@ private extension Color {
 
 // MARK: - Stage display names
 
-private let stageOrder: [(key: String, label: String)] = [
+private let defaultStageOrder: [(key: String, label: String)] = [
     ("spec",      "Spec"),
     ("plan",      "Plan"),
     ("implement", "Code"),
     ("qa",        "QA"),
 ]
+
+private let roadmapStageOrder: [(key: String, label: String)] = [
+    ("analyze",  "Analyze"),
+    ("discover", "Discover"),
+    ("generate", "Generate"),
+    ("qa",       "QA"),
+]
+
+private func stageDisplayName(_ key: String) -> String {
+    switch key.lowercased() {
+    case "spec": return "Spec"
+    case "plan": return "Plan"
+    case "implement": return "Code"
+    case "qa": return "QA"
+    case "analyze": return "Analyze"
+    case "discover": return "Discover"
+    case "generate": return "Generate"
+    case "roadmap": return "Roadmap"
+    default:
+        let lower = key.lowercased()
+        guard let first = lower.first else { return key }
+        return String(first).uppercased() + lower.dropFirst()
+    }
+}
 
 // MARK: - Label pill
 
@@ -120,17 +150,22 @@ private struct LabelPill: View {
 private struct StagePipeline: View {
     let currentStage: String
     let stages: [String: MetaStageRecord]?
+    let displayStages: [(key: String, label: String)]
 
     private func status(_ key: String) -> String {
         stages?[key]?.status ?? "pending"
     }
 
+    private var currentIndex: Int {
+        displayStages.firstIndex(where: { $0.key == currentStage }) ?? 0
+    }
+
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(Array(stageOrder.enumerated()), id: \.offset) { idx, pair in
+            ForEach(Array(displayStages.enumerated()), id: \.offset) { idx, pair in
                 let st = status(pair.key)
                 let isCurrent = pair.key == currentStage
-                let isDone    = st == "done" || (idx < (stageOrder.firstIndex(where: { $0.key == currentStage }) ?? 0))
+                let isDone = st == "done" || (idx < currentIndex)
 
                 HStack(spacing: 6) {
                     if isDone {
@@ -146,7 +181,7 @@ private struct StagePipeline: View {
                 .background(isDone ? Color.stageActiveBg.opacity(0.5) : Color.stagePendingBg)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
 
-                if idx < stageOrder.count - 1 {
+                if idx < displayStages.count - 1 {
                     Text("—")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.cardBorder)
@@ -224,7 +259,74 @@ fileprivate struct JobCardPreview: View {
         }
         return "Live tail: bop logs \(id) --follow"
     }
-    
+
+    private var isRoadmapWorkflow: Bool {
+        guard let m = meta else { return false }
+        if m.workflowMode?.lowercased() == "roadmap" {
+            return true
+        }
+        return ["analyze", "discover", "generate", "roadmap"].contains(m.stage.lowercased())
+    }
+
+    private func displayStageOrder(for m: JobCardMeta) -> [(key: String, label: String)] {
+        if let chain = m.stageChain, !chain.isEmpty {
+            return chain.map { (key: $0, label: stageDisplayName($0)) }
+        }
+        return isRoadmapWorkflow ? roadmapStageOrder : defaultStageOrder
+    }
+
+    private func displayStageName(_ key: String) -> String {
+        stageDisplayName(key)
+    }
+
+    private func inferredRoadmapProgress(_ m: JobCardMeta) -> Int {
+        if let progress = m.progress {
+            return progress
+        }
+        switch m.stage.lowercased() {
+        case "analyze": return 20
+        case "discover": return 50
+        case "generate": return 80
+        case "qa": return 95
+        default: return 0
+        }
+    }
+
+    private func roadmapStatusTitle(_ m: JobCardMeta) -> String {
+        switch m.stage.lowercased() {
+        case "analyze": return "Analyzing"
+        case "discover": return "Discovering"
+        case "generate": return "Generating"
+        case "qa": return "Reviewing"
+        default: return displayStageName(m.stage)
+        }
+    }
+
+    private func roadmapStatusSubtitle(_ m: JobCardMeta) -> String {
+        switch m.stage.lowercased() {
+        case "analyze":
+            return "Analyzing project structure and current state."
+        case "discover":
+            return "Discovering user needs and competitor signals."
+        case "generate":
+            return "Generating milestone roadmap and execution plan."
+        case "qa":
+            return "Verifying roadmap quality and handoff readiness."
+        default:
+            return "Roadmap workflow in progress."
+        }
+    }
+
+    private func roadmapStatusIcon(_ m: JobCardMeta) -> String {
+        switch m.stage.lowercased() {
+        case "analyze": return "magnifyingglass.circle"
+        case "discover": return "person.2.circle"
+        case "generate": return "wand.and.stars"
+        case "qa": return "checkmark.shield"
+        default: return "map"
+        }
+    }
+
     private func priorityText(_ p: Int) -> String {
         switch p {
         case 1: return "Critical"
@@ -277,11 +379,12 @@ fileprivate struct JobCardPreview: View {
                             .background(Color.black.opacity(0.3))
                             .clipShape(RoundedRectangle(cornerRadius: 4))
                         
-                        Text(m.stage.capitalized)
+                        Text(displayStageName(m.stage))
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(.stageActive)
-                        
-                        if let prog = m.progress {
+
+                        let headerProgress: Int? = isRoadmapWorkflow ? inferredRoadmapProgress(m) : m.progress
+                        if let prog = headerProgress {
                             Text("\(prog)%")
                                 .font(.system(size: 13, weight: .bold))
                                 .foregroundColor(.textPrimary)
@@ -294,7 +397,7 @@ fileprivate struct JobCardPreview: View {
             .padding(.bottom, 20)
             
             // Progress Bar
-            let prog = m.progress ?? 0
+            let prog = isRoadmapWorkflow ? inferredRoadmapProgress(m) : (m.progress ?? 0)
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Rectangle().fill(Color.barEmpty)
@@ -443,8 +546,16 @@ fileprivate struct JobCardPreview: View {
                     .foregroundColor(.textSecondary)
                     .lineSpacing(4)
             }
-            
-            StagePipeline(currentStage: m.stage, stages: m.stages)
+
+            if isRoadmapWorkflow {
+                roadmapStatusPanel(m)
+            } else {
+                StagePipeline(
+                    currentStage: m.stage,
+                    stages: m.stages,
+                    displayStages: displayStageOrder(for: m)
+                )
+            }
             
             if let criteria = m.acceptanceCriteria, !criteria.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
@@ -469,6 +580,59 @@ fileprivate struct JobCardPreview: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
         }
+    }
+
+    @ViewBuilder
+    private func roadmapStatusPanel(_ m: JobCardMeta) -> some View {
+        let progress = inferredRoadmapProgress(m)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: roadmapStatusIcon(m))
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundColor(.stagePending)
+                    .frame(width: 52, height: 52)
+                    .background(Color.pillPurpleBg.opacity(0.7))
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(roadmapStatusTitle(m))
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(.textPrimary)
+                    Text(roadmapStatusSubtitle(m))
+                        .font(.system(size: 14))
+                        .foregroundColor(.textSecondary)
+                }
+
+                Spacer()
+
+                Text("\(progress)%")
+                    .font(.system(size: 19, weight: .bold))
+                    .foregroundColor(.textPrimary)
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(Color.barEmpty)
+                    Rectangle()
+                        .fill(Color.barFill)
+                        .frame(width: max(0, geo.size.width * CGFloat(progress) / 100))
+                }
+            }
+            .frame(height: 6)
+
+            StagePipeline(
+                currentStage: m.stage,
+                stages: m.stages,
+                displayStages: displayStageOrder(for: m)
+            )
+        }
+        .padding(16)
+        .background(Color.black.opacity(0.18))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.cardBorder.opacity(0.6), lineWidth: 1)
+        )
     }
     
     @ViewBuilder
