@@ -8,7 +8,13 @@ It is NOT the General Transit Feed Specification (transit data).
 ## What you are
 
 You have been dispatched by the `bop` dispatcher to work on a jobcard. You are
-running in a git worktree on branch `{{worktree_branch}}`. Do NOT touch `main`.
+running in a **jj workspace** (not a git branch). Do NOT touch `main`.
+
+VCS is **jj (Jujutsu)** — use `jj` commands, not `git`:
+- Check status: `jj status`
+- Commit: `jj describe -m "feat: ..."` then `jj new`  (or `jj commit -m "..."`)
+- View log: `jj log`
+- Do NOT run `git add`, `git commit`, or `git push`
 
 ## The system
 

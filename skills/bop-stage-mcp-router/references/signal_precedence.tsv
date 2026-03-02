@@ -1,0 +1,6 @@
+priority	signal	location	meaning	decision_rule
+1	Card state folder	.cards/<team>/<state>/<id>.jobcard	lifecycle state (pending/running/done/failed/merged)	Always authoritative for state
+2	Meta stage fields	meta.json: stage,stage_chain,current_stage_index	current execution stage	Authoritative for stage selection
+3	Meta workflow labels	meta.json: labels/workflow keys	workflow mode (ideation, roadmap, pr-fix, mr-fix)	Authoritative for workflow if present
+4	Filename hints	<emoji>-<slug>.jobcard, optional step token	persona/visibility hints only	Never override state/stage; use as routing hints
+5	Card content hints	spec.md,prompt.md,output/*	intent context only	Use only when stronger signals absent
