@@ -61,7 +61,8 @@ my-feature.jobcard/
 ├── spec.md            ← what to build
 ├── prompt.md          ← agent prompt with {{variables}}
 ├── logs/              ← stdout.log, stderr.log, pid
-└── output/            ← diff.patch, qa_report.md
+├── output/            ← qa_report.md
+└── changes.json       ← git diff summary
 ```
 
 ## Card Symbol Protocol

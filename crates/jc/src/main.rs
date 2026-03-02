@@ -685,7 +685,7 @@ fn create_card(
         decision_required: false,
         decision_path: None,
         policy_result: None,
-            timeout_seconds: None,
+        timeout_seconds: None,
         retry_count: Some(0),
         failure_reason: None,
         validation_summary: None,
@@ -1992,12 +1992,25 @@ async fn run_card(
             .await;
     }
 
-    let status_result = tokio::time::timeout(tokio::time::Duration::from_secs(meta.as_ref().and_then(|m| m.timeout_seconds).unwrap_or(3600)), child.wait()).await;
+    let status_result = tokio::time::timeout(
+        tokio::time::Duration::from_secs(
+            meta.as_ref()
+                .and_then(|m| m.timeout_seconds)
+                .unwrap_or(3600),
+        ),
+        child.wait(),
+    )
+    .await;
     let status = match status_result {
         Ok(res) => res?,
         Err(_) => {
             let _ = child.kill().await;
-            anyhow::bail!("adapter timed out after {} seconds", meta.as_ref().and_then(|m| m.timeout_seconds).unwrap_or(3600));
+            anyhow::bail!(
+                "adapter timed out after {} seconds",
+                meta.as_ref()
+                    .and_then(|m| m.timeout_seconds)
+                    .unwrap_or(3600)
+            );
         }
     };
     let exit_code = status.code().unwrap_or(1);
