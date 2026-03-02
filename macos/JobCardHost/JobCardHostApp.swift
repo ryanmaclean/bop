@@ -38,6 +38,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let session = "bop-\(id)"
             // Resumable: attach existing or create new
             runInTerminal("zellij attach '\(session)' 2>/dev/null || zellij -s '\(session)'")
+        case "logs":
+            runInTerminal("bop logs \(id) --follow")
         case "spec":
             // Open spec.md from the card in the default editor
             let candidates = [

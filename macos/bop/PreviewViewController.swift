@@ -70,6 +70,8 @@ private extension Color {
     static let stopText      = Color.black
     static let attachBg      = Color(red: 0.10, green: 0.72, blue: 0.42) // Green
     static let attachText    = Color.black
+    static let tailBg        = Color(red: 0.18, green: 0.42, blue: 0.82) // Blue
+    static let tailText      = Color.white
     
     static let barEmpty      = Color(red: 0.25, green: 0.16, blue: 0.42)
     static let barFill       = Color(red: 0.85, green: 0.45, blue: 0.95) // Pinkish purple
@@ -337,6 +339,23 @@ fileprivate struct JobCardPreview: View {
                 
                 Spacer()
                 
+                if !logs.isEmpty,
+                   let tailURL = URL(string: "bop://card/\(m.id)/logs") {
+                    Link(destination: tailURL) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "scroll")
+                                .font(.system(size: 11))
+                            Text("Tail")
+                                .font(.system(size: 13, weight: .bold))
+                        }
+                        .foregroundColor(.tailText)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.tailBg)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .help("Live tail: bop logs \(m.id) --follow")
+                }
                 if isRunning, let session = m.zellijSession,
                    let url = URL(string: "bop://card/\(m.id)/session") {
                     Link(destination: url) {
