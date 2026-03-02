@@ -12,7 +12,8 @@ fn repo_root() -> PathBuf {
 }
 
 fn build_jc() {
-    let status = Command::new("cargo")
+    let cargo = env!("CARGO");
+    let status = Command::new(cargo)
         .arg("build")
         .current_dir(repo_root())
         .status()

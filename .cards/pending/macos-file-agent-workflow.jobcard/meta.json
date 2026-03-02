@@ -1,0 +1,80 @@
+{
+  "id": "macos-file-agent-workflow",
+  "title": "macOS file-agent workflow in renamed bop repo",
+  "description": "Resurrect GTFS-era card work and produce a unified macOS filesystem-agent workflow plan with renamed-path hardening.",
+  "glyph": "🃝",
+  "token": "⚁",
+  "priority": 2,
+  "labels": [
+    {
+      "name": "macOS",
+      "kind": "domain"
+    },
+    {
+      "name": "Platform",
+      "kind": "scope"
+    },
+    {
+      "name": "Workflow",
+      "kind": "effort"
+    }
+  ],
+  "progress": 0,
+  "subtasks": [
+    {
+      "id": "resurrect",
+      "title": "Consolidate previous GTFS session context and open card lineage",
+      "done": false
+    },
+    {
+      "id": "plan-doc",
+      "title": "Write end-to-end macOS file-agent workflow plan document",
+      "done": false
+    },
+    {
+      "id": "rename-hardening",
+      "title": "Remove stale /Users/studio/gtfs adapter paths from team providers",
+      "done": false
+    },
+    {
+      "id": "handoff",
+      "title": "Define phased handoff and acceptance gates for implementation",
+      "done": false
+    }
+  ],
+  "created": "2026-03-01T23:32:49.628199Z",
+  "stage": "plan",
+  "provider_chain": [
+    "claude",
+    "codex",
+    "goose"
+  ],
+  "stages": {
+    "spec": {
+      "status": "done",
+      "agent": "human"
+    },
+    "plan": {
+      "status": "pending",
+      "agent": null
+    },
+    "implement": {
+      "status": "blocked",
+      "agent": null,
+      "blocked_by": "plan"
+    },
+    "qa": {
+      "status": "blocked",
+      "agent": null,
+      "blocked_by": "implement"
+    }
+  },
+  "acceptance_criteria": [
+    "test -f docs/plans/2026-03-01-macos-file-agent-workflow.md",
+    "rg -n \"jobcard://(stop|approve)|bop (kill|approve)|FSEvents|launchd|fallback\" docs/plans/2026-03-01-macos-file-agent-workflow.md",
+    "! rg -n \"/Users/studio/gtfs/adapters\" .cards/team-*/providers.json"
+  ],
+  "worktree_branch": "job/macos-file-agent-workflow",
+  "template_namespace": "implement",
+  "retry_count": 0
+}

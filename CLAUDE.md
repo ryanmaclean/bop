@@ -81,7 +81,7 @@ Each job is a `<id>.jobcard/` directory bundle containing `meta.json`, `spec.md`
 
 Shell scripts in `adapters/` with the calling convention:
 ```
-adapter.sh <workdir> <prompt_file> <stdout_log> <stderr_log>
+adapter.sh <workdir> <prompt_file> <stdout_log> <stderr_log> [timeout]
 ```
 Exit code 75 signals rate-limiting (EX_TEMPFAIL). `mock.sh` is the default for testing.
 

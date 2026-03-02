@@ -105,7 +105,7 @@ Use `adapters/codex.zsh` as the execution bridge.
 Do not couple control plane to Codex internals.
 Adapter contract remains:
 
-`adapter.sh <workdir> <prompt_file> <stdout_log> <stderr_log>`
+`adapter.sh <workdir> <prompt_file> <stdout_log> <stderr_log> [timeout]`
 
 Exit `75` means rate-limit and must trigger retry/failover logic.
 

@@ -12,7 +12,8 @@ fn repo_root() -> PathBuf {
 }
 
 fn build_jc() {
-    let status = Command::new("cargo")
+    let cargo = env!("CARGO");
+    let status = Command::new(cargo)
         .arg("build")
         .current_dir(repo_root())
         .status()
@@ -49,6 +50,22 @@ fn make_failed_card(cards: &Path, id: &str, retry_count: u32, failure_reason: &s
         dir.join("meta.json"),
         format!(
             r#"{{"id":"{id}","created":"2026-03-01T00:00:00Z","stage":"implement","provider_chain":["mock"],"stages":{{}},"acceptance_criteria":[],"retry_count":{retry_count},"failure_reason":"{failure_reason}"}}"#
+        ),
+    )
+    .unwrap();
+    fs::write(dir.join("spec.md"), format!("spec for {id}")).unwrap();
+    dir
+}
+
+/// Create a failed card whose stage metadata is stale (still marked running).
+fn make_failed_card_with_running_stage(cards: &Path, id: &str) -> PathBuf {
+    let dir = cards.join("failed").join(format!("{}.jobcard", id));
+    fs::create_dir_all(dir.join("logs")).unwrap();
+    fs::create_dir_all(dir.join("output")).unwrap();
+    fs::write(
+        dir.join("meta.json"),
+        format!(
+            r#"{{"id":"{id}","created":"2026-03-01T00:00:00Z","stage":"implement","provider_chain":["mock"],"stages":{{"implement":{{"status":"running","agent":"adapters/mock.zsh","provider":"mock","duration_s":12,"started":"2026-03-01T00:00:00Z"}}}},"acceptance_criteria":[],"retry_count":1,"failure_reason":"killed"}}"#
         ),
     )
     .unwrap();
@@ -120,6 +137,46 @@ fn retry_increments_retry_count_and_clears_failure_reason() {
                 .and_then(|v| v.as_null())
                 .is_some(),
         "failure_reason should be cleared"
+    );
+}
+
+#[test]
+fn retry_normalizes_stale_running_stage_to_pending() {
+    build_jc();
+    let td = tempfile::tempdir().unwrap();
+    let cards = td.path().join(".cards");
+    init_cards(&cards);
+    make_failed_card_with_running_stage(&cards, "r2b");
+
+    let status = Command::new(jc_bin())
+        .args(["--cards-dir", cards.to_str().unwrap(), "retry", "r2b"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let meta_raw =
+        fs::read_to_string(cards.join("pending").join("r2b.jobcard").join("meta.json")).unwrap();
+    let meta: serde_json::Value = serde_json::from_str(&meta_raw).unwrap();
+    let stage = meta.get("stages").and_then(|s| s.get("implement")).unwrap();
+
+    assert_eq!(
+        stage.get("status").and_then(|v| v.as_str()),
+        Some("pending"),
+        "retry should reset stale stage status to pending"
+    );
+    assert!(
+        stage.get("agent").is_none() || stage.get("agent").and_then(|v| v.as_null()).is_some(),
+        "retry should clear stale agent"
+    );
+    assert!(
+        stage.get("provider").is_none()
+            || stage.get("provider").and_then(|v| v.as_null()).is_some(),
+        "retry should clear stale provider"
+    );
+    assert!(
+        stage.get("duration_s").is_none()
+            || stage.get("duration_s").and_then(|v| v.as_null()).is_some(),
+        "retry should clear stale duration_s"
     );
 }
 
@@ -253,6 +310,55 @@ fn kill_sends_sigterm_and_moves_to_failed() {
 
     let meta_raw =
         fs::read_to_string(cards.join("failed").join("k2.jobcard").join("meta.json")).unwrap();
+    let meta: serde_json::Value = serde_json::from_str(&meta_raw).unwrap();
+    assert_eq!(
+        meta.get("failure_reason").and_then(|v| v.as_str()),
+        Some("killed"),
+        "failure_reason should be 'killed'"
+    );
+}
+
+#[test]
+fn kill_handles_stale_pid_and_moves_to_failed() {
+    build_jc();
+    let td = tempfile::tempdir().unwrap();
+    let cards = td.path().join(".cards");
+    init_cards(&cards);
+
+    let card_dir = make_card(&cards, "running", "k3");
+
+    // Create a stale PID by spawning then immediately terminating a child.
+    let mut child = std::process::Command::new("sleep")
+        .arg("60")
+        .spawn()
+        .expect("failed to spawn sleep");
+    let pid = child.id();
+    let _ = std::process::Command::new("kill")
+        .arg("-TERM")
+        .arg(pid.to_string())
+        .status();
+    let _ = child.wait();
+
+    fs::create_dir_all(card_dir.join("logs")).unwrap();
+    fs::write(card_dir.join("logs").join("pid"), pid.to_string()).unwrap();
+
+    let status = Command::new(jc_bin())
+        .args(["--cards-dir", cards.to_str().unwrap(), "kill", "k3"])
+        .status()
+        .unwrap();
+    assert!(status.success(), "kill should succeed for stale pid");
+
+    assert!(
+        cards.join("failed").join("k3.jobcard").exists(),
+        "card should be in failed/"
+    );
+    assert!(
+        !cards.join("running").join("k3.jobcard").exists(),
+        "card should not remain in running/"
+    );
+
+    let meta_raw =
+        fs::read_to_string(cards.join("failed").join("k3.jobcard").join("meta.json")).unwrap();
     let meta: serde_json::Value = serde_json::from_str(&meta_raw).unwrap();
     assert_eq!(
         meta.get("failure_reason").and_then(|v| v.as_str()),

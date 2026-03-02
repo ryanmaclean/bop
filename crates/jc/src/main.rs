@@ -1,7 +1,7 @@
 use anyhow::Context;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use clap::{Parser, Subcommand, ValueEnum};
-use jobcard_core::{write_meta, Meta, VcsEngine as CoreVcsEngine};
+use jobcard_core::{write_meta, Meta, StageStatus, VcsEngine as CoreVcsEngine};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -599,6 +599,7 @@ fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
             decision_required: false,
             decision_path: None,
             policy_result: None,
+            timeout_seconds: None,
             retry_count: Some(0),
             failure_reason: None,
             validation_summary: None,
@@ -684,6 +685,7 @@ fn create_card(
         decision_required: false,
         decision_path: None,
         policy_result: None,
+            timeout_seconds: None,
         retry_count: Some(0),
         failure_reason: None,
         validation_summary: None,
@@ -906,13 +908,14 @@ fn append_log_line(path: &Path, line: &str) -> anyhow::Result<()> {
 }
 
 fn run_policy_script(cwd: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
+    // Prefer a script relative to the actual git root so the binary works
+    // regardless of where it was compiled (avoids stale CARGO_MANIFEST_DIR).
+    let git_root_candidate = find_git_root(cwd)
+        .map(|r| r.join("scripts").join("policy_check.zsh"))
+        .unwrap_or_else(|| cwd.join("scripts").join("policy_check.zsh"));
     let script_candidates = [
+        git_root_candidate,
         cwd.join("scripts").join("policy_check.zsh"),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .and_then(|p| p.parent())
-            .map(|p| p.join("scripts").join("policy_check.zsh"))
-            .unwrap_or_else(|| PathBuf::from("scripts/policy_check.zsh")),
     ];
     let script = script_candidates
         .iter()
@@ -1989,7 +1992,14 @@ async fn run_card(
             .await;
     }
 
-    let status = child.wait().await?;
+    let status_result = tokio::time::timeout(tokio::time::Duration::from_secs(meta.as_ref().and_then(|m| m.timeout_seconds).unwrap_or(3600)), child.wait()).await;
+    let status = match status_result {
+        Ok(res) => res?,
+        Err(_) => {
+            let _ = child.kill().await;
+            anyhow::bail!("adapter timed out after {} seconds", meta.as_ref().and_then(|m| m.timeout_seconds).unwrap_or(3600));
+        }
+    };
     let exit_code = status.code().unwrap_or(1);
 
     if let Err(err) = merge_memory_output(cards_dir, &memory_namespace, &memory_out_file) {
@@ -2435,6 +2445,16 @@ fn retry_card(root: &Path, id: &str) -> anyhow::Result<String> {
     if let Ok(mut meta) = jobcard_core::read_meta(&card) {
         meta.retry_count = Some(meta.retry_count.unwrap_or(0).saturating_add(1));
         meta.failure_reason = None;
+        for stage in meta.stages.values_mut() {
+            if matches!(stage.status, StageStatus::Running | StageStatus::Failed) {
+                stage.status = StageStatus::Pending;
+                stage.agent = None;
+                stage.provider = None;
+                stage.duration_s = None;
+                stage.started = None;
+                stage.blocked_by = None;
+            }
+        }
         let _ = write_meta(&card, &meta);
     }
 
@@ -2468,16 +2488,23 @@ async fn kill_card(root: &Path, id: &str) -> anyhow::Result<String> {
         .await?
         .with_context(|| format!("no PID found for card '{}'", id))?;
 
-    // Send SIGTERM (kill -15)
-    let sent = TokioCommand::new("kill")
-        .arg("-TERM")
-        .arg(pid.to_string())
-        .status()
-        .await
-        .with_context(|| format!("failed to send SIGTERM to pid {}", pid))?;
+    let mut was_running = is_alive(pid).await.unwrap_or(false);
+    if was_running {
+        // Send SIGTERM (kill -15)
+        let sent = TokioCommand::new("kill")
+            .arg("-TERM")
+            .arg(pid.to_string())
+            .status()
+            .await
+            .with_context(|| format!("failed to send SIGTERM to pid {}", pid))?;
 
-    if !sent.success() {
-        anyhow::bail!("kill -TERM {} returned non-zero", pid);
+        if !sent.success() {
+            // The process may have exited between the liveness check and kill.
+            was_running = is_alive(pid).await.unwrap_or(false);
+            if was_running {
+                anyhow::bail!("kill -TERM {} returned non-zero", pid);
+            }
+        }
     }
 
     // Update meta with failure reason
@@ -2491,7 +2518,14 @@ async fn kill_card(root: &Path, id: &str) -> anyhow::Result<String> {
     fs::rename(&card, &target)
         .with_context(|| format!("failed to move card to failed/: {}", id))?;
 
-    Ok(format!("killed pid {} and moved '{}' to failed/", pid, id))
+    if was_running {
+        Ok(format!("killed pid {} and moved '{}' to failed/", pid, id))
+    } else {
+        Ok(format!(
+            "pid {} was not alive; moved '{}' to failed as stale running card",
+            pid, id
+        ))
+    }
 }
 
 // ── approve ───────────────────────────────────────────────────────────────────
