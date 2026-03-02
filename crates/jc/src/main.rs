@@ -5339,58 +5339,49 @@ fn cmd_inspect(root: &Path, id: &str) -> anyhow::Result<()> {
         }
     }
 
-    if !meta.runs.is_empty() {
-        println!("\nRuns  {} attempts", meta.runs.len());
-        for (idx, run) in meta.runs.iter().enumerate() {
-            let started = if run.started_at.trim().is_empty() {
-                "<unknown>"
-            } else {
-                run.started_at.as_str()
-            };
-            let provider = if run.provider.trim().is_empty() {
-                "unknown"
-            } else {
-                run.provider.as_str()
-            };
-            let model = if run.model.trim().is_empty() {
-                "unknown"
-            } else {
-                run.model.as_str()
-            };
-            let stage = if run.stage.trim().is_empty() {
-                "unknown"
-            } else {
-                run.stage.as_str()
-            };
-            let outcome = if run.outcome.trim().is_empty() {
-                "unknown"
-            } else {
-                run.outcome.as_str()
-            };
-            let mut extras: Vec<String> = Vec::new();
-            if let Some(duration_s) = run.duration_s {
-                extras.push(format!("{}s", duration_s));
-            }
-            if let Some(cost) = run.cost_usd {
-                extras.push(format!("${:.2}", cost));
-            }
-            let extra = if extras.is_empty() {
-                String::new()
-            } else {
-                format!(" ({})", extras.join(", "))
-            };
-
-            println!(
-                "  #{}  {}  {}/{}  {}  {}{}",
-                idx + 1,
-                started,
-                provider,
-                model,
-                stage,
-                outcome,
-                extra
-            );
-        }
+    println!("\n=== runs ({} attempts) ===", meta.runs.len());
+    for (idx, run) in meta.runs.iter().enumerate() {
+        let started = if run.started_at.len() >= 19 {
+            run.started_at[..19].to_string()
+        } else if run.started_at.trim().is_empty() {
+            "<unknown>".to_string()
+        } else {
+            run.started_at.clone()
+        };
+        let provider_model = match (run.provider.trim(), run.model.trim()) {
+            ("", "") => "unknown".to_string(),
+            ("", m) => m.to_string(),
+            (p, "") => p.to_string(),
+            (p, m) => format!("{}/{}", p, m),
+        };
+        let stage = if run.stage.trim().is_empty() {
+            "unknown"
+        } else {
+            run.stage.as_str()
+        };
+        let outcome = if run.outcome.trim().is_empty() {
+            "unknown"
+        } else {
+            run.outcome.as_str()
+        };
+        let duration = run
+            .duration_s
+            .map(|d| format!("{}s", d))
+            .unwrap_or_else(|| "\u{2014}".to_string());
+        let cost = run
+            .cost_usd
+            .map(|c| format!("${:.2}", c))
+            .unwrap_or_else(|| "\u{2014}".to_string());
+        println!(
+            "  #{:<2}  {:<20}  {:<22}  {:<12}  {:<8}  {:<6}  {}",
+            idx + 1,
+            started,
+            provider_model,
+            stage,
+            outcome,
+            duration,
+            cost
+        );
     }
 
     Ok(())
