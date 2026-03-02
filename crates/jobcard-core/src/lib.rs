@@ -7,6 +7,7 @@ pub use config::{load_config, Config};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -111,6 +112,30 @@ pub struct Meta {
 
     pub stage: String,
 
+    /// Card behavior/type discriminator.
+    /// Example: `roadmap` or `roadmap_feature`.
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub card_type: Option<String>,
+
+    /// Relative or absolute path to an external metadata JSON payload.
+    /// For roadmap cards this commonly points to `roadmap.json` or
+    /// `output/roadmap.json`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_source: Option<String>,
+
+    /// Optional key used to select an item from external metadata.
+    /// For roadmap feature cards this typically matches `features[].id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_key: Option<String>,
+
+    /// High-level workflow family used for stage routing and agent behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_mode: Option<String>,
+
+    /// 1-based step index inside a workflow plan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_index: Option<u32>,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -151,6 +176,10 @@ pub struct Meta {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decision_path: Option<String>,
+
+    /// Card IDs this card depends on — dispatcher skips until all are done/merged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub depends_on: Vec<String>,
 
     /// Where spawn_child_cards() should place children: "pending" (default) or "drafts".
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -217,6 +246,23 @@ impl Meta {
         if self.stage.trim().is_empty() {
             return Err(JobCardError::Invalid("meta.stage is empty".to_string()));
         }
+        if let Some(mode) = self.workflow_mode.as_ref() {
+            if mode.trim().is_empty() {
+                return Err(JobCardError::Invalid(
+                    "meta.workflow_mode is empty".to_string(),
+                ));
+            }
+        }
+        if self.step_index == Some(0) {
+            return Err(JobCardError::Invalid(
+                "meta.step_index must be >= 1".to_string(),
+            ));
+        }
+        if self.step_index.is_some() && self.workflow_mode.is_none() {
+            return Err(JobCardError::Invalid(
+                "meta.step_index requires meta.workflow_mode".to_string(),
+            ));
+        }
         Ok(())
     }
 }
@@ -225,9 +271,206 @@ pub fn meta_path(card_dir: &Path) -> PathBuf {
     card_dir.join("meta.json")
 }
 
+fn value_as_non_empty_string(v: Option<&Value>) -> Option<String> {
+    v.and_then(|x| x.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
+fn normalize_roadmap_status(raw: &str) -> Option<String> {
+    let key = raw
+        .trim()
+        .to_lowercase()
+        .replace(['-', ' '], "_");
+    match key.as_str() {
+        "under_review" | "review" | "underreview" => Some("under_review".to_string()),
+        "planned" | "plan" => Some("planned".to_string()),
+        "in_progress" | "inprogress" | "active" | "doing" => Some("in_progress".to_string()),
+        "done" | "completed" | "complete" => Some("done".to_string()),
+        _ => None,
+    }
+}
+
+fn roadmap_priority_to_rank(raw: &str) -> Option<i64> {
+    let key = raw
+        .trim()
+        .to_lowercase()
+        .replace(['-', ' '], "_");
+    match key.as_str() {
+        "must" | "must_have" | "critical" => Some(1),
+        "should" | "should_have" | "important" => Some(2),
+        "could" | "could_have" | "nice_to_have" => Some(3),
+        _ => None,
+    }
+}
+
+fn resolve_metadata_source(card_dir: &Path, meta: &Meta) -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(source) = meta.metadata_source.as_ref().map(|s| s.trim()) {
+        if !source.is_empty() {
+            let p = PathBuf::from(source);
+            if p.is_absolute() {
+                candidates.push(p);
+            } else {
+                candidates.push(card_dir.join(p));
+            }
+        }
+    }
+    candidates.push(card_dir.join("roadmap.json"));
+    candidates.push(card_dir.join("output").join("roadmap.json"));
+    candidates.into_iter().find(|p| p.exists())
+}
+
+fn hydrate_roadmap_from_json(meta: &mut Meta, json: &Value) {
+    if let Some(obj) = json.as_object() {
+        if meta.title.is_none() {
+            meta.title = value_as_non_empty_string(
+                obj.get("project_name")
+                    .or_else(|| obj.get("title"))
+                    .or_else(|| obj.get("name")),
+            );
+        }
+        if meta.description.is_none() {
+            meta.description = value_as_non_empty_string(
+                obj.get("vision")
+                    .or_else(|| obj.get("summary"))
+                    .or_else(|| obj.get("description")),
+            );
+        }
+    }
+    if meta.workflow_mode.is_none() {
+        meta.workflow_mode = Some("roadmap".to_string());
+    }
+}
+
+fn hydrate_roadmap_feature_from_json(meta: &mut Meta, json: &Value) {
+    let Some(obj) = json.as_object() else {
+        return;
+    };
+    let Some(features) = obj.get("features").and_then(|v| v.as_array()) else {
+        return;
+    };
+    let lookup = meta
+        .metadata_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(meta.id.as_str());
+    let Some(feature) = features.iter().find(|f| {
+        f.as_object()
+            .and_then(|fo| fo.get("id"))
+            .and_then(|v| v.as_str())
+            .map(|id| id == lookup)
+            .unwrap_or(false)
+    }) else {
+        return;
+    };
+    let Some(fo) = feature.as_object() else {
+        return;
+    };
+
+    if meta.title.is_none() {
+        meta.title = value_as_non_empty_string(fo.get("title").or_else(|| fo.get("name")));
+    }
+    if meta.description.is_none() {
+        meta.description = value_as_non_empty_string(fo.get("description"));
+    }
+    if meta.priority.is_none() {
+        meta.priority = fo
+            .get("priority")
+            .and_then(|v| v.as_str())
+            .and_then(roadmap_priority_to_rank);
+    }
+    if meta.acceptance_criteria.is_empty() {
+        if let Some(arr) = fo.get("acceptance_criteria").and_then(|v| v.as_array()) {
+            meta.acceptance_criteria = arr
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect();
+        }
+    }
+    if meta.labels.is_empty() {
+        let mut labels = Vec::new();
+
+        if let Some(priority_raw) = fo.get("priority").and_then(|v| v.as_str()) {
+            let p = priority_raw.trim().to_lowercase();
+            if !p.is_empty() {
+                labels.push(Label {
+                    name: p,
+                    kind: Some("priority".to_string()),
+                });
+            }
+        }
+        if let Some(status_raw) = fo.get("status").and_then(|v| v.as_str()) {
+            if let Some(status) = normalize_roadmap_status(status_raw) {
+                labels.push(Label {
+                    name: status.clone(),
+                    kind: Some("status".to_string()),
+                });
+                if matches!(
+                    meta.stage.as_str(),
+                    "roadmap" | "roadmap_feature" | "feature"
+                ) {
+                    meta.stage = status;
+                }
+            }
+        }
+        if let Some(phase) =
+            value_as_non_empty_string(fo.get("phase").or_else(|| fo.get("phase_id")))
+        {
+            labels.push(Label {
+                name: phase,
+                kind: Some("phase".to_string()),
+            });
+        }
+        if !labels.is_empty() {
+            meta.labels = labels;
+        }
+    }
+    if meta.workflow_mode.is_none() {
+        meta.workflow_mode = Some("roadmap".to_string());
+    }
+}
+
+fn hydrate_typed_metadata(card_dir: &Path, meta: &mut Meta) {
+    let Some(card_type) = meta
+        .card_type
+        .as_deref()
+        .map(str::trim)
+        .map(str::to_lowercase)
+    else {
+        return;
+    };
+    if card_type.is_empty() {
+        return;
+    }
+    let Some(source_path) = resolve_metadata_source(card_dir, meta) else {
+        return;
+    };
+    let Ok(raw) = fs::read_to_string(source_path) else {
+        return;
+    };
+    let Ok(json) = serde_json::from_str::<Value>(&raw) else {
+        return;
+    };
+
+    match card_type.as_str() {
+        "roadmap" => hydrate_roadmap_from_json(meta, &json),
+        "roadmap_feature" | "roadmap-feature" | "roadmap_feature_card" => {
+            hydrate_roadmap_feature_from_json(meta, &json)
+        }
+        _ => {}
+    }
+}
+
 pub fn read_meta(card_dir: &Path) -> anyhow::Result<Meta> {
     let bytes = fs::read(meta_path(card_dir))?;
-    let meta: Meta = serde_json::from_slice(&bytes)?;
+    let mut meta: Meta = serde_json::from_slice(&bytes)?;
+    hydrate_typed_metadata(card_dir, &mut meta);
     meta.validate()
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
     Ok(meta)
@@ -261,6 +504,12 @@ pub struct PromptContext {
     pub stage_count: String,
     /// Output from the previous stage (`output/result.md` of prior card).
     pub prior_stage_output: String,
+    /// This card's ID — lets prompts reference the card by name.
+    pub card_id: String,
+    /// Absolute path to the card directory.
+    pub card_dir: String,
+    /// Concatenated output/result.md from all cards in `depends_on`.
+    pub depends_output: String,
 }
 
 impl PromptContext {
@@ -311,6 +560,49 @@ impl PromptContext {
         let prior_stage_output =
             fs::read_to_string(card_dir.join("output").join("prior_result.md")).unwrap_or_default();
 
+        // Dependency output: concatenate output/result.md from all depends_on cards.
+        // Walk up from card_dir to find the .cards root, then search done/merged for each dep.
+        let depends_output = if meta.depends_on.is_empty() {
+            String::new()
+        } else {
+            let mut parts = Vec::new();
+            // card_dir is e.g. .cards/running/my-card.jobcard — parent.parent = .cards
+            if let Some(cards_root) = card_dir.parent().and_then(|p| p.parent()) {
+                for dep_id in &meta.depends_on {
+                    for state in ["done", "merged"] {
+                        let dep_exact = cards_root
+                            .join(state)
+                            .join(format!("{}.jobcard", dep_id));
+                        let result_path = dep_exact.join("output").join("result.md");
+                        if result_path.exists() {
+                            if let Ok(content) = fs::read_to_string(&result_path) {
+                                parts.push(format!("## Output from `{}`\n\n{}", dep_id, content));
+                            }
+                            break;
+                        }
+                        // Also try glyph-prefixed dirs
+                        let suffix = format!("-{}.jobcard", dep_id);
+                        if let Ok(entries) = fs::read_dir(cards_root.join(state)) {
+                            for entry in entries.flatten() {
+                                let name = entry.file_name();
+                                if name.to_str().map(|n| n.ends_with(&suffix)).unwrap_or(false) {
+                                    let rp = entry.path().join("output").join("result.md");
+                                    if let Ok(content) = fs::read_to_string(&rp) {
+                                        parts.push(format!(
+                                            "## Output from `{}`\n\n{}",
+                                            dep_id, content
+                                        ));
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            parts.join("\n\n---\n\n")
+        };
+
         Ok(Self {
             spec,
             plan,
@@ -325,6 +617,9 @@ impl PromptContext {
             stage_index,
             stage_count,
             prior_stage_output,
+            card_id: meta.id.clone(),
+            card_dir: card_dir.to_string_lossy().into_owned(),
+            depends_output,
         })
     }
 }
@@ -348,6 +643,9 @@ pub fn render_prompt(template: &str, ctx: &PromptContext) -> String {
     out = out.replace("{{stage_index}}", &ctx.stage_index);
     out = out.replace("{{stage_count}}", &ctx.stage_count);
     out = out.replace("{{prior_stage_output}}", &ctx.prior_stage_output);
+    out = out.replace("{{card_id}}", &ctx.card_id);
+    out = out.replace("{{card_dir}}", &ctx.card_dir);
+    out = out.replace("{{depends_output}}", &ctx.depends_output);
     if ctx.system_context.is_empty() {
         out
     } else {
@@ -375,6 +673,9 @@ mod tests {
             stage_index: "1".to_string(),
             stage_count: "1".to_string(),
             prior_stage_output: String::new(),
+            card_id: "test-card".to_string(),
+            card_dir: "/tmp/test.jobcard".to_string(),
+            depends_output: String::new(),
         };
 
         let rendered = render_prompt("Memory:\n{{memory}}\n", &ctx);
@@ -397,6 +698,9 @@ mod tests {
             stage_index: "2".to_string(),
             stage_count: "2".to_string(),
             prior_stage_output: "Implemented auth module.".to_string(),
+            card_id: "feat-auth-qa".to_string(),
+            card_dir: "/tmp/feat-auth-qa.jobcard".to_string(),
+            depends_output: String::new(),
         };
 
         let template = "{{stage_instructions}}\nCard stage: {{stage}} ({{stage_index}} of {{stage_count}})\n{{spec}}\n{{prior_stage_output}}";
@@ -493,5 +797,146 @@ mod tests {
         write_meta(dir.path(), &m).unwrap();
         let back = read_meta(dir.path()).unwrap();
         assert_eq!(back.token.as_deref(), Some("\u{2660}"));
+    }
+
+    #[test]
+    fn meta_workflow_fields_validate_and_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut m = Meta {
+            id: "wf-1".into(),
+            created: chrono::Utc::now(),
+            stage: "implement".into(),
+            workflow_mode: Some("default-feature".into()),
+            step_index: Some(1),
+            ..Default::default()
+        };
+
+        write_meta(dir.path(), &m).unwrap();
+        let back = read_meta(dir.path()).unwrap();
+        assert_eq!(back.workflow_mode.as_deref(), Some("default-feature"));
+        assert_eq!(back.step_index, Some(1));
+
+        m.workflow_mode = Some("   ".into());
+        assert!(write_meta(dir.path(), &m).is_err());
+
+        m.workflow_mode = None;
+        m.step_index = Some(1);
+        assert!(write_meta(dir.path(), &m).is_err());
+
+        m.workflow_mode = Some("default-feature".into());
+        m.step_index = Some(0);
+        assert!(write_meta(dir.path(), &m).is_err());
+    }
+
+    #[test]
+    fn meta_card_type_serializes_to_type_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = Meta {
+            id: "roadmap-1".into(),
+            created: chrono::Utc::now(),
+            stage: "roadmap".into(),
+            card_type: Some("roadmap".into()),
+            metadata_source: Some("roadmap.json".into()),
+            ..Default::default()
+        };
+
+        write_meta(dir.path(), &m).unwrap();
+        let raw = fs::read_to_string(meta_path(dir.path())).unwrap();
+        assert!(raw.contains("\"type\""));
+        assert!(!raw.contains("\"card_type\""));
+    }
+
+    #[test]
+    fn read_meta_hydrates_roadmap_type_from_roadmap_json() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("roadmap.json"),
+            r#"{
+  "project_name": "Auto-Tundra",
+  "vision": "AI orchestration for software teams"
+}"#,
+        )
+        .unwrap();
+
+        let m = Meta {
+            id: "roadmap-root".into(),
+            created: chrono::Utc::now(),
+            stage: "roadmap".into(),
+            card_type: Some("roadmap".into()),
+            metadata_source: Some("roadmap.json".into()),
+            ..Default::default()
+        };
+        write_meta(dir.path(), &m).unwrap();
+
+        let back = read_meta(dir.path()).unwrap();
+        assert_eq!(back.title.as_deref(), Some("Auto-Tundra"));
+        assert_eq!(
+            back.description.as_deref(),
+            Some("AI orchestration for software teams")
+        );
+        assert_eq!(back.workflow_mode.as_deref(), Some("roadmap"));
+    }
+
+    #[test]
+    fn read_meta_hydrates_roadmap_feature_type_from_output_json() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("output")).unwrap();
+        fs::write(
+            dir.path().join("output").join("roadmap.json"),
+            r#"{
+  "features": [
+    {
+      "id": "feat-auth",
+      "title": "API Authentication & Authorization System",
+      "description": "Secure all API endpoints",
+      "priority": "must",
+      "status": "in progress",
+      "phase": "Production Foundation",
+      "acceptance_criteria": [
+        "All API endpoints enforce authentication by default",
+        "Role-based access control is supported"
+      ]
+    }
+  ]
+}"#,
+        )
+        .unwrap();
+
+        let m = Meta {
+            id: "job-auth-impl".into(),
+            created: chrono::Utc::now(),
+            stage: "roadmap_feature".into(),
+            card_type: Some("roadmap_feature".into()),
+            metadata_key: Some("feat-auth".into()),
+            ..Default::default()
+        };
+        write_meta(dir.path(), &m).unwrap();
+
+        let back = read_meta(dir.path()).unwrap();
+        assert_eq!(
+            back.title.as_deref(),
+            Some("API Authentication & Authorization System")
+        );
+        assert_eq!(
+            back.description.as_deref(),
+            Some("Secure all API endpoints")
+        );
+        assert_eq!(back.priority, Some(1));
+        assert_eq!(back.stage, "in_progress");
+        assert_eq!(back.workflow_mode.as_deref(), Some("roadmap"));
+        assert_eq!(back.acceptance_criteria.len(), 2);
+
+        assert!(back
+            .labels
+            .iter()
+            .any(|l| l.kind.as_deref() == Some("priority") && l.name == "must"));
+        assert!(back
+            .labels
+            .iter()
+            .any(|l| l.kind.as_deref() == Some("status") && l.name == "in_progress"));
+        assert!(back
+            .labels
+            .iter()
+            .any(|l| l.kind.as_deref() == Some("phase") && l.name == "Production Foundation"));
     }
 }

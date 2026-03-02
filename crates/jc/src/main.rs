@@ -428,6 +428,77 @@ fn find_repo_script(start: &Path, script_rel: &str) -> Option<PathBuf> {
     })
 }
 
+/// Post a macOS Notification Center toast when a card reaches a terminal state.
+///
+/// Prefers `terminal-notifier` (brew install terminal-notifier) which supports:
+///   • Click-to-open via bop:// URL → opens card session/logs in terminal
+///   • Per-card grouping → new notification replaces stale one for same card
+///   • Custom sender icon
+///
+/// Falls back to `osascript display notification` (no click action).
+fn macos_notify(card_id: &str, card_dir: &Path) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let state = card_dir
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    let (title, subtitle, sound, action) = match state {
+        "done" => (
+            "✓ Card Done",
+            "Click to open session",
+            "Glass",
+            "session",
+        ),
+        "failed" => (
+            "✗ Card Failed",
+            "Click to view logs",
+            "Basso",
+            "logs",
+        ),
+        "merged" => (
+            "⤴ Card Merged",
+            "Click to open session",
+            "Purr",
+            "session",
+        ),
+        _ => return,
+    };
+    let open_url = format!("bop://card/{}/{}", card_id, action);
+
+    // Try terminal-notifier first (actionable toast)
+    if StdCommand::new("which")
+        .arg("terminal-notifier")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        let _ = StdCommand::new("terminal-notifier")
+            .args([
+                "-title", title,
+                "-subtitle", card_id,
+                "-message", subtitle,
+                "-sound", sound,
+                "-open", &open_url,
+                "-group", &format!("bop-{}", card_id),
+                "-sender", "sh.bop.host",
+            ])
+            .spawn();
+        return;
+    }
+
+    // Fallback: osascript (shows toast but no click action)
+    let _ = StdCommand::new("osascript")
+        .arg("-e")
+        .arg(format!(
+            "display notification \"{}\" with title \"{}\" sound name \"{}\"",
+            card_id, title, sound
+        ))
+        .spawn();
+}
+
 fn render_card_thumbnail(card_dir: &Path) {
     if !cfg!(target_os = "macos") {
         return;
@@ -456,51 +527,6 @@ fn render_card_thumbnail(card_dir: &Path) {
             .arg(card_dir)
             .status();
     }
-}
-
-fn maybe_hfs_compress_card(card_dir: &Path) {
-    if !cfg!(target_os = "macos") {
-        return;
-    }
-    let enabled = std::env::var("BOP_HFS_COMPRESS_MERGED")
-        .map(|v| matches!(v.as_str(), "1" | "true" | "yes"))
-        .unwrap_or(false);
-    if !enabled {
-        return;
-    }
-
-    let Some(name) = card_dir.file_name().and_then(|s| s.to_str()) else {
-        return;
-    };
-    let Some(parent) = card_dir.parent() else {
-        return;
-    };
-    let compressed = parent.join(format!("{}.hfs.tmp", name));
-    let backup = parent.join(format!("{}.bak.tmp", name));
-    let _ = fs::remove_dir_all(&compressed);
-    let _ = fs::remove_dir_all(&backup);
-
-    let status = StdCommand::new("ditto")
-        .arg("--clone")
-        .arg("--hfsCompression")
-        .arg(card_dir)
-        .arg(&compressed)
-        .status();
-    if !matches!(status, Ok(s) if s.success()) {
-        let _ = fs::remove_dir_all(&compressed);
-        return;
-    }
-
-    if fs::rename(card_dir, &backup).is_err() {
-        let _ = fs::remove_dir_all(&compressed);
-        return;
-    }
-    if fs::rename(&compressed, card_dir).is_err() {
-        let _ = fs::rename(&backup, card_dir);
-        let _ = fs::remove_dir_all(&compressed);
-        return;
-    }
-    let _ = fs::remove_dir_all(&backup);
 }
 
 fn ensure_cards_layout(root: &Path) -> anyhow::Result<()> {
@@ -572,6 +598,85 @@ fn clone_template(src: &Path, dst: &Path) -> anyhow::Result<()> {
 
     // Final fallback to manual copy
     copy_dir_all(src, dst)
+}
+
+/// Apply APFS transparent compression to a card directory.
+///
+/// Uses `ditto --hfsCompression` which applies macOS-native LZFSE compression.
+/// Files remain readable as-is — the OS decompresses on read, so `bop logs`,
+/// Quick Look, and all tooling work unchanged. Already-compressed blocks are
+/// skipped by the filesystem, making this idempotent.
+///
+/// Only fires for terminal states (done/failed/merged) where the card won't
+/// be written to again.
+fn compress_card(card_dir: &Path) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let state = card_dir
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    if !matches!(state, "done" | "failed" | "merged") {
+        return;
+    }
+
+    let Some(name) = card_dir.file_name().and_then(|s| s.to_str()) else {
+        return;
+    };
+    let Some(parent) = card_dir.parent() else {
+        return;
+    };
+
+    // ditto --hfsCompression clones to a new dir with compression enabled.
+    // Atomic swap: compress to tmp, rename original to backup, rename tmp to original.
+    let compressed = parent.join(format!("{}.comp.tmp", name));
+    let backup = parent.join(format!("{}.bak.tmp", name));
+    let _ = fs::remove_dir_all(&compressed);
+    let _ = fs::remove_dir_all(&backup);
+
+    let ok = StdCommand::new("ditto")
+        .arg("--hfsCompression")
+        .arg(card_dir)
+        .arg(&compressed)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !ok {
+        let _ = fs::remove_dir_all(&compressed);
+        return;
+    }
+
+    // Atomic swap
+    if fs::rename(card_dir, &backup).is_err() {
+        let _ = fs::remove_dir_all(&compressed);
+        return;
+    }
+    if fs::rename(&compressed, card_dir).is_err() {
+        let _ = fs::rename(&backup, card_dir);
+        let _ = fs::remove_dir_all(&compressed);
+        return;
+    }
+    let _ = fs::remove_dir_all(&backup);
+}
+
+/// Copy a single file using APFS COW clone when possible.
+/// Falls back to `fs::copy` if cloning isn't available (non-APFS, Linux, etc).
+fn cow_copy_file(src: &Path, dst: &Path) {
+    if cfg!(target_os = "macos") {
+        let ok = StdCommand::new("cp")
+            .arg("-c") // APFS clone
+            .arg(src)
+            .arg(dst)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok {
+            return;
+        }
+    }
+    let _ = fs::copy(src, dst);
 }
 
 fn ensure_mock_provider_command(cards_dir: &Path, adapter: &str) -> anyhow::Result<()> {
@@ -908,6 +1013,11 @@ fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
             created: Utc::now(),
             agent_type: None,
             stage: "implement".to_string(),
+            card_type: None,
+            metadata_source: None,
+            metadata_key: None,
+            workflow_mode: None,
+            step_index: None,
             priority: None,
             provider_chain: vec![],
             stages: Default::default(),
@@ -921,6 +1031,7 @@ fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
             policy_scope: vec![],
             decision_required: false,
             decision_path: None,
+            depends_on: vec![],
             spawn_to: None,
             policy_result: None,
             timeout_seconds: None,
@@ -1018,6 +1129,7 @@ fn create_card(
         policy_scope: vec![],
         decision_required: false,
         decision_path: None,
+        depends_on: vec![],
         spawn_to: None,
         policy_result: None,
         timeout_seconds: None,
@@ -1039,6 +1151,11 @@ fn create_card(
         stage_models: Default::default(),
         stage_providers: Default::default(),
         stage_budgets: Default::default(),
+        card_type: None,
+        metadata_source: None,
+        metadata_key: None,
+        workflow_mode: None,
+        step_index: None,
     });
 
     meta.id = id.to_string();
@@ -2719,6 +2836,35 @@ async fn run_dispatcher(
                         None => continue,
                     };
 
+                    // ── pre-dispatch gates ──────────────────────────────────
+                    // Read meta before moving to running/ so we can skip
+                    // cards that aren't ready yet.
+                    if let Ok(pre_meta) = jobcard_core::read_meta(&pending_path) {
+                        // Gate 1: decision_required — needs human approval first
+                        if pre_meta.decision_required {
+                            eprintln!(
+                                "[dispatcher] skipping {} — decision_required",
+                                pre_meta.id
+                            );
+                            continue;
+                        }
+                        // Gate 2: depends_on — all deps must be in done/ or merged/
+                        if !pre_meta.depends_on.is_empty() {
+                            let blocked = pre_meta.depends_on.iter().any(|dep_id| {
+                                !card_exists_in(cards_dir, "done", dep_id)
+                                    && !card_exists_in(cards_dir, "merged", dep_id)
+                            });
+                            if blocked {
+                                eprintln!(
+                                    "[dispatcher] skipping {} — unmet depends_on: {:?}",
+                                    pre_meta.id,
+                                    pre_meta.depends_on
+                                );
+                                continue;
+                            }
+                        }
+                    }
+
                     let running_path = running_dir.join(&name);
                     // Count before rename so the current card is not included in the tally
                     let active = count_running_cards(cards_dir);
@@ -2753,6 +2899,14 @@ async fn run_dispatcher(
                         }
                     };
                     persist_workspace_meta(&mut meta, &running_path, vcs_engine, ws_info.as_ref());
+
+                    // Assign deterministic zellij session name
+                    if let Some(ref mut m) = meta {
+                        if m.zellij_session.is_none() {
+                            m.zellij_session = Some(format!("bop-{}", card_id));
+                            let _ = write_meta(&running_path, m);
+                        }
+                    }
 
                     // Adaptive zellij pane management
                     if is_zellij_interactive() {
@@ -2838,6 +2992,8 @@ async fn run_dispatcher(
 
                     let _ = fs::rename(&running_path, &target);
                     render_card_thumbnail(&target);
+                    compress_card(&target);
+                    macos_notify(&card_id, &target);
                     if exit_code == 0 && !validation_triggered_fail {
                         maybe_advance_stage(cards_dir, &target);
                         spawn_child_cards(cards_dir, &target);
@@ -2932,24 +3088,24 @@ fn maybe_advance_stage(cards_dir: &Path, done_card_dir: &Path) {
     };
     let _ = write_meta(&next_card_dir, &next_meta);
 
-    // Copy spec.md from parent
+    // COW-copy spec.md from parent (APFS clone — zero disk cost until modified)
     let spec_src = done_card_dir.join("spec.md");
     if spec_src.exists() {
-        let _ = fs::copy(&spec_src, next_card_dir.join("spec.md"));
+        cow_copy_file(&spec_src, &next_card_dir.join("spec.md"));
     }
 
-    // Copy prompt.md template from parent
+    // COW-copy prompt.md template from parent
     let prompt_src = done_card_dir.join("prompt.md");
     if prompt_src.exists() {
-        let _ = fs::copy(&prompt_src, next_card_dir.join("prompt.md"));
+        cow_copy_file(&prompt_src, &next_card_dir.join("prompt.md"));
     }
 
-    // Carry prior stage output: copy done card's output/result.md → next card's output/prior_result.md
+    // Carry prior stage output: COW-copy done card's output/result.md → next card's output/prior_result.md
     let result_src = done_card_dir.join("output").join("result.md");
     if result_src.exists() {
-        let _ = fs::copy(
+        cow_copy_file(
             &result_src,
-            next_card_dir.join("output").join("prior_result.md"),
+            &next_card_dir.join("output").join("prior_result.md"),
         );
     }
 
@@ -2961,6 +3117,250 @@ fn maybe_advance_stage(cards_dir: &Path, done_card_dir: &Path) {
 }
 
 // ── child-card-pipeline ───────────────────────────────────────────────────────
+
+/// Convert a priority string ("must_have", "should_have", "could_have") to
+/// numeric priority (1, 2, 3). Falls back to parsing as integer.
+fn priority_from_yaml(value: &serde_yaml::Value) -> i64 {
+    if let Some(n) = value.as_i64() {
+        return n;
+    }
+    if let Some(s) = value.as_str() {
+        match s
+            .to_lowercase()
+            .replace(['-', ' '], "_")
+            .as_str()
+        {
+            "must" | "must_have" | "critical" => return 1,
+            "should" | "should_have" | "important" => return 2,
+            "could" | "could_have" | "nice_to_have" => return 3,
+            _ => {}
+        }
+        if let Ok(n) = s.parse::<i64>() {
+            return n;
+        }
+    }
+    3
+}
+
+/// Build labels array from explicit labels + roadmap-specific fields
+/// (phase, complexity, impact).
+fn labels_from_yaml(entry: &serde_yaml::Value) -> Vec<serde_json::Value> {
+    let mut labels: Vec<serde_json::Value> = Vec::new();
+
+    // Explicit labels array
+    if let Some(seq) = entry["labels"].as_sequence() {
+        for item in seq {
+            if let Some(name) = item.as_str() {
+                labels.push(serde_json::json!({"name": name}));
+            } else if let Some(name) = item["name"].as_str() {
+                labels.push(serde_json::json!({
+                    "name": name,
+                    "kind": item["kind"].as_str()
+                }));
+            }
+        }
+    }
+
+    // Phase → label
+    if let Some(phase) = entry["phase"].as_str() {
+        labels.push(serde_json::json!({"name": phase, "kind": "phase"}));
+    }
+
+    // Complexity → label
+    if let Some(complexity) = entry["complexity"].as_str() {
+        let display = match complexity.to_lowercase().as_str() {
+            "low" => "Low Complexity",
+            "medium" => "Medium Complexity",
+            "high" => "High Complexity",
+            _ => complexity,
+        };
+        labels.push(serde_json::json!({"name": display, "kind": "complexity"}));
+    }
+
+    // Impact → label
+    if let Some(impact) = entry["impact"].as_str() {
+        let display = match impact.to_lowercase().as_str() {
+            "low" => "Low Impact",
+            "medium" => "Medium Impact",
+            "high" => "High Impact",
+            _ => impact,
+        };
+        labels.push(serde_json::json!({"name": display, "kind": "impact"}));
+    }
+
+    labels
+}
+
+/// Build subtasks array from explicit subtasks + user_stories.
+fn subtasks_from_yaml(entry: &serde_yaml::Value) -> Vec<serde_json::Value> {
+    let mut subtasks: Vec<serde_json::Value> = Vec::new();
+
+    // Explicit subtasks
+    if let Some(seq) = entry["subtasks"].as_sequence() {
+        for item in seq {
+            if let Some(title) = item["title"].as_str() {
+                subtasks.push(serde_json::json!({
+                    "id": item["id"].as_str().unwrap_or(&format!("st-{}", subtasks.len() + 1)),
+                    "title": title,
+                    "done": item["done"].as_bool().unwrap_or(false)
+                }));
+            }
+        }
+    }
+
+    // User stories → subtasks
+    if let Some(seq) = entry["user_stories"].as_sequence() {
+        for (i, story) in seq.iter().enumerate() {
+            if let Some(text) = story.as_str() {
+                subtasks.push(serde_json::json!({
+                    "id": format!("us-{}", i + 1),
+                    "title": text,
+                    "done": false
+                }));
+            }
+        }
+    }
+
+    subtasks
+}
+
+/// Build spec.md content from a YAML card entry.
+///
+/// Assembles sections: description, rationale, user stories, dependencies.
+fn build_spec_md(entry: &serde_yaml::Value, id: &str) -> String {
+    let title = entry["title"].as_str().unwrap_or(id);
+    let mut spec = format!("# {}\n", title);
+
+    if let Some(desc) = entry["description"].as_str() {
+        spec.push_str(&format!("\n{}\n", desc));
+    }
+
+    if let Some(rationale) = entry["rationale"].as_str() {
+        spec.push_str(&format!("\n## Rationale\n\n{}\n", rationale));
+    }
+
+    if let Some(stories) = entry["user_stories"].as_sequence() {
+        let items: Vec<&str> = stories.iter().filter_map(|v| v.as_str()).collect();
+        if !items.is_empty() {
+            spec.push_str("\n## User Stories\n\n");
+            for story in &items {
+                spec.push_str(&format!("- {}\n", story));
+            }
+        }
+    }
+
+    if let Some(deps) = entry["depends_on"].as_sequence() {
+        let items: Vec<&str> = deps.iter().filter_map(|v| v.as_str()).collect();
+        if !items.is_empty() {
+            spec.push_str("\n## Dependencies\n\n");
+            for dep in &items {
+                spec.push_str(&format!("- `{}`\n", dep));
+            }
+        }
+    }
+
+    if let Some(criteria) = entry["acceptance_criteria"].as_sequence() {
+        let items: Vec<&str> = criteria.iter().filter_map(|v| v.as_str()).collect();
+        if !items.is_empty() {
+            spec.push_str("\n## Acceptance Criteria\n\n");
+            for c in &items {
+                spec.push_str(&format!("- [ ] {}\n", c));
+            }
+        }
+    }
+
+    spec
+}
+
+/// Create a .jobcard directory from a YAML entry. Used by both
+/// `spawn_child_cards()` and `cmd_import()`.
+fn create_card_from_yaml(dest_dir: &Path, entry: &serde_yaml::Value) -> Option<String> {
+    let id = entry["id"].as_str()?;
+    let child_dir = dest_dir.join(format!("{}.jobcard", id));
+    if child_dir.exists() {
+        return None; // don't overwrite
+    }
+    let _ = fs::create_dir_all(child_dir.join("logs"));
+    let _ = fs::create_dir_all(child_dir.join("output"));
+
+    let labels = labels_from_yaml(entry);
+    let subtasks = subtasks_from_yaml(entry);
+
+    let stage = entry["stage"].as_str().unwrap_or("spec");
+    let workflow_mode = entry["workflow_mode"].as_str();
+
+    let mut meta = serde_json::json!({
+        "id": id,
+        "title": entry["title"].as_str().unwrap_or(id),
+        "description": entry["description"].as_str().unwrap_or(""),
+        "stage": stage,
+        "priority": priority_from_yaml(&entry["priority"]),
+        "created": chrono::Utc::now().to_rfc3339(),
+        "provider_chain": entry["provider_chain"].as_sequence()
+            .map(|s| s.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+            .unwrap_or_else(|| vec!["claude"]),
+        "stages": {
+            "spec": {"status": "pending", "agent": null},
+            "plan": {"status": "blocked", "agent": null},
+            "implement": {"status": "blocked", "agent": null},
+            "qa": {"status": "blocked", "agent": null}
+        },
+        "acceptance_criteria": entry["acceptance_criteria"].as_sequence()
+            .map(|s| s.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+            .unwrap_or_default(),
+        "retry_count": 0
+    });
+
+    // Add optional rich fields
+    if !labels.is_empty() {
+        meta["labels"] = serde_json::Value::Array(labels);
+    }
+    if !subtasks.is_empty() {
+        meta["subtasks"] = serde_json::Value::Array(subtasks);
+    }
+    if let Some(wm) = workflow_mode {
+        meta["workflow_mode"] = serde_json::Value::String(wm.to_string());
+    }
+    if let Some(deps) = entry["depends_on"].as_sequence() {
+        let dep_ids: Vec<serde_json::Value> = deps
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| serde_json::Value::String(s.to_string())))
+            .collect();
+        if !dep_ids.is_empty() {
+            meta["depends_on"] = serde_json::Value::Array(dep_ids);
+        }
+    }
+
+    let _ = fs::write(
+        child_dir.join("meta.json"),
+        serde_json::to_vec_pretty(&meta).unwrap(),
+    );
+
+    // Build rich spec.md
+    let spec = build_spec_md(entry, id);
+    let _ = fs::write(child_dir.join("spec.md"), spec);
+
+    // Write roadmap.json snapshot if features are present
+    if let Some(features) = entry["features"].as_sequence() {
+        let roadmap_json = serde_json::json!({
+            "features": features.iter().map(|f| {
+                serde_json::json!({
+                    "title": f["title"].as_str().unwrap_or(""),
+                    "status": f["status"].as_str().unwrap_or("under_review"),
+                    "priority": f["priority"].as_str().unwrap_or(""),
+                    "phase": f["phase"].as_str().unwrap_or(""),
+                })
+            }).collect::<Vec<_>>()
+        });
+        let _ = fs::write(
+            child_dir.join("output/roadmap.json"),
+            serde_json::to_vec_pretty(&roadmap_json).unwrap(),
+        );
+    }
+
+    render_card_thumbnail(&child_dir);
+    Some(id.to_string())
+}
 
 fn spawn_child_cards(cards_dir: &Path, done_card_dir: &Path) {
     let yaml_path = done_card_dir.join("output/cards.yaml");
@@ -2984,53 +3384,9 @@ fn spawn_child_cards(cards_dir: &Path, done_card_dir: &Path) {
     let _ = fs::create_dir_all(&dest_dir);
 
     for entry in entries {
-        let Some(id) = entry["id"].as_str() else {
-            continue;
-        };
-
-        let child_dir = dest_dir.join(format!("{}.jobcard", id));
-        if child_dir.exists() {
-            continue; // don't overwrite
+        if let Some(id) = create_card_from_yaml(&dest_dir, &entry) {
+            eprintln!("[child-cards] created {} in {}/", id, dest);
         }
-        let _ = fs::create_dir_all(child_dir.join("logs"));
-        let _ = fs::create_dir_all(child_dir.join("output"));
-
-        let meta = serde_json::json!({
-            "id": id,
-            "title": entry["title"].as_str().unwrap_or(id),
-            "description": entry["description"].as_str().unwrap_or(""),
-            "stage": entry["stage"].as_str().unwrap_or("spec"),
-            "priority": entry["priority"].as_i64().unwrap_or(3),
-            "created": chrono::Utc::now().to_rfc3339(),
-            "provider_chain": entry["provider_chain"].as_sequence()
-                .map(|s| s.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
-                .unwrap_or_else(|| vec!["claude"]),
-            "stages": {
-                "spec": {"status": "pending", "agent": null},
-                "plan": {"status": "blocked", "agent": null},
-                "implement": {"status": "blocked", "agent": null},
-                "qa": {"status": "blocked", "agent": null}
-            },
-            "acceptance_criteria": entry["acceptance_criteria"].as_sequence()
-                .map(|s| s.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
-                .unwrap_or_default(),
-            "retry_count": 0
-        });
-        let _ = fs::write(
-            child_dir.join("meta.json"),
-            serde_json::to_vec_pretty(&meta).unwrap(),
-        );
-
-        if let Some(desc) = entry["description"].as_str() {
-            let _ = fs::write(
-                child_dir.join("spec.md"),
-                format!("# {}\n\n{}\n", entry["title"].as_str().unwrap_or(id), desc),
-            );
-        }
-
-        render_card_thumbnail(&child_dir);
-
-        eprintln!("[child-cards] created {} in {}/", id, dest);
     }
 }
 
@@ -3157,6 +3513,12 @@ async fn run_card(
         .arg(&memory_out_file)
         .env("JOBCARD_MEMORY_OUT", &memory_out_file)
         .env("JOBCARD_MEMORY_NAMESPACE", &memory_namespace)
+        // Card identity — lets any agent orient itself
+        .env("BOP_CARD_ID", meta.as_ref().map(|m| m.id.as_str()).unwrap_or(""))
+        .env("BOP_CARD_DIR", card_dir)
+        .env("BOP_CARDS_DIR", cards_dir)
+        .env("BOP_STAGE", &stage)
+        .env("BOP_PROVIDER", provider_name)
         .spawn()
         .with_context(|| format!("failed to spawn adapter: {}", adapter))?;
 
@@ -3604,7 +3966,7 @@ async fn run_merge_gate(
                 let _ = write_meta(&card_dir, &meta);
                 let merged_path = merged_dir.join(&name);
                 let _ = fs::rename(&card_dir, &merged_path);
-                maybe_hfs_compress_card(&merged_path);
+                compress_card(&merged_path);
                 render_card_thumbnail(&merged_path);
             }
         }
@@ -3826,51 +4188,20 @@ fn cmd_import(root: &Path, source: &str, immediate: bool) -> anyhow::Result<()> 
 
     let mut count = 0u32;
     for entry in &entries {
-        let Some(id) = entry["id"].as_str() else {
-            continue;
-        };
-
-        let child_dir = dest_dir.join(format!("{}.jobcard", id));
-        if child_dir.exists() {
-            eprintln!("[import] skipping {} (already exists)", id);
+        if entry["id"].as_str().is_none() {
             continue;
         }
-        fs::create_dir_all(child_dir.join("logs"))?;
-        fs::create_dir_all(child_dir.join("output"))?;
-
-        let meta = serde_json::json!({
-            "id": id,
-            "title": entry["title"].as_str().unwrap_or(id),
-            "description": entry["description"].as_str().unwrap_or(""),
-            "stage": entry["stage"].as_str().unwrap_or("spec"),
-            "priority": entry["priority"].as_i64().unwrap_or(3),
-            "created": chrono::Utc::now().to_rfc3339(),
-            "provider_chain": entry["provider_chain"].as_sequence()
-                .map(|s| s.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
-                .unwrap_or_else(|| vec!["claude"]),
-            "stages": {
-                "spec": {"status": "pending", "agent": null},
-                "plan": {"status": "blocked", "agent": null},
-                "implement": {"status": "blocked", "agent": null},
-                "qa": {"status": "blocked", "agent": null}
-            },
-            "acceptance_criteria": entry["acceptance_criteria"].as_sequence()
-                .map(|s| s.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
-                .unwrap_or_default(),
-            "retry_count": 0
-        });
-        fs::write(
-            child_dir.join("meta.json"),
-            serde_json::to_vec_pretty(&meta)?,
-        )?;
-
-        if let Some(desc) = entry["description"].as_str() {
-            let title = entry["title"].as_str().unwrap_or(id);
-            fs::write(child_dir.join("spec.md"), format!("# {}\n\n{}\n", title, desc))?;
+        match create_card_from_yaml(&dest_dir, entry) {
+            Some(id) => {
+                eprintln!("[import] created {}", id);
+                count += 1;
+            }
+            None => {
+                if let Some(id) = entry["id"].as_str() {
+                    eprintln!("[import] skipping {} (already exists)", id);
+                }
+            }
         }
-
-        render_card_thumbnail(&child_dir);
-        count += 1;
     }
 
     eprintln!("[import] created {} card(s) in {}/", count, dest);
@@ -4208,6 +4539,28 @@ fn print_state_group(dir: &Path, state: &str, team_prefix: Option<&str>) -> anyh
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Check if a card with `id` exists in a specific state directory (e.g. "done", "merged").
+/// Handles both exact names (`{id}.jobcard`) and glyph-prefixed (`{tok}-{id}.jobcard`).
+fn card_exists_in(root: &Path, state: &str, id: &str) -> bool {
+    let state_dir = root.join(state);
+    let exact = format!("{}.jobcard", id);
+    if state_dir.join(&exact).exists() {
+        return true;
+    }
+    let suffix = format!("-{}.jobcard", id);
+    fs::read_dir(&state_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|e| {
+            e.path().is_dir()
+                && e.file_name()
+                    .to_str()
+                    .map(|n| n.ends_with(&suffix))
+                    .unwrap_or(false)
+        })
+}
 
 fn find_card(root: &Path, id: &str) -> Option<PathBuf> {
     let suffix = format!("-{}.jobcard", id);

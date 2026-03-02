@@ -33,6 +33,7 @@ func stateColor(_ state: String) -> NSColor {
     case "merged":   return NSColor(calibratedRed: 0.30, green: 0.13, blue: 0.58, alpha: 1)
     case "failed":   return NSColor(calibratedRed: 0.52, green: 0.09, blue: 0.09, alpha: 1)
     case "pending":  return NSColor(calibratedRed: 0.14, green: 0.22, blue: 0.38, alpha: 1)
+    case "drafts":   return NSColor(calibratedRed: 0.35, green: 0.35, blue: 0.38, alpha: 1)
     default:         return NSColor(calibratedRed: 0.18, green: 0.18, blue: 0.22, alpha: 1)
     }
 }
@@ -111,6 +112,7 @@ if isCard {
     case "done":      symbol = "✓"   // check = complete
     case "merged":    symbol = "⤴"   // arrow up-right = landed
     case "failed":    symbol = "✗"   // cross = error
+    case "drafts":    symbol = "✎"   // pencil = draft
     case "templates": symbol = "⬡"   // hexagon = blueprint
     default:          symbol = "·"
     }

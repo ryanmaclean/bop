@@ -1,0 +1,88 @@
+# Example: bop import .cards/examples/roadmap-import.yaml
+#
+# This file demonstrates the roadmap YAML format for `bop import`.
+# Each entry becomes a .jobcard in drafts/ (or pending/ with --immediate).
+#
+# Fields:
+#   id            (required) — unique card identifier
+#   title         (required) — display name
+#   description   — one-sentence summary
+#   priority      — "must_have" | "should_have" | "could_have" | 1-4
+#   stage         — initial stage (default: "spec")
+#   phase         — roadmap phase name → becomes a label
+#   complexity    — "low" | "medium" | "high" → becomes a label
+#   impact        — "low" | "medium" | "high" → becomes a label
+#   rationale     — why this feature matters → goes into spec.md
+#   user_stories  — list of user stories → become subtasks
+#   acceptance_criteria — list of pass/fail checks
+#   depends_on    — list of card IDs this depends on
+#   labels        — additional labels [{name, kind}]
+#   workflow_mode — e.g. "roadmap" for roadmap-derived cards
+#   provider_chain — e.g. ["claude", "codex"]
+
+- id: smart-contracts-engine
+  title: Smart Contracts Engine
+  description: Core execution environment for deterministic smart contract processing.
+  priority: must_have
+  stage: spec
+  phase: Production Foundation
+  complexity: high
+  impact: high
+  workflow_mode: roadmap
+  rationale: >
+    Without a robust contract execution engine, the platform cannot
+    guarantee deterministic outcomes — the core value proposition.
+    This is the foundation that all other features build upon.
+  user_stories:
+    - As a developer, I want to deploy contracts with predictable gas costs
+    - As a validator, I want deterministic execution across all nodes
+    - As a user, I want my transactions to complete within the stated timeout
+  acceptance_criteria:
+    - cargo test passes for contract-engine crate
+    - Benchmark shows < 50ms execution for reference contract
+    - Fuzzing reveals no panics in 10M iterations
+  depends_on: []
+
+- id: developer-sdk
+  title: Developer SDK & Tooling
+  description: TypeScript and Rust SDKs with CLI tooling for contract development.
+  priority: should_have
+  stage: spec
+  phase: Developer Experience
+  complexity: medium
+  impact: high
+  workflow_mode: roadmap
+  rationale: >
+    Developer adoption depends on excellent tooling. A first-class SDK
+    reduces the barrier to entry and accelerates ecosystem growth.
+  user_stories:
+    - As a developer, I want to scaffold a new project with one command
+    - As a developer, I want type-safe contract interactions from TypeScript
+    - As a developer, I want local testing without a running node
+  acceptance_criteria:
+    - npm create @platform/contract works end-to-end
+    - SDK type definitions cover all contract ABIs
+    - Documentation covers the top 10 use cases
+  depends_on:
+    - smart-contracts-engine
+
+- id: monitoring-dashboard
+  title: Real-Time Monitoring Dashboard
+  description: Operational dashboard showing network health, transaction throughput, and alerts.
+  priority: could_have
+  stage: spec
+  phase: Growth & Market
+  complexity: low
+  impact: medium
+  workflow_mode: roadmap
+  rationale: >
+    Visibility into system health builds operator confidence and enables
+    proactive issue detection before users are impacted.
+  user_stories:
+    - As an operator, I want to see transaction throughput in real time
+    - As an operator, I want alerts when error rates exceed thresholds
+  acceptance_criteria:
+    - Dashboard loads within 2 seconds
+    - Alerts fire within 30 seconds of threshold breach
+  depends_on:
+    - smart-contracts-engine

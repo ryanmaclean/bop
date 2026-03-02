@@ -9,6 +9,9 @@ fileprivate struct JobCardMeta: Codable {
     let title: String?
     let description: String?
     let stage: String
+    let workflowMode: String?
+    let stepIndex: Int?
+    let stageChain: [String]?
     let priority: Int?
     let created: String?
     let labels: [MetaLabel]?
@@ -23,6 +26,9 @@ fileprivate struct JobCardMeta: Codable {
     enum CodingKeys: String, CodingKey {
         case id, title, description, stage, priority, created, labels, progress, subtasks, stages
         case glyph
+        case workflowMode = "workflow_mode"
+        case stepIndex = "step_index"
+        case stageChain = "stage_chain"
         case acceptanceCriteria = "acceptance_criteria"
         case zellijSession = "zellij_session"
         case zellijPane = "zellij_pane"
@@ -43,75 +49,151 @@ private struct MetaSubtask: Codable {
 private struct MetaStageRecord: Codable {
     let status: String
     let agent: String?
+    let provider: String?
+    let durationS: Int?
+    let started: String?
+
+    enum CodingKeys: String, CodingKey {
+        case status, agent, provider, started
+        case durationS = "duration_s"
+    }
+}
+
+private struct RoadmapSnapshot {
+    let statusCounts: [String: Int]
+    let priorityCounts: [String: Int]
+    let phaseCount: Int
+    let featureCount: Int
 }
 
 // MARK: - Palette
 
 private extension Color {
-    static let appBg         = Color(red: 0.09, green: 0.07, blue: 0.14) // Darker background outside card
+    static let appBg         = Color(red: 0.09, green: 0.07, blue: 0.14)
     static let cardBg        = Color(red: 0.16, green: 0.13, blue: 0.27)
     static let cardBorder    = Color(red: 0.30, green: 0.22, blue: 0.45)
     static let textPrimary   = Color.white
     static let textSecondary = Color(red: 0.82, green: 0.73, blue: 0.94)
     static let textMuted     = Color(red: 0.60, green: 0.50, blue: 0.75)
-    
+
     static let pillPurple    = Color(red: 0.65, green: 0.45, blue: 0.95)
     static let pillPurpleBg  = Color(red: 0.25, green: 0.18, blue: 0.45)
-    
+
     static let pillGold      = Color(red: 0.95, green: 0.80, blue: 0.25)
     static let pillGoldBg    = Color(red: 0.35, green: 0.25, blue: 0.15)
-    
-    static let stageActive   = Color(red: 0.10, green: 0.80, blue: 0.90) // Cyan checkmark
+
+    static let pillTeal      = Color(red: 0.20, green: 0.85, blue: 0.80)
+    static let pillTealBg    = Color(red: 0.10, green: 0.30, blue: 0.30)
+
+    static let pillOrange    = Color(red: 0.95, green: 0.60, blue: 0.25)
+    static let pillOrangeBg  = Color(red: 0.35, green: 0.22, blue: 0.10)
+
+    static let stageActive   = Color(red: 0.10, green: 0.80, blue: 0.90)
     static let stageActiveBg = Color(red: 0.15, green: 0.35, blue: 0.45)
-    static let stagePending  = Color(red: 0.60, green: 0.45, blue: 0.85) // Light purple text
-    static let stagePendingBg = Color(red: 0.22, green: 0.16, blue: 0.36) // Dark purple bg
-    
-    static let stopBg        = Color(red: 0.98, green: 0.45, blue: 0.50) // Coral
+    static let stagePending  = Color(red: 0.60, green: 0.45, blue: 0.85)
+    static let stagePendingBg = Color(red: 0.22, green: 0.16, blue: 0.36)
+
+    static let stopBg        = Color(red: 0.98, green: 0.45, blue: 0.50)
     static let stopText      = Color.black
-    static let attachBg      = Color(red: 0.10, green: 0.72, blue: 0.42) // Green
+    static let attachBg      = Color(red: 0.10, green: 0.72, blue: 0.42)
     static let attachText    = Color.black
-    static let tailBg        = Color(red: 0.18, green: 0.42, blue: 0.82) // Blue
+    static let tailBg        = Color(red: 0.18, green: 0.42, blue: 0.82)
     static let tailText      = Color.white
-    
+
     static let barEmpty      = Color(red: 0.25, green: 0.16, blue: 0.42)
-    static let barFill       = Color(red: 0.85, green: 0.45, blue: 0.95) // Pinkish purple
+    static let barFill       = Color(red: 0.85, green: 0.45, blue: 0.95)
 }
 
 // MARK: - Stage display names
 
-private let stageOrder: [(key: String, label: String)] = [
+private let defaultStageOrder: [(key: String, label: String)] = [
     ("spec",      "Spec"),
     ("plan",      "Plan"),
     ("implement", "Code"),
     ("qa",        "QA"),
 ]
 
+private let roadmapStageOrder: [(key: String, label: String)] = [
+    ("analyze",  "Analyze"),
+    ("discover", "Discover"),
+    ("generate", "Generate"),
+    ("qa",       "QA"),
+]
+
+private let featureLifecycleStageOrder: [(key: String, label: String)] = [
+    ("under_review", "Under Review"),
+    ("planned", "Planned"),
+    ("in_progress", "In Progress"),
+    ("done", "Done"),
+]
+
+private func stageDisplayName(_ key: String) -> String {
+    switch key.lowercased() {
+    case "spec": return "Spec"
+    case "plan": return "Plan"
+    case "implement": return "Code"
+    case "qa": return "QA"
+    case "analyze": return "Analyze"
+    case "discover": return "Discover"
+    case "generate": return "Generate"
+    case "roadmap": return "Roadmap"
+    case "under_review": return "Under Review"
+    case "planned": return "Planned"
+    case "in_progress": return "In Progress"
+    case "done": return "Done"
+    default:
+        let lower = key.lowercased()
+        guard let first = lower.first else { return key }
+        return String(first).uppercased() + lower.dropFirst()
+    }
+}
+
 // MARK: - Label pill
 
 private struct LabelPill: View {
     let label: MetaLabel
 
-    var color: Color { .pillPurple }
-    
+    private var pillColors: (fg: Color, bg: Color) {
+        switch label.kind?.lowercased() {
+        case "phase":
+            return (.pillTeal, .pillTealBg)
+        case "complexity":
+            let isHigh = label.name.lowercased().contains("high")
+            return isHigh ? (.pillOrange, .pillOrangeBg) : (.pillPurple, .pillPurpleBg)
+        case "impact":
+            let isHigh = label.name.lowercased().contains("high")
+            return isHigh ? (.pillGold, .pillGoldBg) : (.pillPurple, .pillPurpleBg)
+        default:
+            return (.pillPurple, .pillPurpleBg)
+        }
+    }
+
     var icon: String {
-        switch label.name.lowercased() {
-        case "coding": return "arrow.triangle.2.circlepath"
-        case "performance": return "gauge.medium"
-        case "bug": return "ladybug.fill"
-        default: return "tag"
+        switch label.kind?.lowercased() {
+        case "phase": return "calendar.badge.clock"
+        case "complexity": return "cpu"
+        case "impact": return "bolt.fill"
+        default:
+            switch label.name.lowercased() {
+            case "coding": return "arrow.triangle.2.circlepath"
+            case "performance": return "gauge.medium"
+            case "bug": return "ladybug.fill"
+            default: return "tag"
+            }
         }
     }
 
     var body: some View {
+        let colors = pillColors
         HStack(spacing: 6) {
             Image(systemName: icon).font(.system(size: 11, weight: .medium))
             Text(label.name).font(.system(size: 13, weight: .medium))
         }
-        .foregroundColor(color)
+        .foregroundColor(colors.fg)
         .padding(.horizontal, 12).padding(.vertical, 6)
-        .background(Color.pillPurpleBg)
+        .background(colors.bg)
         .clipShape(Capsule())
-        .overlay(Capsule().stroke(color.opacity(0.6), lineWidth: 1))
+        .overlay(Capsule().stroke(colors.fg.opacity(0.6), lineWidth: 1))
     }
 }
 
@@ -120,17 +202,22 @@ private struct LabelPill: View {
 private struct StagePipeline: View {
     let currentStage: String
     let stages: [String: MetaStageRecord]?
+    let displayStages: [(key: String, label: String)]
 
     private func status(_ key: String) -> String {
         stages?[key]?.status ?? "pending"
     }
 
+    private var currentIndex: Int {
+        displayStages.firstIndex(where: { $0.key == currentStage }) ?? 0
+    }
+
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(Array(stageOrder.enumerated()), id: \.offset) { idx, pair in
+            ForEach(Array(displayStages.enumerated()), id: \.offset) { idx, pair in
                 let st = status(pair.key)
                 let isCurrent = pair.key == currentStage
-                let isDone    = st == "done" || (idx < (stageOrder.firstIndex(where: { $0.key == currentStage }) ?? 0))
+                let isDone = st == "done" || (idx < currentIndex)
 
                 HStack(spacing: 6) {
                     if isDone {
@@ -146,7 +233,7 @@ private struct StagePipeline: View {
                 .background(isDone ? Color.stageActiveBg.opacity(0.5) : Color.stagePendingBg)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
 
-                if idx < stageOrder.count - 1 {
+                if idx < displayStages.count - 1 {
                     Text("—")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.cardBorder)
@@ -172,6 +259,190 @@ private func relativeTime(_ iso: String?) -> String {
     return "\(dt / 86400)d ago"
 }
 
+private func parseISODate(_ iso: String?) -> Date? {
+    guard let s = iso else { return nil }
+    let f1 = ISO8601DateFormatter()
+    f1.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let f2 = ISO8601DateFormatter()
+    return f1.date(from: s) ?? f2.date(from: s)
+}
+
+private func relativeTimeFromDate(_ date: Date?) -> String {
+    guard let d = date else { return "unknown" }
+    let dt = Int(-d.timeIntervalSinceNow)
+    if dt < 60 { return "just now" }
+    if dt < 3600 { return "\(dt / 60)m ago" }
+    if dt < 86400 { return "\(dt / 3600)h ago" }
+    return "\(dt / 86400)d ago"
+}
+
+private func formatElapsed(_ seconds: Int) -> String {
+    let s = max(0, seconds)
+    let h = s / 3600
+    let m = (s % 3600) / 60
+    let sec = s % 60
+    if h > 0 {
+        return String(format: "%d:%02d:%02d", h, m, sec)
+    }
+    return String(format: "%d:%02d", m, sec)
+}
+
+private func detectToolTag(in text: String) -> String? {
+    let lines = text.split(separator: "\n").map(String.init).reversed()
+    for line in lines {
+        if let r = line.range(of: #"\[Tool:\s*([^\]]+)\]"#, options: .regularExpression) {
+            let payload = String(line[r]).replacingOccurrences(of: "[Tool:", with: "").replacingOccurrences(of: "]", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !payload.isEmpty { return payload }
+        }
+        if let r = line.range(of: #"functions\.([a-zA-Z0-9_-]+)"#, options: .regularExpression) {
+            let raw = String(line[r])
+            return raw.replacingOccurrences(of: "functions.", with: "")
+        }
+    }
+    return nil
+}
+
+private func normalizeRoadmapStatus(_ raw: String) -> String? {
+    let key = raw
+        .lowercased()
+        .replacingOccurrences(of: "-", with: "_")
+        .replacingOccurrences(of: " ", with: "_")
+    switch key {
+    case "under_review", "review", "underreview":
+        return "under_review"
+    case "planned", "plan":
+        return "planned"
+    case "in_progress", "inprogress", "active", "doing":
+        return "in_progress"
+    case "done", "completed", "complete":
+        return "done"
+    default:
+        return nil
+    }
+}
+
+private func normalizeRoadmapPriority(_ raw: String) -> String? {
+    let key = raw
+        .lowercased()
+        .replacingOccurrences(of: "-", with: "_")
+        .replacingOccurrences(of: " ", with: "_")
+    switch key {
+    case "must", "must_have", "critical":
+        return "must"
+    case "should", "should_have", "important":
+        return "should"
+    case "could", "could_have", "nice_to_have":
+        return "could"
+    default:
+        return nil
+    }
+}
+
+private func parseRoadmapSnapshot(from cardURL: URL) -> RoadmapSnapshot? {
+    let roadmapURL = cardURL.appendingPathComponent("output/roadmap.json")
+    guard
+        let data = try? Data(contentsOf: roadmapURL),
+        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else { return nil }
+
+    let featureItems = (obj["features"] as? [Any]) ?? []
+    var statusCounts: [String: Int] = [:]
+    var priorityCounts: [String: Int] = [:]
+    var phaseSet = Set<String>()
+    var featureCount = 0
+
+    for item in featureItems {
+        guard let feature = item as? [String: Any] else { continue }
+        featureCount += 1
+
+        if let rawStatus = feature["status"] as? String,
+           let status = normalizeRoadmapStatus(rawStatus) {
+            statusCounts[status, default: 0] += 1
+        }
+        if let rawPriority = feature["priority"] as? String,
+           let priority = normalizeRoadmapPriority(rawPriority) {
+            priorityCounts[priority, default: 0] += 1
+        }
+
+        if let phase = feature["phase"] as? String, !phase.isEmpty {
+            phaseSet.insert(phase)
+        } else if let phase = feature["phase_id"] as? String, !phase.isEmpty {
+            phaseSet.insert(phase)
+        } else if let phaseNum = feature["phase"] as? NSNumber {
+            phaseSet.insert(phaseNum.stringValue)
+        }
+    }
+
+    let explicitPhases = (obj["phases"] as? [Any])?.count ?? 0
+    let phaseCount = max(explicitPhases, phaseSet.count)
+
+    return RoadmapSnapshot(
+        statusCounts: statusCounts,
+        priorityCounts: priorityCounts,
+        phaseCount: phaseCount,
+        featureCount: featureCount
+    )
+}
+
+/// Extract markdown sections from spec.md for display in the overview tab.
+private struct SpecSections {
+    var rationale: String?
+    var userStories: [String]
+    var dependencies: [String]
+}
+
+private func parseSpecSections(_ text: String) -> SpecSections {
+    var rationale: String?
+    var userStories: [String] = []
+    var dependencies: [String] = []
+    var currentSection: String?
+    var currentContent: [String] = []
+
+    func flush() {
+        guard let section = currentSection else { return }
+        let body = currentContent.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        switch section.lowercased() {
+        case "rationale":
+            rationale = body
+        case "user stories":
+            userStories = body.split(separator: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+                .map { line in
+                    var l = line
+                    if l.hasPrefix("- ") { l = String(l.dropFirst(2)) }
+                    return l
+                }
+        case "dependencies":
+            dependencies = body.split(separator: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+                .map { line in
+                    var l = line
+                    if l.hasPrefix("- ") { l = String(l.dropFirst(2)) }
+                    if l.hasPrefix("`") && l.hasSuffix("`") {
+                        l = String(l.dropFirst().dropLast())
+                    }
+                    return l
+                }
+        default: break
+        }
+    }
+
+    for line in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+        if line.hasPrefix("## ") {
+            flush()
+            currentSection = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+            currentContent = []
+        } else {
+            currentContent.append(line)
+        }
+    }
+    flush()
+
+    return SpecSections(rationale: rationale, userStories: userStories, dependencies: dependencies)
+}
+
 // MARK: - Card view
 
 fileprivate enum CardTab: String, CaseIterable {
@@ -186,6 +457,10 @@ fileprivate struct JobCardPreview: View {
     var meta: JobCardMeta?
     var logs: String = ""
     var bundleFiles: [String] = []
+    var lastActivityAt: Date? = nil
+    var activeTool: String? = nil
+    var roadmapSnapshot: RoadmapSnapshot? = nil
+    var specSections: SpecSections? = nil
 
     @State private var selectedTab: CardTab = .overview
 
@@ -193,22 +468,163 @@ fileprivate struct JobCardPreview: View {
         meta?.title ?? meta?.id ?? url?.lastPathComponent ?? "JobCard"
     }
 
+    private var cardState: String {
+        guard let url else { return "unknown" }
+        return url.deletingLastPathComponent().lastPathComponent
+    }
+
     private var isRunning: Bool {
+        if cardState == "running" { return true }
         guard let m = meta else { return false }
         return m.stages?[m.stage]?.status == "running"
     }
-    
+
+    private var isDoneLike: Bool {
+        cardState == "done" || cardState == "merged"
+    }
+
+    private var logsAction: String { isDoneLike ? "logs" : "tail" }
+
+    private var logsURL: URL? {
+        guard let id = meta?.id else { return nil }
+        return URL(string: "bop://card/\(id)/\(logsAction)")
+    }
+
+    private var stopURL: URL? {
+        guard isRunning, let id = meta?.id else { return nil }
+        return URL(string: "bop://card/\(id)/stop")
+    }
+
+    private var logsButtonText: String { isDoneLike ? "Logs" : "Tail" }
+
+    private var logsHelpText: String {
+        guard let id = meta?.id else { return "" }
+        if isDoneLike {
+            return "Open logs: bop logs \(id)"
+        }
+        return "Live tail: bop logs \(id) --follow"
+    }
+
+    private var isRoadmapWorkflow: Bool {
+        guard let m = meta else { return false }
+        if m.workflowMode?.lowercased() == "roadmap" {
+            return true
+        }
+        return [
+            "analyze", "discover", "generate", "roadmap",
+            "under_review", "planned", "in_progress",
+        ].contains(m.stage.lowercased())
+    }
+
+    /// True if this card has roadmap-derived rich metadata (phase/impact/complexity labels).
+    private var hasRoadmapLabels: Bool {
+        guard let labels = meta?.labels else { return false }
+        return labels.contains { $0.kind == "phase" || $0.kind == "complexity" || $0.kind == "impact" }
+    }
+
+    private func displayStageOrder(for m: JobCardMeta) -> [(key: String, label: String)] {
+        if let chain = m.stageChain, !chain.isEmpty {
+            return chain.map { (key: $0, label: stageDisplayName($0)) }
+        }
+        if normalizeRoadmapStatus(m.stage) != nil {
+            return featureLifecycleStageOrder
+        }
+        return isRoadmapWorkflow ? roadmapStageOrder : defaultStageOrder
+    }
+
+    private func displayStageName(_ key: String) -> String {
+        stageDisplayName(key)
+    }
+
+    private func inferredRoadmapProgress(_ m: JobCardMeta) -> Int {
+        if let progress = m.progress {
+            return progress
+        }
+        switch m.stage.lowercased() {
+        case "analyze": return 20
+        case "discover": return 40
+        case "generate": return 60
+        case "qa": return 85
+        case "under_review": return 15
+        case "planned": return 35
+        case "in_progress": return 65
+        case "done": return 100
+        default: return 0
+        }
+    }
+
+    private func elapsedTimeText(_ m: JobCardMeta) -> String {
+        let start = parseISODate(m.stages?[m.stage]?.started) ?? parseISODate(m.created)
+        guard let start else { return "0:00" }
+        return formatElapsed(Int(Date().timeIntervalSince(start)))
+    }
+
+    private func lastActivityText() -> String {
+        relativeTimeFromDate(lastActivityAt)
+    }
+
+    private func roadmapStatusTitle(_ m: JobCardMeta) -> String {
+        switch m.stage.lowercased() {
+        case "analyze": return "Analyzing"
+        case "discover": return "Discovering"
+        case "generate": return "Generating"
+        case "qa": return "Reviewing"
+        case "under_review": return "Under Review"
+        case "planned": return "Planned"
+        case "in_progress": return "In Progress"
+        case "done": return "Done"
+        default: return displayStageName(m.stage)
+        }
+    }
+
+    private func roadmapStatusSubtitle(_ m: JobCardMeta) -> String {
+        switch m.stage.lowercased() {
+        case "analyze":
+            return "Analyzing project structure and current state."
+        case "discover":
+            return "Discovering user needs and competitor signals."
+        case "generate":
+            return "Generating milestone roadmap and execution plan."
+        case "qa":
+            return "Verifying roadmap quality and handoff readiness."
+        case "under_review":
+            return "Reviewing generated features before planning."
+        case "planned":
+            return "Prioritized and phase-assigned, ready to execute."
+        case "in_progress":
+            return "Executing selected roadmap features."
+        case "done":
+            return "Roadmap execution complete for this scope."
+        default:
+            return "Roadmap workflow in progress."
+        }
+    }
+
+    private func roadmapStatusIcon(_ m: JobCardMeta) -> String {
+        switch m.stage.lowercased() {
+        case "analyze": return "magnifyingglass.circle"
+        case "discover": return "person.2.circle"
+        case "generate": return "wand.and.stars"
+        case "qa": return "checkmark.shield"
+        case "under_review": return "eye.circle"
+        case "planned": return "calendar.circle"
+        case "in_progress": return "play.circle"
+        case "done": return "checkmark.circle"
+        default: return "map"
+        }
+    }
+
     private func priorityText(_ p: Int) -> String {
         switch p {
-        case 1: return "Critical"
-        case 2: return "High Impact"
-        case 3: return "Medium Impact"
+        case 1: return "Must Have"
+        case 2: return "Should Have"
+        case 3: return "Could Have"
         default: return "Low Priority"
         }
     }
 
     private func tabName(for tab: CardTab) -> String {
-        if tab == .subtasks, let count = meta?.subtasks?.count {
+        if tab == .subtasks, let count = meta?.subtasks?.count, count > 0 {
             return "Subtasks (\(count))"
         }
         return tab.rawValue
@@ -240,20 +656,20 @@ fileprivate struct JobCardPreview: View {
     @ViewBuilder
     private func cardBody(_ m: JobCardMeta) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            
-            // Header: Checkbox + Title
+
+            // Header: Glyph + Title
             HStack(alignment: .top, spacing: 16) {
                 Text(m.glyph ?? "🂠")
                     .font(glyphFont(for: m.glyph ?? "🂠"))
                     .fixedSize()
                     .offset(y: -36)
-                
+
                 VStack(alignment: .leading, spacing: 10) {
                     Text(displayTitle)
                         .font(.system(size: 22, weight: .bold))
                         .foregroundColor(.textPrimary)
                         .lineLimit(2)
-                    
+
                     HStack(spacing: 12) {
                         Text(m.id)
                             .font(.system(size: 13, design: .monospaced))
@@ -261,12 +677,13 @@ fileprivate struct JobCardPreview: View {
                             .padding(.horizontal, 8).padding(.vertical, 4)
                             .background(Color.black.opacity(0.3))
                             .clipShape(RoundedRectangle(cornerRadius: 4))
-                        
-                        Text(m.stage.capitalized)
+
+                        Text(displayStageName(m.stage))
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(.stageActive)
-                        
-                        if let prog = m.progress {
+
+                        let headerProgress: Int? = isRoadmapWorkflow ? inferredRoadmapProgress(m) : m.progress
+                        if let prog = headerProgress {
                             Text("\(prog)%")
                                 .font(.system(size: 13, weight: .bold))
                                 .foregroundColor(.textPrimary)
@@ -277,9 +694,9 @@ fileprivate struct JobCardPreview: View {
             .padding(.horizontal, 24)
             .padding(.top, 24)
             .padding(.bottom, 20)
-            
+
             // Progress Bar
-            let prog = m.progress ?? 0
+            let prog = isRoadmapWorkflow ? inferredRoadmapProgress(m) : (m.progress ?? 0)
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Rectangle().fill(Color.barEmpty)
@@ -291,7 +708,7 @@ fileprivate struct JobCardPreview: View {
             .frame(height: 4)
             .padding(.horizontal, 24)
             .padding(.bottom, 20)
-            
+
             // Tabs
             HStack(spacing: 24) {
                 ForEach(CardTab.allCases, id: \.self) { tab in
@@ -311,9 +728,9 @@ fileprivate struct JobCardPreview: View {
                 Spacer()
             }
             .padding(.horizontal, 24)
-            
+
             Divider().background(Color.cardBorder)
-            
+
             // Tab Content
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
@@ -323,16 +740,16 @@ fileprivate struct JobCardPreview: View {
                     case .subtasks:
                         subtasksTab(m)
                     case .logs:
-                        logsTab(m.id)
+                        logsTab()
                     case .files:
                         filesTab()
                     }
                 }
                 .padding(24)
             }
-            
+
             Divider().background(Color.cardBorder)
-            
+
             // Footer
             HStack(spacing: 8) {
                 Image(systemName: "clock")
@@ -341,16 +758,15 @@ fileprivate struct JobCardPreview: View {
                 Text("Created \(relativeTime(m.created))")
                     .font(.system(size: 13))
                     .foregroundColor(.textMuted)
-                
+
                 Spacer()
-                
-                if !logs.isEmpty,
-                   let tailURL = URL(string: "bop://card/\(m.id)/logs") {
-                    Link(destination: tailURL) {
+
+                if let logsURL {
+                    Link(destination: logsURL) {
                         HStack(spacing: 6) {
                             Image(systemName: "scroll")
                                 .font(.system(size: 11))
-                            Text("Tail")
+                            Text(logsButtonText)
                                 .font(.system(size: 13, weight: .bold))
                         }
                         .foregroundColor(.tailText)
@@ -359,7 +775,7 @@ fileprivate struct JobCardPreview: View {
                         .background(Color.tailBg)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
-                    .help("Live tail: bop logs \(m.id) --follow")
+                    .help(logsHelpText)
                 }
                 if isRunning, let session = m.zellijSession,
                    let url = URL(string: "bop://card/\(m.id)/session") {
@@ -379,17 +795,21 @@ fileprivate struct JobCardPreview: View {
                     .help("Attach to zellij session: \(session)")
                 }
                 if isRunning {
-                    HStack(spacing: 6) {
-                        Image(systemName: "square.fill")
-                            .font(.system(size: 11))
-                        Text("Stop")
-                            .font(.system(size: 13, weight: .bold))
+                    if let stopURL {
+                        Link(destination: stopURL) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "square")
+                                    .font(.system(size: 11))
+                                Text("Stop")
+                                    .font(.system(size: 13, weight: .bold))
+                            }
+                            .foregroundColor(.stopText)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.stopBg)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
                     }
-                    .foregroundColor(.stopText)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.stopBg)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
             }
             .padding(.horizontal, 24)
@@ -402,11 +822,18 @@ fileprivate struct JobCardPreview: View {
         )
         .padding(16)
     }
-    
+
     @ViewBuilder
     private func overviewTab(_ m: JobCardMeta) -> some View {
         VStack(alignment: .leading, spacing: 24) {
-            // Labels & Priority
+            // Labels & Priority — separate phase/complexity/impact for visual grouping
+            let phaseLabels = m.labels?.filter { $0.kind == "phase" } ?? []
+            let metricLabels = m.labels?.filter { $0.kind == "complexity" || $0.kind == "impact" } ?? []
+            let otherLabels = m.labels?.filter { l in
+                l.kind != "priority" && l.kind != "phase" && l.kind != "complexity" && l.kind != "impact"
+            } ?? []
+
+            // Priority + phase row
             HStack(spacing: 12) {
                 if let priority = m.priority {
                     Text(priorityText(priority))
@@ -417,27 +844,104 @@ fileprivate struct JobCardPreview: View {
                         .clipShape(Capsule())
                         .overlay(Capsule().stroke(Color.pillGold.opacity(0.4), lineWidth: 1))
                 }
-                
-                if let labels = m.labels?.filter({ $0.kind != "priority" }), !labels.isEmpty {
-                    ForEach(labels, id: \.name) { LabelPill(label: $0) }
+                ForEach(phaseLabels, id: \.name) { LabelPill(label: $0) }
+            }
+
+            // Complexity + Impact row (if present)
+            if !metricLabels.isEmpty {
+                HStack(spacing: 12) {
+                    ForEach(metricLabels, id: \.name) { LabelPill(label: $0) }
                 }
             }
-            
+
+            // Other labels
+            if !otherLabels.isEmpty {
+                HStack(spacing: 12) {
+                    ForEach(otherLabels, id: \.name) { LabelPill(label: $0) }
+                }
+            }
+
             if let desc = m.description {
                 Text(desc)
                     .font(.system(size: 15))
                     .foregroundColor(.textSecondary)
                     .lineSpacing(4)
             }
-            
-            StagePipeline(currentStage: m.stage, stages: m.stages)
-            
+
+            // Rationale from spec.md
+            if let rationale = specSections?.rationale, !rationale.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "lightbulb.fill")
+                            .font(.system(size: 13))
+                            .foregroundColor(.pillGold)
+                        Text("RATIONALE")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.textMuted)
+                    }
+                    Text(rationale)
+                        .font(.system(size: 14))
+                        .foregroundColor(.textSecondary)
+                        .lineSpacing(3)
+                }
+                .padding()
+                .background(Color.black.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.pillGold.opacity(0.2), lineWidth: 1)
+                )
+            }
+
+            // Dependencies from spec.md
+            if let deps = specSections?.dependencies, !deps.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "link")
+                            .font(.system(size: 13))
+                            .foregroundColor(.pillTeal)
+                        Text("DEPENDENCIES")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.textMuted)
+                    }
+                    ForEach(deps, id: \.self) { dep in
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.right.circle")
+                                .font(.system(size: 12))
+                                .foregroundColor(.pillTeal)
+                            Text(dep)
+                                .font(.system(size: 13, design: .monospaced))
+                                .foregroundColor(.textSecondary)
+                        }
+                    }
+                }
+                .padding()
+                .background(Color.black.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+
+            // Roadmap status panel (for roadmap workflow cards)
+            if isRoadmapWorkflow {
+                roadmapStatusPanel(m)
+            } else {
+                StagePipeline(
+                    currentStage: m.stage,
+                    stages: m.stages,
+                    displayStages: displayStageOrder(for: m)
+                )
+            }
+
+            // Roadmap snapshot summary (feature counts)
+            if let snap = roadmapSnapshot, snap.featureCount > 0 {
+                roadmapSnapshotPanel(snap)
+            }
+
             if let criteria = m.acceptanceCriteria, !criteria.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("ACCEPTANCE CRITERIA")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(.textMuted)
-                    
+
                     ForEach(criteria, id: \.self) { c in
                         HStack(alignment: .top, spacing: 10) {
                             Image(systemName: "checkmark.circle")
@@ -456,7 +960,169 @@ fileprivate struct JobCardPreview: View {
             }
         }
     }
-    
+
+    @ViewBuilder
+    private func roadmapStatusPanel(_ m: JobCardMeta) -> some View {
+        let progress = inferredRoadmapProgress(m)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: roadmapStatusIcon(m))
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundColor(.stagePending)
+                    .frame(width: 52, height: 52)
+                    .background(Color.pillPurpleBg.opacity(0.7))
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(roadmapStatusTitle(m))
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(.textPrimary)
+                    Text(roadmapStatusSubtitle(m))
+                        .font(.system(size: 14))
+                        .foregroundColor(.textSecondary)
+                    if let activeTool {
+                        Text("[Tool: \(activeTool)]")
+                            .font(.system(size: 13, design: .monospaced))
+                            .foregroundColor(.stagePending)
+                    }
+                }
+
+                Spacer()
+                if let stopURL {
+                    Link(destination: stopURL) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "square")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("Stop")
+                                .font(.system(size: 13, weight: .bold))
+                        }
+                        .foregroundColor(.stopText)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.stopBg)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                }
+            }
+
+            HStack(spacing: 8) {
+                Text("Progress")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.textSecondary)
+                Image(systemName: "clock")
+                    .font(.system(size: 12))
+                    .foregroundColor(.stagePending)
+                Text(elapsedTimeText(m))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.textSecondary)
+                Text("·")
+                    .foregroundColor(.textMuted)
+                Text("last activity \(lastActivityText())")
+                    .font(.system(size: 13))
+                    .foregroundColor(.stagePending)
+                Spacer()
+                Circle()
+                    .fill(Color.stagePending)
+                    .frame(width: 10, height: 10)
+                Text("Processing")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.stagePending)
+                Text("\(progress)%")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.textPrimary)
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(Color.barEmpty)
+                    Rectangle()
+                        .fill(Color.barFill)
+                        .frame(width: max(0, geo.size.width * CGFloat(progress) / 100))
+                }
+            }
+            .frame(height: 6)
+
+            StagePipeline(
+                currentStage: m.stage,
+                stages: m.stages,
+                displayStages: displayStageOrder(for: m)
+            )
+        }
+        .padding(16)
+        .background(Color.black.opacity(0.18))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.cardBorder.opacity(0.6), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func roadmapSnapshotPanel(_ snap: RoadmapSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "chart.bar.fill")
+                    .font(.system(size: 13))
+                    .foregroundColor(.pillPurple)
+                Text("ROADMAP SUMMARY")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.textMuted)
+                Spacer()
+                Text("\(snap.featureCount) features")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.textSecondary)
+                if snap.phaseCount > 0 {
+                    Text("· \(snap.phaseCount) phases")
+                        .font(.system(size: 13))
+                        .foregroundColor(.textMuted)
+                }
+            }
+
+            // Priority breakdown
+            if !snap.priorityCounts.isEmpty {
+                HStack(spacing: 16) {
+                    if let must = snap.priorityCounts["must"], must > 0 {
+                        metricBadge("Must Have", count: must, color: .pillGold)
+                    }
+                    if let should = snap.priorityCounts["should"], should > 0 {
+                        metricBadge("Should Have", count: should, color: .pillPurple)
+                    }
+                    if let could = snap.priorityCounts["could"], could > 0 {
+                        metricBadge("Could Have", count: could, color: .textMuted)
+                    }
+                }
+            }
+
+            // Status breakdown
+            if !snap.statusCounts.isEmpty {
+                HStack(spacing: 16) {
+                    ForEach(["under_review", "planned", "in_progress", "done"], id: \.self) { key in
+                        if let count = snap.statusCounts[key], count > 0 {
+                            let display = stageDisplayName(key)
+                            let color: Color = key == "done" ? .stageActive : .stagePending
+                            metricBadge(display, count: count, color: color)
+                        }
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(Color.black.opacity(0.15))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private func metricBadge(_ label: String, count: Int, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Text("\(count)")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(color)
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundColor(.textMuted)
+        }
+    }
+
     @ViewBuilder
     private func subtasksTab(_ m: JobCardMeta) -> some View {
         if let subs = m.subtasks, !subs.isEmpty {
@@ -471,31 +1137,30 @@ fileprivate struct JobCardPreview: View {
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(.textSecondary)
                 }
-                
+
+                // Show user stories with a distinct prefix
                 ForEach(Array(subs.enumerated()), id: \.offset) { idx, st in
+                    let isUserStory = st.id.hasPrefix("us-")
                     HStack(alignment: .top, spacing: 16) {
                         Image(systemName: st.done ? "checkmark.circle.fill" : "circle")
                             .foregroundColor(st.done ? .stageActive : .textMuted)
                             .font(.system(size: 18))
-                        
+
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Text("#\(idx + 1)")
+                                Text(isUserStory ? "Story" : "#\(idx + 1)")
                                     .font(.system(size: 12, weight: .bold))
-                                    .foregroundColor(.pillPurple)
+                                    .foregroundColor(isUserStory ? .pillTeal : .pillPurple)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
-                                    .background(Color.pillPurpleBg)
+                                    .background(isUserStory ? Color.pillTealBg : Color.pillPurpleBg)
                                     .clipShape(Capsule())
-                                
+
                                 Text(st.title)
                                     .font(.system(size: 15, weight: .medium))
                                     .foregroundColor(st.done ? .textSecondary : .textPrimary)
+                                    .lineLimit(3)
                             }
-                            
-                            Text(st.title)
-                                .font(.system(size: 13))
-                                .foregroundColor(.textMuted)
                         }
                     }
                     .padding()
@@ -509,9 +1174,9 @@ fileprivate struct JobCardPreview: View {
                 .foregroundColor(.textMuted)
         }
     }
-    
+
     @ViewBuilder
-    private func logsTab(_ id: String) -> some View {
+    private func logsTab() -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if !logs.isEmpty {
                 Text(logs)
@@ -525,22 +1190,23 @@ fileprivate struct JobCardPreview: View {
                 Text("No logs yet.")
                     .foregroundColor(.textMuted)
             }
-            if let tailURL = URL(string: "bop://card/\(id)/logs") {
-                Link(destination: tailURL) {
+            if let logsURL = logsURL {
+                Link(destination: logsURL) {
                     HStack(spacing: 6) {
                         Image(systemName: "scroll").font(.system(size: 12))
-                        Text("Open live tail →").font(.system(size: 13, weight: .medium))
+                        Text(isDoneLike ? "Open logs →" : "Open live tail →")
+                            .font(.system(size: 13, weight: .medium))
                     }
                     .foregroundColor(.tailText)
                     .padding(.horizontal, 14).padding(.vertical, 7)
                     .background(Color.tailBg)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
-                .help("bop logs \(id) --follow")
+                .help(logsHelpText)
             }
         }
     }
-    
+
     @ViewBuilder
     private func filesTab() -> some View {
         if !bundleFiles.isEmpty {
@@ -551,11 +1217,11 @@ fileprivate struct JobCardPreview: View {
                             .foregroundColor(.pillPurple)
                             .font(.system(size: 16))
                             .frame(width: 20)
-                        
+
                         Text(file)
                             .font(.system(size: 14, design: .monospaced))
                             .foregroundColor(.textPrimary)
-                        
+
                         Spacer()
                     }
                     .padding(.vertical, 8)
@@ -569,7 +1235,7 @@ fileprivate struct JobCardPreview: View {
                 .foregroundColor(.textMuted)
         }
     }
-    
+
     private func fileIcon(for name: String) -> String {
         if name.hasSuffix(".md") { return "doc.text" }
         if name.hasSuffix(".json") { return "curlybraces" }
@@ -611,12 +1277,45 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         }
 
         var logs = ""
-        let logUrl = url.appendingPathComponent("logs/stdout.log")
-        if let data = try? Data(contentsOf: logUrl),
+        var combinedLogs = ""
+        var lastActivityAt: Date?
+        let stdoutUrl = url.appendingPathComponent("logs/stdout.log")
+        let stderrUrl = url.appendingPathComponent("logs/stderr.log")
+
+        if let data = try? Data(contentsOf: stdoutUrl),
            let text = String(data: data, encoding: .utf8) {
             logs = text.components(separatedBy: .newlines).suffix(100)
                 .joined(separator: "\n")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
+            combinedLogs += text
+        }
+        if let data = try? Data(contentsOf: stderrUrl),
+           let text = String(data: data, encoding: .utf8) {
+            combinedLogs += "\n" + text
+        }
+
+        let fm = FileManager.default
+        for logPath in [stdoutUrl.path, stderrUrl.path] {
+            if let attrs = try? fm.attributesOfItem(atPath: logPath),
+               let mod = attrs[.modificationDate] as? Date {
+                if let curr = lastActivityAt {
+                    if mod > curr { lastActivityAt = mod }
+                } else {
+                    lastActivityAt = mod
+                }
+            }
+        }
+        let activeTool = detectToolTag(in: combinedLogs)
+
+        // Parse roadmap snapshot (output/roadmap.json)
+        let roadmapSnapshot = parseRoadmapSnapshot(from: url)
+
+        // Parse spec.md for rationale, user stories, dependencies sections
+        var specSections: SpecSections?
+        let specUrl = url.appendingPathComponent("spec.md")
+        if let specData = try? Data(contentsOf: specUrl),
+           let specText = String(data: specData, encoding: .utf8) {
+            specSections = parseSpecSections(specText)
         }
 
         // Enumerate bundle files (top-level only, skip logs/ and output/ dirs)
@@ -628,7 +1327,16 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         }
 
         DispatchQueue.main.async {
-            self.hostingView.rootView = JobCardPreview(url: url, meta: meta, logs: logs, bundleFiles: bundleFiles)
+            self.hostingView.rootView = JobCardPreview(
+                url: url,
+                meta: meta,
+                logs: logs,
+                bundleFiles: bundleFiles,
+                lastActivityAt: lastActivityAt,
+                activeTool: activeTool,
+                roadmapSnapshot: roadmapSnapshot,
+                specSections: specSections
+            )
             self.preferredContentSize = NSSize(width: 820, height: 720)
             handler(nil)
         }

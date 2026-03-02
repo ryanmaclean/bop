@@ -24,35 +24,95 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         for url in urls { handleBopURL(url) }
     }
 
+    private struct SessionMeta: Decodable {
+        let zellijSession: String?
+        enum CodingKeys: String, CodingKey {
+            case zellijSession = "zellij_session"
+        }
+    }
+
+    private func cardRootCandidates() -> [URL] {
+        var roots: [URL] = []
+        let env = ProcessInfo.processInfo.environment
+        if let cards = env["BOP_CARDS_DIR"], !cards.isEmpty {
+            roots.append(URL(fileURLWithPath: cards))
+        }
+        roots.append(
+            FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("bop/.cards")
+        )
+        return roots.filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    private func findCardDirectory(id: String) -> URL? {
+        let suffix = "-\(id).jobcard"
+        let exact = "\(id).jobcard"
+        let fm = FileManager.default
+
+        for base in cardRootCandidates() {
+            for state in ["running", "pending", "done", "merged", "failed", "drafts"] {
+                let stateDir = base.appendingPathComponent(state)
+                let exactURL = stateDir.appendingPathComponent(exact)
+                if fm.fileExists(atPath: exactURL.path) {
+                    return exactURL
+                }
+                guard let entries = try? fm.contentsOfDirectory(
+                    at: stateDir,
+                    includingPropertiesForKeys: nil
+                ) else { continue }
+                if let match = entries.first(where: { $0.lastPathComponent.hasSuffix(suffix) }) {
+                    return match
+                }
+            }
+        }
+        return nil
+    }
+
+    private func resolveZellijSession(id: String) -> String? {
+        guard let cardDir = findCardDirectory(id: id) else { return nil }
+        let metaURL = cardDir.appendingPathComponent("meta.json")
+        guard
+            let data = try? Data(contentsOf: metaURL),
+            let meta = try? JSONDecoder().decode(SessionMeta.self, from: data),
+            let session = meta.zellijSession?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !session.isEmpty
+        else { return nil }
+        return session
+    }
+
+    private func shQuote(_ text: String) -> String {
+        let escaped = text.replacingOccurrences(of: "'", with: "'\"'\"'")
+        return "'\(escaped)'"
+    }
+
     private func handleBopURL(_ url: URL) {
-        // bop://card/<id>/session  → zellij attach bop-<id>
+        // bop://card/<id>/<action>
         guard url.scheme == "bop",
-              url.host == "card",
-              let id = url.pathComponents.dropFirst().first
+              url.host == "card"
         else { return }
 
-        let action = url.pathComponents.last ?? "session"
+        let parts = url.pathComponents.filter { $0 != "/" }
+        guard let rawID = parts.first else { return }
+        let id = rawID.removingPercentEncoding ?? rawID
+        let action = (parts.count >= 2 ? parts[1] : "session").lowercased()
+        let qid = shQuote(id)
 
         switch action {
         case "session":
-            let session = "bop-\(id)"
-            // Resumable: attach existing or create new
-            runInTerminal("zellij attach '\(session)' 2>/dev/null || zellij -s '\(session)'")
+            let session = resolveZellijSession(id: id) ?? "bop-\(id)"
+            let qsession = shQuote(session)
+            runInTerminal("zellij attach \(qsession) 2>/dev/null || zellij -s \(qsession)")
+        case "tail":
+            runInTerminal("bop logs \(qid) --follow")
         case "logs":
-            runInTerminal("bop logs \(id) --follow")
+            runInTerminal("bop logs \(qid)")
+        case "stop":
+            runInTerminal("bop kill \(qid)")
         case "spec":
-            // Open spec.md from the card in the default editor
-            let candidates = [
-                FileManager.default.homeDirectoryForCurrentUser
-                    .appendingPathComponent("bop/.cards"),
-            ]
-            for base in candidates {
-                for state in ["running", "pending", "done", "merged", "failed"] {
-                    let spec = base.appendingPathComponent("\(state)/\(id).jobcard/spec.md")
-                    if FileManager.default.fileExists(atPath: spec.path) {
-                        NSWorkspace.shared.open(spec)
-                        return
-                    }
+            if let cardDir = findCardDirectory(id: id) {
+                let spec = cardDir.appendingPathComponent("spec.md")
+                if FileManager.default.fileExists(atPath: spec.path) {
+                    NSWorkspace.shared.open(spec)
                 }
             }
         default:

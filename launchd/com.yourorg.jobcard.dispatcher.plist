@@ -33,9 +33,16 @@
   
   <key>KeepAlive</key>
   <true/>
-  
+
   <key>RunAtLoad</key>
   <true/>
+
+  <!-- Wake dispatcher immediately when cards land in pending/ or drafts/ -->
+  <key>WatchPaths</key>
+  <array>
+    <string>REPLACE_WITH_REPO_ROOT/.cards/pending</string>
+    <string>REPLACE_WITH_REPO_ROOT/.cards/drafts</string>
+  </array>
   
   <key>StandardOutPath</key>
   <string>/tmp/jobcard-dispatcher.log</string>
