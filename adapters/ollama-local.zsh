@@ -118,22 +118,24 @@ ELAPSED=$(( SECONDS - START_S ))
 python3 -c "
 import json, sys, datetime
 d = json.load(sys.stdin)
+eval_dur = d.get('eval_duration', 0)          # nanoseconds for completion tokens
+eval_cnt = d.get('eval_count', 0)
+toks_per_s = round(eval_cnt / (eval_dur / 1e9), 1) if eval_dur > 0 else None
 stats = {
     'model':             sys.argv[1],
     'provider':          'ollama',
     'prompt_tokens':     d.get('prompt_eval_count', 0),
-    'completion_tokens': d.get('eval_count', 0),
+    'completion_tokens': eval_cnt,
+    'toks_per_s':        toks_per_s,
     'total_duration_ns': d.get('total_duration', 0),
+    'load_duration_ns':  d.get('load_duration', 0),
     'elapsed_s':         int(sys.argv[2]),
     'done':              d.get('done', False),
     'done_reason':       d.get('done_reason', ''),
     'timestamp':         datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z'),
 }
 print(json.dumps(stats, indent=2))
-" "$MODEL" "$ELAPSED" <<< "$RESPONSE" > "$STATS_LOG"
-
-python3 -c "
-import json
-s = json.load(open('$STATS_LOG'))
-print(f\"[ollama] done. prompt_tokens={s['prompt_tokens']} completion_tokens={s['completion_tokens']}\")
-" >> "$stderr_log" 2>/dev/null || print -r "[ollama] done." >> "$stderr_log"
+tps = f\"{toks_per_s} tok/s\" if toks_per_s else \"\"
+print(f\"[ollama] done. prompt={stats['prompt_tokens']} completion={eval_cnt} {tps}\", file=sys.stderr)
+" "$MODEL" "$ELAPSED" <<< "$RESPONSE" > "$STATS_LOG" 2>> "$stderr_log" \
+  || print -r "[ollama] done (stats error)." >> "$stderr_log"
