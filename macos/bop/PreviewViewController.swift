@@ -232,9 +232,9 @@ fileprivate struct JobCardPreview: View {
             // Header: Checkbox + Title
             HStack(alignment: .top, spacing: 16) {
                 Text(m.glyph ?? "🂠")
-                    .font(.system(size: 72))
+                    .font(.system(size: 108))
                     .fixedSize()
-                    .padding(.top, 2)
+                    .offset(y: -36)
                 
                 VStack(alignment: .leading, spacing: 10) {
                     Text(displayTitle)
@@ -617,7 +617,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
         DispatchQueue.main.async {
             self.hostingView.rootView = JobCardPreview(url: url, meta: meta, logs: logs, bundleFiles: bundleFiles)
-            self.preferredContentSize = NSSize(width: 1100, height: 900)
+            self.preferredContentSize = NSSize(width: 820, height: 720)
             handler(nil)
         }
     }
