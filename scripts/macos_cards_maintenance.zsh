@@ -5,6 +5,7 @@ setopt NULL_GLOB
 ROOT=${0:A:h:h}
 CARDS_ROOT="${ROOT}/.cards"
 RENDER_SWIFT="${ROOT}/scripts/render_card_thumbnail.swift"
+ICON_SWIFT="${ROOT}/scripts/set_card_icon.swift"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "macos_cards_maintenance: Darwin only" >&2

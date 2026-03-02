@@ -1,58 +1,42 @@
-# JobCard Launchd Services
+# bop Factory — launchd Services
 
-This directory contains launchd plist files for running JobCard services as background processes on macOS.
+> **Preferred method:** Use `bop factory install` instead of manually copying plists.
 
-## Installation
+## Quick Start
 
-1. Copy the plist files to `~/Library/LaunchAgents/`:
-```bash
-cp com.yourorg.jobcard.dispatcher.plist ~/Library/LaunchAgents/
-cp com.yourorg.jobcard.merge-gate.plist ~/Library/LaunchAgents/
+```zsh
+bop factory install   # generates plists from repo root, loads both services
+bop factory status    # check if dispatcher + merge-gate are running
+bop factory stop      # stop both services
+bop factory start     # restart both services
+bop factory uninstall # unload + remove plist files
 ```
 
-2. Load the services:
-```bash
-launchctl load ~/Library/LaunchAgents/com.yourorg.jobcard.dispatcher.plist
-launchctl load ~/Library/LaunchAgents/com.yourorg.jobcard.merge-gate.plist
-```
+## What It Does
 
-## Management
+`bop factory install` generates two launchd user agents:
 
-### Start services:
-```bash
-launchctl start com.yourorg.jobcard.dispatcher
-launchctl start com.yourorg.jobcard.merge-gate
-```
+| Label | Service |
+|-------|---------|
+| `sh.bop.dispatcher` | Polls `.cards/pending/`, dispatches agents |
+| `sh.bop.merge-gate` | Polls `.cards/done/`, runs acceptance criteria |
 
-### Stop services:
-```bash
-launchctl stop com.yourorg.jobcard.dispatcher
-launchctl stop com.yourorg.jobcard.merge-gate
-```
-
-### Unload services:
-```bash
-launchctl unload ~/Library/LaunchAgents/com.yourorg.jobcard.dispatcher.plist
-launchctl unload ~/Library/LaunchAgents/com.yourorg.jobcard.merge-gate.plist
-```
-
-### Check status:
-```bash
-launchctl list | grep jobcard
-```
+Plists are written to `~/Library/LaunchAgents/` with:
+- Correct `WorkingDirectory` (auto-detected from repo root)
+- Correct `CARDS_DIR` environment variable
+- PATH including `~/.cargo/bin` for Rust toolchain
+- Log files at `/tmp/bop-dispatcher.{log,err}` and `/tmp/bop-merge-gate.{log,err}`
 
 ## Logs
 
-- Dispatcher logs: `/tmp/jobcard-dispatcher.log`
-- Dispatcher errors: `/tmp/jobcard-dispatcher.err`
-- Merge gate logs: `/tmp/jobcard-merge-gate.log`
-- Merge gate errors: `/tmp/jobcard-merge-gate.err`
+```zsh
+tail -f /tmp/bop-dispatcher.log   # dispatcher stdout
+tail -f /tmp/bop-dispatcher.err   # dispatcher stderr
+tail -f /tmp/bop-merge-gate.log   # merge-gate stdout
+tail -f /tmp/bop-merge-gate.err   # merge-gate stderr
+```
 
-## Configuration
+## Legacy Plists
 
-The plist files assume:
-- JobCard binary is installed at `/usr/local/bin/bop`
-- Working directory is `/Users/studio/gtfs`
-- Cards directory is `/Users/studio/gtfs/.cards`
-
-Update these paths in the plist files if your installation differs.
+The `.plist` files in this directory are **deprecated reference copies**.
+Use `bop factory install` which generates correct plists dynamically.

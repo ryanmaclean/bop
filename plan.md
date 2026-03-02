@@ -112,9 +112,9 @@ No agent invents a new workflow when this loop already works.
 
 ---
 
-## 7) The Bridge (LANDED 2026-03-01)
+## 7) The Bridge (ALL LANDED 2026-03-01)
 
-These gaps between the two agents' work have been implemented.
+All gaps between the two agents' work have been implemented. §7a–7f complete.
 
 ### 7a) Meta struct factory fields ✅
 
@@ -174,12 +174,13 @@ pipeline config, and prior stage output. **Status:** DONE.
 aider, opencode), stages/ directory, templates/ count, system_context.md, zellij.
 **Status:** DONE.
 
-### 7f) bop factory launchd lifecycle (REMAINING)
+### 7f) bop factory launchd lifecycle ✅
 
-Old plists in `launchd/` have wrong paths. Build `bop factory install/start/stop/status/uninstall`
-that generates plists from repo root with labels `sh.bop.dispatcher`, `sh.bop.merge-gate`.
+`bop factory install/start/stop/status/uninstall` generates plists dynamically
+from repo root with labels `sh.bop.dispatcher`, `sh.bop.merge-gate`. Includes
+PATH with `~/.cargo/bin`, correct CARDS_DIR, and log paths at `/tmp/bop-*.log`.
 
-**Effort:** Medium. **Files:** `main.rs`, `launchd/`. **Status:** NOT STARTED.
+**Effort:** Medium. **Files:** `main.rs`, `launchd/README.md`. **Status:** DONE.
 
 ---
 
