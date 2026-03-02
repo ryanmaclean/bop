@@ -15,5 +15,19 @@
     }
   },
   "worktree_branch": "job/ideation-session",
-  "retry_count": 0
+  "retry_count": 0,
+  "stage_chain": [
+    "implement"
+  ],
+  "stage_models": {
+    "implement": "llama3"
+  },
+  "stage_providers": {
+    "implement": "ollama-local"
+  },
+  "stage_budgets": {
+    "implement": 32000
+  },
+  "token": "\u2660",
+  "glyph": "\ud83c\udcab"
 }

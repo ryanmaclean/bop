@@ -8,7 +8,7 @@
   "token": null,
   "stage_chain": ["implement"],
   "stage_models": {
-    "implement": "local"
+    "implement": "ollama-local"
   },
   "stage_providers": {
     "implement": "ollama-local"

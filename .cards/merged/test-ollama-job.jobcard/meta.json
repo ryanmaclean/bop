@@ -15,5 +15,19 @@
     }
   },
   "worktree_branch": "job/test-ollama-job",
-  "retry_count": 0
+  "retry_count": 0,
+  "stage_chain": [
+    "implement"
+  ],
+  "stage_models": {
+    "implement": "mock"
+  },
+  "stage_providers": {
+    "implement": "mock"
+  },
+  "stage_budgets": {
+    "implement": 32000
+  },
+  "token": "\u2660",
+  "glyph": "\ud83c\udcab"
 }

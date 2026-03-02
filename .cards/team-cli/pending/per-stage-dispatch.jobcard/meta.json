@@ -1,9 +1,9 @@
 {
   "id": "per-stage-dispatch",
   "created": "2026-03-01T00:00:00Z",
-  "glyph": "🂫",
+  "glyph": "\ud83c\udcab",
   "title": "Per-stage dispatch: spec, plan, implement, qa as separate agent runs",
-  "description": "Currently all stages run inside one agent invocation. Split so each stage is a separate dispatch with optional human review gate between spec→plan.",
+  "description": "Currently all stages run inside one agent invocation. Split so each stage is a separate dispatch with optional human review gate between spec\u2192plan.",
   "labels": [
     {
       "name": "Dispatcher",
@@ -34,7 +34,7 @@
     },
     {
       "id": "test",
-      "title": "Card progresses spec→plan→implement→qa with 4 dispatches",
+      "title": "Card progresses spec\u2192plan\u2192implement\u2192qa with 4 dispatches",
       "done": false
     }
   ],
@@ -65,5 +65,30 @@
   "provider_chain": [
     "claude"
   ],
-  "retry_count": 0
+  "retry_count": 0,
+  "stage_chain": [
+    "spec",
+    "plan",
+    "implement",
+    "qa"
+  ],
+  "stage_models": {
+    "spec": "opus",
+    "plan": "opus",
+    "implement": "opus",
+    "qa": "opus"
+  },
+  "stage_providers": {
+    "spec": "claude",
+    "plan": "claude",
+    "implement": "claude",
+    "qa": "claude"
+  },
+  "stage_budgets": {
+    "spec": 32000,
+    "plan": 32000,
+    "implement": 32000,
+    "qa": 32000
+  },
+  "token": "\u2660"
 }

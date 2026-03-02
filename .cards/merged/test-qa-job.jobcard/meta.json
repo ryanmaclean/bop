@@ -15,10 +15,24 @@
     }
   },
   "acceptance_criteria": [
-    "cd /Users/studio/gtfs && make test",
-    "cd /Users/studio/gtfs && cargo clippy -- -D warnings"
+    "cargo test",
+    "cargo clippy -- -D warnings"
   ],
   "worktree_branch": "job/test-qa-job",
   "retry_count": 0,
-  "failure_reason": "acceptance_criteria_failed"
+  "failure_reason": "acceptance_criteria_failed",
+  "stage_chain": [
+    "qa"
+  ],
+  "stage_models": {
+    "qa": "mock"
+  },
+  "stage_providers": {
+    "qa": "mock"
+  },
+  "stage_budgets": {
+    "qa": 32000
+  },
+  "token": "\u2660",
+  "glyph": "\ud83c\udcab"
 }

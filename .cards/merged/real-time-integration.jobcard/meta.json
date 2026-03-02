@@ -15,9 +15,23 @@
     }
   },
   "acceptance_criteria": [
-    "cd /Users/studio/gtfs && make test",
-    "cd /Users/studio/gtfs && cargo clippy -- -D warnings"
+    "cargo test",
+    "cargo clippy -- -D warnings"
   ],
   "worktree_branch": "job/real-time-integration",
-  "retry_count": 0
+  "retry_count": 0,
+  "stage_chain": [
+    "implement"
+  ],
+  "stage_models": {
+    "implement": "opus"
+  },
+  "stage_providers": {
+    "implement": "claude"
+  },
+  "stage_budgets": {
+    "implement": 32000
+  },
+  "token": "\u2660",
+  "glyph": "\ud83c\udcab"
 }

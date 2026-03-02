@@ -15,5 +15,19 @@
     }
   },
   "worktree_branch": "job/portable-test",
-  "retry_count": 0
+  "retry_count": 0,
+  "stage_chain": [
+    "implement"
+  ],
+  "stage_models": {
+    "implement": "opus"
+  },
+  "stage_providers": {
+    "implement": "claude"
+  },
+  "stage_budgets": {
+    "implement": 32000
+  },
+  "token": "\u2660",
+  "glyph": "\ud83c\udcab"
 }

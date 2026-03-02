@@ -1,8 +1,8 @@
 {
   "id": "jobcard-spec-v1",
   "created": "2026-03-01T00:00:00Z",
-  "glyph": "🂱",
-  "title": "Write jobcard-spec-v1.md — the format spec",
+  "glyph": "\ud83c\udcb1",
+  "title": "Write jobcard-spec-v1.md \u2014 the format spec",
   "description": "Like Apache Iceberg defines a table format, this defines the jobcard format. Any agent/tool that can write JSON + directories can produce or consume cards without the CLI.",
   "labels": [
     {
@@ -76,5 +76,30 @@
   "provider_chain": [
     "claude"
   ],
-  "retry_count": 0
+  "retry_count": 0,
+  "stage_chain": [
+    "spec",
+    "plan",
+    "implement",
+    "qa"
+  ],
+  "stage_models": {
+    "spec": "opus",
+    "plan": "opus",
+    "implement": "opus",
+    "qa": "opus"
+  },
+  "stage_providers": {
+    "spec": "claude",
+    "plan": "claude",
+    "implement": "claude",
+    "qa": "claude"
+  },
+  "stage_budgets": {
+    "spec": 32000,
+    "plan": 32000,
+    "implement": 32000,
+    "qa": 32000
+  },
+  "token": "\u2665"
 }
