@@ -68,6 +68,7 @@
   "workspace_name": "ws-macos-file-agent-workflow-1772431014581",
   "workspace_path": "/Users/studio/bop/.workspaces/ws-macos-file-agent-workflow-1772431014581",
   "change_ref": "@  lpnqqmrntwqn\n│\n~",
+  "policy_result": "pass",
   "retry_count": 0,
   "validation_summary": {
     "total": 0,

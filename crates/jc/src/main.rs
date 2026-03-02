@@ -3802,6 +3802,16 @@ async fn run_merge_gate(
 
                 let qa_log = card_dir.join("logs").join("qa.log");
 
+                // Heal stale working copy before running ACs — concurrent jj ops
+                // often leave workspaces stale, causing `jj log` to fail.
+                if matches!(vcs_engine, VcsEngine::Jj) {
+                    let _ = TokioCommand::new("jj")
+                        .args(["workspace", "update-stale"])
+                        .current_dir(&workdir)
+                        .output()
+                        .await;
+                }
+
                 let mut acceptance_ok = true;
                 let mut failed_criterion: Option<String> = None;
                 for criterion in meta.acceptance_criteria.iter() {
