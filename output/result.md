@@ -1,34 +1,46 @@
-# Token Cost in Inspect — Done
+# macOS File-Agent Workflow — Planning Card Done
 
 ## What was done
 
-Added a "Cost" summary line to `bop inspect` output.
+1. **Plan document** — `docs/plans/2026-03-01-macos-file-agent-workflow.md` exists
+   and is complete. Contains:
+   - Architecture diagram (event source → dispatcher → adapter → merge-gate)
+   - launchd service topology (`com.yourorg.bop.dispatcher` + `merge-gate`)
+   - Quick Look URL scheme routing (`jobcard://stop/<id>`, `jobcard://approve/<id>`)
+   - FSEvents primary path + 1s polling fallback
+   - SLOs (pickup <100ms, idle CPU <1%, control action median <1s)
+   - Phased rollout (4 phases with explicit acceptance gates)
 
-After the log tail sections, if `logs/stdout.log` exists and contains a JSON
-line with `usage` and `total_cost_usd`, it now prints:
+2. **Rename hardening** — audited all active execution paths:
+   - `.cards/team-arch/providers.json` — already repo-relative (`adapters/*.zsh`)
+   - `.cards/team-cli/providers.json` — already repo-relative
+   - `.cards/team-platform/providers.json` — already repo-relative
+   - `launchd/com.yourorg.jobcard.merge-gate.plist` — **fixed**: stale
+     `/Users/studio/gtfs/.cards` replaced with `REPLACE_WITH_REPO_ROOT/.cards`
 
-```
-Cost  $0.73  |  cache_read 623k  cache_create 55k  output 2.7k  |  13 turns
-```
+3. **Acceptance criteria** — all three pass from workspace root:
+   - `test -f docs/plans/...` ✓
+   - `rg -n "jobcard://...|FSEvents|launchd|fallback" ...` ✓ (all terms present)
+   - `! rg -n "/Users/studio/gtfs/adapters" .cards/team-*/providers.json` ✓ (no matches)
 
-## Implementation
+## Phased Next Actions
 
-Modified `crates/jc/src/main.rs`:
+**Phase 1 — Rename Integrity (complete for active configs)**
+- [x] Team provider configs use repo-relative adapter paths
+- [x] launchd plists use `REPLACE_WITH_REPO_ROOT` placeholder (not hardcoded paths)
+- [ ] `launchd/README.md` install script to substitute placeholder at deploy time
 
-- In `cmd_inspect`: scans `logs/stdout.log` lines in reverse for valid JSON
-  with a `usage` key, extracts `cache_read_input_tokens`,
-  `cache_creation_input_tokens`, `output_tokens`, `total_cost_usd`,
-  `num_turns` and prints them in the compact Cost line.
-- Added helper `fn fmt_tokens(n: u64) -> String` that formats token counts:
-  - ≥ 10k → `{n}k` (no decimal)
-  - 1k–10k → `{n:.1}k` (one decimal)
-  - < 1k → raw number
+**Phase 2 — Control Surface (next card)**
+- Implement `bop kill <id>` and `bop approve <id>` subcommands in `crates/jc/`
+- Add URL scheme handling in `JobCardHost.app` (`jobcard://` → shell dispatch)
+- QL preview: surface action links only when card is in `running/` state
 
-## Acceptance criteria
+**Phase 3 — Event Loop (after Phase 2)**
+- FSEvents integration in dispatcher (replace/augment polling loop)
+- Measure pickup latency on event path vs 1s poll
+- Validate idle CPU stays <1% with empty queue
 
-- `cargo build` ✓
-- `cargo clippy -- -D warnings` ✓
-- `./target/debug/bop inspect short-cli-flags 2>&1 | grep -qi 'cost'` ✓
-- `jj log -r 'main..@-' | grep -q .` ✓
-
-Committed as `lypsnumm` (feat: show token cost in bop inspect).
+**Phase 4 — Memory Injection (last)**
+- `.cards/memory/<namespace>.json` store
+- Prompt template `{{memory}}` substitution in `render_prompt`
+- TTL + stale-eviction semantics
