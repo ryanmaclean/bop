@@ -1627,65 +1627,73 @@ fn factory_status_one(label: &str, name: &str) {
 
 const ICONS_LABEL: &str = "sh.bop.iconwatcher";
 
-/// Run set_card_icon.swift on a single card dir (best-effort, silent on failure).
-fn set_card_icon(card_dir: &Path) {
+/// Run set_card_icon.swift on a single path (card bundle or state dir).
+fn set_card_icon(path: &Path) {
     if !cfg!(target_os = "macos") {
         return;
     }
-    if let Some(script) = find_repo_script(card_dir, "scripts/set_card_icon.swift") {
-        let _ = StdCommand::new("swift").arg(script).arg(card_dir).status();
+    if let Some(script) = find_repo_script(path, "scripts/set_card_icon.swift") {
+        let _ = StdCommand::new("swift").arg(script).arg(path).status();
     }
 }
 
-/// Batch: update icons for every .jobcard under .cards/.
+/// Stamp icons for all state dirs + cards within a single team root.
+fn sync_icons_in_root(team_root: &Path, n_cards: &mut usize, n_dirs: &mut usize) {
+    const STATES: &[&str] = &[
+        "pending",
+        "running",
+        "done",
+        "merged",
+        "failed",
+        "templates",
+    ];
+    for &state in STATES {
+        let dir = team_root.join(state);
+        if !dir.exists() {
+            continue;
+        }
+        // State directory itself gets an icon.
+        set_card_icon(&dir);
+        *n_dirs += 1;
+        // Each .jobcard inside gets an icon.
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("jobcard") && path.is_dir() {
+                    set_card_icon(&path);
+                    *n_cards += 1;
+                }
+            }
+        }
+    }
+}
+
+/// Batch: update icons for every state dir + .jobcard under .cards/.
 fn cmd_icons_sync(root: &Path) -> anyhow::Result<()> {
     if !cfg!(target_os = "macos") {
         println!("icons: macOS only");
         return Ok(());
     }
-    let mut n = 0usize;
-    for state in &["pending", "running", "done", "merged", "failed"] {
-        let dir = root.join(state);
-        if !dir.exists() {
-            continue;
-        }
-        for entry in fs::read_dir(&dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("jobcard") && path.is_dir() {
-                set_card_icon(&path);
-                n += 1;
-            }
-        }
-    }
-    // Also handle team-* subdirs
+    let mut n_cards = 0usize;
+    let mut n_dirs = 0usize;
+
+    // Top-level state dirs
+    sync_icons_in_root(root, &mut n_cards, &mut n_dirs);
+
+    // team-* subdirs
     for entry in fs::read_dir(root)? {
-        let entry = entry?;
-        let team = entry.path();
-        if !team.is_dir()
-            || !team
+        let team = entry?.path();
+        if team.is_dir()
+            && team
                 .file_name()
                 .and_then(|n| n.to_str())
                 .map(|n| n.starts_with("team-"))
                 .unwrap_or(false)
         {
-            continue;
-        }
-        for state in &["pending", "running", "done", "merged", "failed"] {
-            let dir = team.join(state);
-            if !dir.exists() {
-                continue;
-            }
-            for e in fs::read_dir(&dir)? {
-                let path = e?.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("jobcard") && path.is_dir() {
-                    set_card_icon(&path);
-                    n += 1;
-                }
-            }
+            sync_icons_in_root(&team, &mut n_cards, &mut n_dirs);
         }
     }
-    println!("✓ icons synced: {} cards", n);
+    println!("✓ icons synced: {} state dirs, {} cards", n_dirs, n_cards);
     Ok(())
 }
 
