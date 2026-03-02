@@ -1,3 +1,4 @@
+pub mod cardchars;
 pub mod config;
 pub mod realtime;
 pub mod worktree;
