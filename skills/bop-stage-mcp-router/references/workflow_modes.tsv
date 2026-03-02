@@ -3,6 +3,6 @@ default-feature	implement	implement,qa	implement	standard feature/fix flow
 full-spec	full	spec,plan,implement,qa	spec	for ambiguous or larger work
 ideation	ideation	ideation,qa	ideation	idea generation with QA sanity review
 roadmap	roadmap	roadmap,qa	roadmap	roadmap authoring + review
-pr-fix	pr-fix	implement,qa	implement	fix findings from GitHub PR review
-mr-fix	mr-fix	implement,qa	implement	fix findings from GitLab MR review
+pr-fix	pr-fix	pr-fix,qa	pr-fix	fix findings from GitHub PR review
+mr-fix	mr-fix	mr-fix,qa	mr-fix	fix findings from GitLab MR review
 qa-only	qa-only	qa	qa	review-only flow

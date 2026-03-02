@@ -68,7 +68,38 @@ pub struct Subtask {
     pub done: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+/// OpenLineage-style provenance for a single stage execution attempt.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct RunRecord {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub run_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub stage: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub model: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub adapter: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub started_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub outcome: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_s: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct Meta {
     pub id: String,
     pub created: DateTime<Utc>,
@@ -232,6 +263,10 @@ pub struct Meta {
     /// Max token budget per stage. Example: `{"implement": 32000, "qa": 8000}`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub stage_budgets: BTreeMap<String, u64>,
+
+    /// Execution provenance records (OpenLineage-style) for each run attempt.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runs: Vec<RunRecord>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -279,10 +314,7 @@ fn value_as_non_empty_string(v: Option<&Value>) -> Option<String> {
 }
 
 fn normalize_roadmap_status(raw: &str) -> Option<String> {
-    let key = raw
-        .trim()
-        .to_lowercase()
-        .replace(['-', ' '], "_");
+    let key = raw.trim().to_lowercase().replace(['-', ' '], "_");
     match key.as_str() {
         "under_review" | "review" | "underreview" => Some("under_review".to_string()),
         "planned" | "plan" => Some("planned".to_string()),
@@ -293,10 +325,7 @@ fn normalize_roadmap_status(raw: &str) -> Option<String> {
 }
 
 fn roadmap_priority_to_rank(raw: &str) -> Option<i64> {
-    let key = raw
-        .trim()
-        .to_lowercase()
-        .replace(['-', ' '], "_");
+    let key = raw.trim().to_lowercase().replace(['-', ' '], "_");
     match key.as_str() {
         "must" | "must_have" | "critical" => Some(1),
         "should" | "should_have" | "important" => Some(2),
@@ -510,6 +539,8 @@ pub struct PromptContext {
     pub card_dir: String,
     /// Concatenated output/result.md from all cards in `depends_on`.
     pub depends_output: String,
+    /// Contents of `.cards/CODEBASE.md` if present; empty otherwise.
+    pub codebase_index: String,
 }
 
 impl PromptContext {
@@ -523,13 +554,19 @@ impl PromptContext {
             meta.acceptance_criteria.join("\n")
         };
 
-        // Walk up from card_dir to find .cards/system_context.md and .cards/stages/
+        // Walk up from card_dir to find .cards/system_context.md, .cards/CODEBASE.md, and .cards/stages/
         let mut system_context = String::new();
         let mut stage_instructions = String::new();
+        let mut codebase_index = String::new();
         for ancestor in card_dir.ancestors() {
             if system_context.is_empty() {
                 if let Ok(sc) = fs::read_to_string(ancestor.join("system_context.md")) {
                     system_context = sc;
+                }
+            }
+            if codebase_index.is_empty() {
+                if let Ok(ci) = fs::read_to_string(ancestor.join("CODEBASE.md")) {
+                    codebase_index = ci;
                 }
             }
             if stage_instructions.is_empty() {
@@ -538,7 +575,7 @@ impl PromptContext {
                     stage_instructions = si;
                 }
             }
-            if !system_context.is_empty() && !stage_instructions.is_empty() {
+            if !system_context.is_empty() && !stage_instructions.is_empty() && !codebase_index.is_empty() {
                 break;
             }
         }
@@ -620,6 +657,7 @@ impl PromptContext {
             card_id: meta.id.clone(),
             card_dir: card_dir.to_string_lossy().into_owned(),
             depends_output,
+            codebase_index,
         })
     }
 }
@@ -646,6 +684,7 @@ pub fn render_prompt(template: &str, ctx: &PromptContext) -> String {
     out = out.replace("{{card_id}}", &ctx.card_id);
     out = out.replace("{{card_dir}}", &ctx.card_dir);
     out = out.replace("{{depends_output}}", &ctx.depends_output);
+    out = out.replace("{{codebase_index}}", &ctx.codebase_index);
     if ctx.system_context.is_empty() {
         out
     } else {
@@ -676,6 +715,7 @@ mod tests {
             card_id: "test-card".to_string(),
             card_dir: "/tmp/test.jobcard".to_string(),
             depends_output: String::new(),
+            codebase_index: String::new(),
         };
 
         let rendered = render_prompt("Memory:\n{{memory}}\n", &ctx);
@@ -701,6 +741,7 @@ mod tests {
             card_id: "feat-auth-qa".to_string(),
             card_dir: "/tmp/feat-auth-qa.jobcard".to_string(),
             depends_output: String::new(),
+            codebase_index: String::new(),
         };
 
         let template = "{{stage_instructions}}\nCard stage: {{stage}} ({{stage_index}} of {{stage_count}})\n{{spec}}\n{{prior_stage_output}}";
@@ -797,6 +838,40 @@ mod tests {
         write_meta(dir.path(), &m).unwrap();
         let back = read_meta(dir.path()).unwrap();
         assert_eq!(back.token.as_deref(), Some("\u{2660}"));
+    }
+
+    #[test]
+    fn meta_runs_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = Meta {
+            id: "run1".into(),
+            created: chrono::Utc::now(),
+            stage: "implement".into(),
+            runs: vec![RunRecord {
+                run_id: "abcd1234".into(),
+                stage: "implement".into(),
+                provider: "claude".into(),
+                model: "claude-sonnet-4-6".into(),
+                adapter: "adapters/claude.zsh".into(),
+                started_at: "2026-03-01T20:45:00Z".into(),
+                ended_at: Some("2026-03-01T20:48:00Z".into()),
+                outcome: "success".into(),
+                prompt_tokens: Some(123),
+                completion_tokens: Some(456),
+                cost_usd: Some(0.73),
+                duration_s: Some(180),
+                note: Some("retry 1".into()),
+            }],
+            ..Default::default()
+        };
+        write_meta(dir.path(), &m).unwrap();
+        let raw = fs::read_to_string(meta_path(dir.path())).unwrap();
+        assert!(raw.contains("\"runs\""));
+        let back = read_meta(dir.path()).unwrap();
+        assert_eq!(back.runs.len(), 1);
+        assert_eq!(back.runs[0].run_id, "abcd1234");
+        assert_eq!(back.runs[0].outcome, "success");
+        assert_eq!(back.runs[0].duration_s, Some(180));
     }
 
     #[test]

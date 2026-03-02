@@ -1,10 +1,9 @@
 {
   "id": "macos-file-agent-workflow",
+  "created": "2026-03-01T23:32:49.628199Z",
+  "glyph": "🃝",
   "title": "macOS file-agent workflow in renamed bop repo",
   "description": "Resurrect GTFS-era card work and produce a unified macOS filesystem-agent workflow plan with renamed-path hardening.",
-  "glyph": "🃝",
-  "token": "⚁",
-  "priority": 2,
   "labels": [
     {
       "name": "macOS",
@@ -42,31 +41,20 @@
       "done": false
     }
   ],
-  "created": "2026-03-01T23:32:49.628199Z",
   "stage": "plan",
+  "priority": 2,
   "provider_chain": [
     "claude",
     "codex",
     "goose"
   ],
   "stages": {
-    "spec": {
-      "status": "done",
-      "agent": "human"
-    },
     "plan": {
-      "status": "pending",
-      "agent": null
-    },
-    "implement": {
-      "status": "blocked",
-      "agent": null,
-      "blocked_by": "plan"
-    },
-    "qa": {
-      "status": "blocked",
-      "agent": null,
-      "blocked_by": "implement"
+      "status": "done",
+      "agent": "adapters/claude.zsh",
+      "provider": "claude",
+      "duration_s": 118,
+      "started": "2026-03-02T05:56:54.978945Z"
     }
   },
   "acceptance_criteria": [
@@ -76,5 +64,34 @@
   ],
   "worktree_branch": "job/macos-file-agent-workflow",
   "template_namespace": "implement",
-  "retry_count": 0
+  "vcs_engine": "jj",
+  "workspace_name": "ws-macos-file-agent-workflow-1772431014581",
+  "workspace_path": "/Users/studio/bop/.workspaces/ws-macos-file-agent-workflow-1772431014581",
+  "change_ref": "@  lpnqqmrntwqn\n│\n~",
+  "policy_result": "pass",
+  "retry_count": 0,
+  "validation_summary": {
+    "total": 0,
+    "valid": 0,
+    "invalid": 0,
+    "alert_count": 1,
+    "critical_alerts": 1,
+    "health": "down"
+  },
+  "runs": [
+    {
+      "run_id": "664a9316",
+      "stage": "plan",
+      "provider": "claude",
+      "model": "claude-sonnet-4-6",
+      "adapter": "adapters/claude.zsh",
+      "started_at": "2026-03-02T05:56:54.978945+00:00",
+      "ended_at": "2026-03-02T05:58:53.380647+00:00",
+      "outcome": "success",
+      "prompt_tokens": 20,
+      "completion_tokens": 6477,
+      "cost_usd": 1.0221685,
+      "duration_s": 118
+    }
+  ]
 }

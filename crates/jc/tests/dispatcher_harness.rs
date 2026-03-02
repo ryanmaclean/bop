@@ -90,6 +90,21 @@ fn write_running_card_with_stale_lease(cards: &Path, id: &str) {
     .unwrap();
 }
 
+fn write_invalid_pending_card(cards: &Path, id: &str) {
+    let card = cards.join("pending").join(format!("{id}.jobcard"));
+    fs::create_dir_all(card.join("logs")).unwrap();
+    fs::create_dir_all(card.join("output")).unwrap();
+    fs::write(
+        card.join("meta.json"),
+        format!(
+            r#"{{"id":"{id}","created":"2026-03-01T00:00:00Z","stage":"","provider_chain":["mock"],"stages":{{}},"acceptance_criteria":[]}}"#
+        ),
+    )
+    .unwrap();
+    fs::write(card.join("spec.md"), "invalid").unwrap();
+    fs::write(card.join("prompt.md"), "{{spec}}\n").unwrap();
+}
+
 #[test]
 fn dispatcher_moves_success_to_done() {
     build_jc();
@@ -133,7 +148,13 @@ fn dispatcher_moves_success_to_done() {
         .unwrap();
     assert!(status.success());
 
-    assert!(find_card_in(&cards, "done", "job1").exists());
+    let card = find_card_in(&cards, "done", "job1");
+    assert!(card.exists());
+    let logs_webloc = fs::read_to_string(card.join("Logs.webloc")).unwrap();
+    assert!(
+        logs_webloc.contains("bop://card/job1/logs"),
+        "done cards should link to static logs action"
+    );
 }
 
 #[test]
@@ -179,7 +200,13 @@ fn dispatcher_rate_limit_requeues_to_pending() {
         .unwrap();
     assert!(status.success());
 
-    assert!(find_card_in(&cards, "pending", "job2").exists());
+    let card = find_card_in(&cards, "pending", "job2");
+    assert!(card.exists());
+    let logs_webloc = fs::read_to_string(card.join("Logs.webloc")).unwrap();
+    assert!(
+        logs_webloc.contains("bop://card/job2/tail"),
+        "non-done cards should link to live tail action"
+    );
 }
 
 #[test]
@@ -398,6 +425,50 @@ fn dispatcher_reaps_stale_lease_without_dead_pid() {
     assert!(
         meta.contains("\"status\": \"pending\"") || meta.contains("\"status\":\"pending\""),
         "running stage should normalize to pending after reaping"
+    );
+}
+
+#[test]
+fn dispatcher_quarantines_invalid_pending_meta_to_failed() {
+    build_jc();
+
+    let td = tempfile::tempdir().unwrap();
+    let cards = td.path().join(".cards");
+
+    let status = Command::new(jc_bin())
+        .args(["--cards-dir", cards.to_str().unwrap(), "init"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    write_invalid_pending_card(&cards, "bad-meta");
+
+    let status = Command::new(jc_bin())
+        .args([
+            "--cards-dir",
+            cards.to_str().unwrap(),
+            "dispatcher",
+            "--adapter",
+            mock_adapter().to_str().unwrap(),
+            "--once",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    assert!(
+        !cards.join("pending").join("bad-meta.jobcard").exists(),
+        "invalid card should leave pending"
+    );
+    let failed = cards.join("failed").join("bad-meta.jobcard");
+    assert!(
+        failed.exists(),
+        "invalid card should be quarantined in failed/"
+    );
+    let rejected_log = fs::read_to_string(failed.join("logs").join("rejected.log")).unwrap();
+    assert!(
+        rejected_log.contains("invalid_meta"),
+        "rejected marker should include invalid_meta reason"
     );
 }
 

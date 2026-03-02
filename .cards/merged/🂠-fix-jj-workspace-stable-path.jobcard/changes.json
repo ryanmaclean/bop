@@ -1,0 +1,34 @@
+{
+  "branch": "@  wuqprqqmyxmo\n│\n~",
+  "files_changed": [
+    {
+      "path": "\".cards/pending/\\360\\237\\202\\240-fix-jj-workspace-stable-path.jobcard/Info.plist\"",
+      "status": "deleted"
+    },
+    {
+      "path": "\".cards/pending/\\360\\237\\202\\240-fix-jj-workspace-stable-path.jobcard/QuickLook/Thumbnail.png\"",
+      "status": "deleted"
+    },
+    {
+      "path": "\".cards/pending/\\360\\237\\202\\240-fix-jj-workspace-stable-path.jobcard/meta.json\"",
+      "status": "deleted"
+    },
+    {
+      "path": "\".cards/pending/\\360\\237\\202\\240-fix-jj-workspace-stable-path.jobcard/prompt.md\"",
+      "status": "deleted"
+    },
+    {
+      "path": "\".cards/pending/\\360\\237\\202\\240-fix-jj-workspace-stable-path.jobcard/spec.md\"",
+      "status": "deleted"
+    },
+    {
+      "path": "crates/jc/src/main.rs",
+      "status": "modified"
+    }
+  ],
+  "stats": {
+    "files_changed": 6,
+    "insertions": 6,
+    "deletions": 138
+  }
+}

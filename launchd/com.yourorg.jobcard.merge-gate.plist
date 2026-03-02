@@ -20,7 +20,7 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>CARDS_DIR</key>
-    <string>/Users/studio/gtfs/.cards</string>
+    <string>REPLACE_WITH_REPO_ROOT/.cards</string>
   </dict>
   
   <key>KeepAlive</key>

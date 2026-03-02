@@ -17,6 +17,7 @@
 # Local agent worktrees / scratch
 .claude/
 .worktrees/
+.workspaces/
 
 # Exploration / research scratch (not part of the build)
 emoji_personas.md

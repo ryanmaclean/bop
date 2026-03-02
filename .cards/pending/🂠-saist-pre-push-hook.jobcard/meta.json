@@ -1,0 +1,34 @@
+{
+  "id": "saist-pre-push-hook",
+  "created": "2026-03-01T21:30:00Z",
+  "stage": "implement",
+  "provider_chain": [
+    "claude"
+  ],
+  "stages": {
+    "implement": {
+      "status": "pending"
+    }
+  },
+  "acceptance_criteria": [
+    "cargo build",
+    "cargo clippy -- -D warnings",
+    "grep -q 'scan_for_secrets' crates/jobcard-core/src/worktree.rs",
+    "grep -q 'QuickLook' .gitignore",
+    "jj log -r 'main..@-' | grep -q ."
+  ],
+  "vcs_engine": "jj",
+  "stage_chain": [
+    "implement"
+  ],
+  "stage_models": {
+    "implement": "sonnet"
+  },
+  "stage_providers": {
+    "implement": "claude"
+  },
+  "stage_budgets": {
+    "implement": 32000
+  },
+  "retry_count": 0
+}

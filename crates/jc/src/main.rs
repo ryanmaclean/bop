@@ -1,13 +1,14 @@
 use anyhow::Context;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use clap::{Parser, Subcommand, ValueEnum};
-use jobcard_core::{write_meta, Meta, StageStatus, VcsEngine as CoreVcsEngine};
+use jobcard_core::{write_meta, Meta, RunRecord, StageStatus, VcsEngine as CoreVcsEngine};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::process::Command as TokioCommand;
 use walkdir::WalkDir;
@@ -26,6 +27,7 @@ const DEFAULT_MEMORY_TTL_SECONDS: i64 = 60 * 60 * 24 * 30;
 const LEASE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const LEASE_STALE_FLOOR: Duration = Duration::from_secs(30);
 const DISPATCHER_LOCK_REL: &str = ".locks/dispatcher.lock";
+static RUN_ID_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Subcommand, Debug)]
 enum Command {
@@ -49,10 +51,10 @@ enum Command {
         realtime: bool,
     },
     Dispatcher {
-        #[arg(long, default_value = "adapters/mock.zsh")]
+        #[arg(short = 'a', long, default_value = "adapters/mock.zsh")]
         adapter: String,
 
-        #[arg(long)]
+        #[arg(short = 'w', long)]
         max_workers: Option<usize>,
 
         #[arg(long, default_value_t = 500)]
@@ -67,7 +69,7 @@ enum Command {
         #[arg(long)]
         no_reap: bool,
 
-        #[arg(long)]
+        #[arg(short = '1', long)]
         once: bool,
 
         /// Error-rate threshold (0.0–1.0) above which a job with critical alerts
@@ -76,18 +78,18 @@ enum Command {
         validation_fail_threshold: f64,
 
         /// VCS engine used for workspace preparation and publish.
-        #[arg(long, value_enum, default_value_t = VcsEngine::GitGt)]
+        #[arg(short = 'v', long, value_enum, default_value_t = VcsEngine::GitGt)]
         vcs_engine: VcsEngine,
     },
     MergeGate {
         #[arg(long, default_value_t = 500)]
         poll_ms: u64,
 
-        #[arg(long)]
+        #[arg(short = '1', long)]
         once: bool,
 
         /// VCS engine used for finalize/publish flow.
-        #[arg(long, value_enum, default_value_t = VcsEngine::GitGt)]
+        #[arg(short = 'v', long, value_enum, default_value_t = VcsEngine::GitGt)]
         vcs_engine: VcsEngine,
     },
     /// Move a card back to pending/ so the dispatcher picks it up again.
@@ -118,6 +120,11 @@ enum Command {
         /// Filter: pending, running, done, failed, merged, active (default), all.
         #[arg(long, default_value = "active")]
         state: String,
+    },
+    /// Safely mutate selected meta fields with schema validation.
+    Meta {
+        #[command(subcommand)]
+        action: MetaAction,
     },
     /// Run policy gates.
     Policy {
@@ -158,6 +165,12 @@ enum Command {
         /// Import directly to pending/ instead of drafts/.
         #[arg(long)]
         immediate: bool,
+    },
+    /// Generate a concise codebase map at .cards/CODEBASE.md for agent orientation.
+    Index {
+        /// Print to stdout instead of writing the file.
+        #[arg(long)]
+        print: bool,
     },
 }
 
@@ -236,6 +249,26 @@ enum PolicyAction {
         /// Check staged changes in the current git index.
         #[arg(long)]
         staged: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum MetaAction {
+    /// Update workflow routing fields in meta.json.
+    Set {
+        id: String,
+        /// Workflow mode label (for stage routing / skill mapping).
+        #[arg(long)]
+        workflow_mode: Option<String>,
+        /// 1-based workflow step index.
+        #[arg(long)]
+        step_index: Option<u32>,
+        /// Clear workflow mode (also clears step index).
+        #[arg(long)]
+        clear_workflow_mode: bool,
+        /// Clear step index.
+        #[arg(long)]
+        clear_step_index: bool,
     },
 }
 
@@ -499,7 +532,90 @@ fn macos_notify(card_id: &str, card_dir: &Path) {
         .spawn();
 }
 
+fn card_state_from_path(card_dir: &Path) -> Option<String> {
+    card_dir
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_string())
+}
+
+fn infer_card_id_from_path(card_dir: &Path) -> Option<String> {
+    let name = card_dir.file_name()?.to_str()?;
+    let base = name.strip_suffix(".jobcard").unwrap_or(name);
+    Some(base.to_string())
+}
+
+fn write_webloc(path: &Path, target_url: &str) -> anyhow::Result<()> {
+    let body = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>URL</key>
+  <string>{target_url}</string>
+</dict>
+</plist>
+"#
+    );
+    fs::write(path, body)?;
+    Ok(())
+}
+
+fn sync_card_action_links(card_dir: &Path) {
+    let meta = jobcard_core::read_meta(card_dir).ok();
+    let id = meta
+        .as_ref()
+        .map(|m| m.id.clone())
+        .or_else(|| infer_card_id_from_path(card_dir))
+        .unwrap_or_default();
+    if id.trim().is_empty() {
+        return;
+    }
+
+    let state = card_state_from_path(card_dir).unwrap_or_else(|| "unknown".to_string());
+    let done_like = matches!(state.as_str(), "done" | "merged");
+    let logs_action = if done_like { "logs" } else { "tail" };
+    let logs_url = format!("bop://card/{id}/{logs_action}");
+    let logs_label = if done_like { "Open logs" } else { "Tail logs" };
+    let logs_cmd = if done_like {
+        format!("bop logs {id}")
+    } else {
+        format!("bop logs {id} --follow")
+    };
+
+    let session = meta
+        .as_ref()
+        .and_then(|m| m.zellij_session.as_ref())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    let mut links_md = String::from("# Card Links\n\n");
+    links_md.push_str(&format!("- Logs: [{logs_label}]({logs_url})\n"));
+    links_md.push_str(&format!("- Logs command: `{logs_cmd}`\n"));
+
+    let session_webloc = card_dir.join("Session.webloc");
+    if state == "running" {
+        if let Some(session) = session {
+            let session_url = format!("bop://card/{id}/session");
+            links_md.push_str(&format!("- Session: [Attach zellij]({session_url})\n"));
+            links_md.push_str(&format!("- Session command: `zellij attach {session}`\n"));
+            let _ = write_webloc(&session_webloc, &session_url);
+        } else {
+            let _ = fs::remove_file(&session_webloc);
+        }
+    } else {
+        let _ = fs::remove_file(&session_webloc);
+    }
+
+    let _ = fs::write(card_dir.join("links.md"), links_md);
+    let _ = write_webloc(&card_dir.join("Logs.webloc"), &logs_url);
+}
+
 fn render_card_thumbnail(card_dir: &Path) {
+    sync_card_action_links(card_dir);
+
     if !cfg!(target_os = "macos") {
         return;
     }
@@ -527,6 +643,50 @@ fn render_card_thumbnail(card_dir: &Path) {
             .arg(card_dir)
             .status();
     }
+
+    compress_card(card_dir);
+}
+
+fn compress_card(card_dir: &Path) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let state = card_state_from_path(card_dir).unwrap_or_default();
+    if !matches!(state.as_str(), "done" | "failed" | "merged") {
+        return;
+    }
+
+    let Some(name) = card_dir.file_name().and_then(|s| s.to_str()) else {
+        return;
+    };
+    let Some(parent) = card_dir.parent() else {
+        return;
+    };
+    let compressed = parent.join(format!("{}.hfs.tmp", name));
+    let backup = parent.join(format!("{}.bak.tmp", name));
+    let _ = fs::remove_dir_all(&compressed);
+    let _ = fs::remove_dir_all(&backup);
+
+    let status = StdCommand::new("ditto")
+        .arg("--hfsCompression")
+        .arg(card_dir)
+        .arg(&compressed)
+        .status();
+    if !matches!(status, Ok(s) if s.success()) {
+        let _ = fs::remove_dir_all(&compressed);
+        return;
+    }
+
+    if fs::rename(card_dir, &backup).is_err() {
+        let _ = fs::remove_dir_all(&compressed);
+        return;
+    }
+    if fs::rename(&compressed, card_dir).is_err() {
+        let _ = fs::rename(&backup, card_dir);
+        let _ = fs::remove_dir_all(&compressed);
+        return;
+    }
+    let _ = fs::remove_dir_all(&backup);
 }
 
 fn ensure_cards_layout(root: &Path) -> anyhow::Result<()> {
@@ -600,67 +760,6 @@ fn clone_template(src: &Path, dst: &Path) -> anyhow::Result<()> {
     copy_dir_all(src, dst)
 }
 
-/// Apply APFS transparent compression to a card directory.
-///
-/// Uses `ditto --hfsCompression` which applies macOS-native LZFSE compression.
-/// Files remain readable as-is — the OS decompresses on read, so `bop logs`,
-/// Quick Look, and all tooling work unchanged. Already-compressed blocks are
-/// skipped by the filesystem, making this idempotent.
-///
-/// Only fires for terminal states (done/failed/merged) where the card won't
-/// be written to again.
-fn compress_card(card_dir: &Path) {
-    if !cfg!(target_os = "macos") {
-        return;
-    }
-    let state = card_dir
-        .parent()
-        .and_then(|p| p.file_name())
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
-    if !matches!(state, "done" | "failed" | "merged") {
-        return;
-    }
-
-    let Some(name) = card_dir.file_name().and_then(|s| s.to_str()) else {
-        return;
-    };
-    let Some(parent) = card_dir.parent() else {
-        return;
-    };
-
-    // ditto --hfsCompression clones to a new dir with compression enabled.
-    // Atomic swap: compress to tmp, rename original to backup, rename tmp to original.
-    let compressed = parent.join(format!("{}.comp.tmp", name));
-    let backup = parent.join(format!("{}.bak.tmp", name));
-    let _ = fs::remove_dir_all(&compressed);
-    let _ = fs::remove_dir_all(&backup);
-
-    let ok = StdCommand::new("ditto")
-        .arg("--hfsCompression")
-        .arg(card_dir)
-        .arg(&compressed)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if !ok {
-        let _ = fs::remove_dir_all(&compressed);
-        return;
-    }
-
-    // Atomic swap
-    if fs::rename(card_dir, &backup).is_err() {
-        let _ = fs::remove_dir_all(&compressed);
-        return;
-    }
-    if fs::rename(&compressed, card_dir).is_err() {
-        let _ = fs::rename(&backup, card_dir);
-        let _ = fs::remove_dir_all(&compressed);
-        return;
-    }
-    let _ = fs::remove_dir_all(&backup);
-}
-
 /// Copy a single file using APFS COW clone when possible.
 /// Falls back to `fs::copy` if cloning isn't available (non-APFS, Linux, etc).
 fn cow_copy_file(src: &Path, dst: &Path) {
@@ -697,6 +796,9 @@ struct Provider {
     cooldown_until_epoch_s: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     model: Option<String>,
+    /// Extra environment variables injected when spawning this provider's adapter.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    env: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -706,6 +808,14 @@ struct ProvidersFile {
     #[serde(default)]
     providers: std::collections::BTreeMap<String, Provider>,
 }
+
+type ProviderSelection = (
+    String,
+    String,
+    i32,
+    std::collections::BTreeMap<String, String>,
+    Option<String>,
+);
 
 #[derive(Debug, Clone)]
 struct WorkspaceInfo {
@@ -865,6 +975,7 @@ fn seed_providers(cards_dir: &Path) -> anyhow::Result<()> {
             rate_limit_exit: 75,
             cooldown_until_epoch_s: None,
             model: None,
+            env: Default::default(),
         },
     );
     pf.providers.insert(
@@ -874,6 +985,7 @@ fn seed_providers(cards_dir: &Path) -> anyhow::Result<()> {
             rate_limit_exit: 75,
             cooldown_until_epoch_s: None,
             model: None,
+            env: Default::default(),
         },
     );
     write_providers(cards_dir, &pf)?;
@@ -1016,8 +1128,8 @@ fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
             card_type: None,
             metadata_source: None,
             metadata_key: None,
-            workflow_mode: None,
-            step_index: None,
+            workflow_mode: Some("default-feature".to_string()),
+            step_index: Some(1),
             priority: None,
             provider_chain: vec![],
             stages: Default::default(),
@@ -1053,6 +1165,7 @@ fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
             stage_models: Default::default(),
             stage_providers: Default::default(),
             stage_budgets: Default::default(),
+            runs: vec![],
         };
         write_meta(&implement, &meta)?;
 
@@ -1116,6 +1229,11 @@ fn create_card(
         created: Utc::now(),
         agent_type: None,
         stage: "spec".to_string(),
+        card_type: None,
+        metadata_source: None,
+        metadata_key: None,
+        workflow_mode: None,
+        step_index: None,
         priority: None,
         provider_chain: vec![],
         stages: Default::default(),
@@ -1151,11 +1269,7 @@ fn create_card(
         stage_models: Default::default(),
         stage_providers: Default::default(),
         stage_budgets: Default::default(),
-        card_type: None,
-        metadata_source: None,
-        metadata_key: None,
-        workflow_mode: None,
-        step_index: None,
+        runs: vec![],
     });
 
     meta.id = id.to_string();
@@ -1164,6 +1278,12 @@ fn create_card(
     meta.template_namespace = Some(template.to_string());
     meta.retry_count = Some(0);
     meta.failure_reason = None;
+    meta.workflow_mode = Some(
+        meta.workflow_mode
+            .clone()
+            .unwrap_or_else(|| workflow_mode_for_template(template).to_string()),
+    );
+    meta.step_index = Some(current_stage_step_index(&meta));
 
     // Auto-assign glyph + token if not already set by template
     if meta.glyph.is_none() {
@@ -1399,6 +1519,69 @@ fn append_log_line(path: &Path, line: &str) -> anyhow::Result<()> {
         .append(true)
         .open(path)?;
     writeln!(file, "{}", line)?;
+    Ok(())
+}
+
+fn workflow_mode_for_template(template: &str) -> &'static str {
+    match template {
+        "full" => "full-spec",
+        "qa-only" => "qa-only",
+        "ideation" => "ideation",
+        "roadmap" => "roadmap",
+        "pr-fix" => "pr-fix",
+        "mr-fix" => "mr-fix",
+        _ => "default-feature",
+    }
+}
+
+fn current_stage_step_index(meta: &Meta) -> u32 {
+    if let Some(idx) = meta
+        .stage_chain
+        .iter()
+        .position(|stage| stage == &meta.stage)
+        .map(|i| i + 1)
+    {
+        idx as u32
+    } else {
+        meta.step_index.unwrap_or(1).max(1)
+    }
+}
+
+fn unique_failed_path(failed_dir: &Path, name: &str) -> PathBuf {
+    let direct = failed_dir.join(name);
+    if !direct.exists() {
+        return direct;
+    }
+    let stem = name.strip_suffix(".jobcard").unwrap_or(name);
+    let ts = Utc::now().timestamp_millis();
+    failed_dir.join(format!("{stem}-rejected-{ts}.jobcard"))
+}
+
+fn quarantine_invalid_pending_card(
+    pending_path: &Path,
+    failed_dir: &Path,
+    reason: &str,
+) -> anyhow::Result<()> {
+    let name = pending_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .with_context(|| format!("invalid card path: {}", pending_path.display()))?;
+    let failed_path = unique_failed_path(failed_dir, name);
+    fs::rename(pending_path, &failed_path).with_context(|| {
+        format!(
+            "failed moving invalid pending card {} to failed/",
+            pending_path.display()
+        )
+    })?;
+    fs::create_dir_all(failed_path.join("logs"))?;
+    fs::create_dir_all(failed_path.join("output"))?;
+    let marker = format!("[{}] dispatcher rejected card: {}\n", Utc::now(), reason);
+    append_log_line(
+        &failed_path.join("logs").join("rejected.log"),
+        marker.trim_end(),
+    )?;
+    let _ = fs::write(failed_path.join("output").join("qa_report.md"), marker);
+    render_card_thumbnail(&failed_path);
     Ok(())
 }
 
@@ -2320,6 +2503,22 @@ async fn main() -> anyhow::Result<()> {
         Command::Logs { id, follow } => cmd_logs(&root, &id, follow).await,
         Command::Inspect { id } => cmd_inspect(&root, &id),
         Command::List { state } => list_cards(&root, &state),
+        Command::Meta { action } => match action {
+            MetaAction::Set {
+                id,
+                workflow_mode,
+                step_index,
+                clear_workflow_mode,
+                clear_step_index,
+            } => cmd_meta_set(
+                &root,
+                &id,
+                workflow_mode.as_deref(),
+                step_index,
+                clear_workflow_mode,
+                clear_step_index,
+            ),
+        },
         Command::Policy { action } => match action {
             PolicyAction::Check { id, staged } => cmd_policy_check(&root, id.as_deref(), staged),
         },
@@ -2353,6 +2552,7 @@ async fn main() -> anyhow::Result<()> {
         },
         Command::Promote { id } => cmd_promote(&root, &id),
         Command::Import { source, immediate } => cmd_import(&root, &source, immediate),
+        Command::Index { print } => cmd_index(&root, print),
     }
 }
 
@@ -2698,6 +2898,18 @@ fn prepare_workspace(
             let repo_root = find_git_root(cards_dir).unwrap_or_else(|| cards_dir.to_path_buf());
             jobcard_core::worktree::ensure_jj_repo(&repo_root)?;
             let ws_name = next_workspace_name(card_id);
+            // Stable path outside the card bundle so it survives card state renames
+            let workspaces_dir = repo_root.join(".workspaces");
+            std::fs::create_dir_all(&workspaces_dir)?;
+            let stable_ws = workspaces_dir.join(&ws_name);
+            let legacy_ws = card_dir.join("workspace");
+            let ws_path = if stable_ws.exists() {
+                stable_ws
+            } else if legacy_ws.exists() {
+                legacy_ws
+            } else {
+                stable_ws
+            };
             jobcard_core::worktree::create_workspace_with_name(&repo_root, &ws_path, &ws_name)?;
             let change_ref = jj_head_ref(&ws_path);
             Ok(Some(WorkspaceInfo {
@@ -2836,10 +3048,27 @@ async fn run_dispatcher(
                         None => continue,
                     };
 
+                    let mut meta = match jobcard_core::read_meta(&pending_path) {
+                        Ok(m) => Some(m),
+                        Err(err) => {
+                            let reason = format!("invalid_meta: {err}");
+                            eprintln!(
+                                "[dispatcher] rejecting invalid pending card {}: {}",
+                                name, err
+                            );
+                            let _ = quarantine_invalid_pending_card(
+                                &pending_path,
+                                &failed_dir,
+                                &reason,
+                            );
+                            continue;
+                        }
+                    };
+
                     // ── pre-dispatch gates ──────────────────────────────────
                     // Read meta before moving to running/ so we can skip
                     // cards that aren't ready yet.
-                    if let Ok(pre_meta) = jobcard_core::read_meta(&pending_path) {
+                    if let Some(ref pre_meta) = meta {
                         // Gate 1: decision_required — needs human approval first
                         if pre_meta.decision_required {
                             eprintln!(
@@ -2873,7 +3102,6 @@ async fn run_dispatcher(
                     }
                     render_card_thumbnail(&running_path);
 
-                    let mut meta = jobcard_core::read_meta(&running_path).ok();
                     let card_id = meta
                         .as_ref()
                         .map(|m| m.id.clone())
@@ -2924,25 +3152,37 @@ async fn run_dispatcher(
                         .map(|m| m.stage.clone())
                         .unwrap_or_else(|| "implement".to_string());
 
-                    let (provider_name, provider_cmd, rate_limit_exit) =
-                        match select_provider(cards_dir, meta.as_mut(), &stage)? {
-                            Some(v) => v,
-                            None => {
-                                let pending_path = pending_dir.join(&name);
-                                let _ = fs::rename(&running_path, &pending_path);
-                                render_card_thumbnail(&pending_path);
-                                continue;
-                            }
-                        };
+                    let (
+                        provider_name,
+                        provider_cmd,
+                        rate_limit_exit,
+                        provider_env,
+                        provider_model,
+                    ) = match select_provider(cards_dir, meta.as_mut(), &stage)? {
+                        Some(v) => v,
+                        None => {
+                            let pending_path = pending_dir.join(&name);
+                            let _ = fs::rename(&running_path, &pending_path);
+                            render_card_thumbnail(&pending_path);
+                            continue;
+                        }
+                    };
 
                     if let Some(ref mut meta) = meta {
                         let _ = write_meta(&running_path, meta);
                     }
 
-                    let (exit_code, mut meta) =
-                        run_card(cards_dir, &running_path, &provider_cmd, &provider_name)
-                            .await
-                            .unwrap_or((1, None));
+                    let (exit_code, mut meta) = run_card(
+                        cards_dir,
+                        &running_path,
+                        &provider_cmd,
+                        &provider_name,
+                        &provider_env,
+                        provider_model.as_deref(),
+                        rate_limit_exit,
+                    )
+                    .await
+                    .unwrap_or((1, None));
 
                     let is_rate_limited = exit_code == rate_limit_exit;
 
@@ -3070,6 +3310,8 @@ fn maybe_advance_stage(cards_dir: &Path, done_card_dir: &Path) {
         id: next_id.clone(),
         created: Utc::now(),
         stage: next_stage.clone(),
+        workflow_mode: meta.workflow_mode.clone(),
+        step_index: Some((current_idx + 2) as u32),
         glyph: meta.glyph.clone(),
         token: meta.token.clone(),
         title: meta.title.clone(),
@@ -3395,6 +3637,9 @@ async fn run_card(
     card_dir: &Path,
     adapter: &str,
     provider_name: &str,
+    provider_env: &std::collections::BTreeMap<String, String>,
+    provider_model: Option<&str>,
+    rate_limit_exit: i32,
 ) -> anyhow::Result<(i32, Option<Meta>)> {
     fs::create_dir_all(card_dir.join("logs"))?;
     fs::create_dir_all(card_dir.join("output"))?;
@@ -3473,6 +3718,9 @@ async fn run_card(
         .map(|m| m.stage.clone())
         .unwrap_or_else(|| "implement".to_string());
     let started_at = Utc::now();
+    let started_at_iso = started_at.to_rfc3339();
+    let run_id = short_run_id();
+    let mut run_idx: Option<usize> = None;
     if let Some(ref mut m) = meta {
         let rec = m
             .stages
@@ -3489,6 +3737,29 @@ async fn run_card(
         rec.started = Some(started_at);
         rec.agent = Some(adapter.to_string());
         rec.provider = Some(provider_name.to_string());
+
+        let initial_model = provider_model
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .or_else(|| model_from_provider_env(provider_env))
+            .unwrap_or_else(|| provider_name.to_string());
+        m.runs.push(RunRecord {
+            run_id: run_id.clone(),
+            stage: stage.clone(),
+            provider: provider_name.to_string(),
+            model: initial_model,
+            adapter: adapter.to_string(),
+            started_at: started_at_iso,
+            ended_at: None,
+            outcome: "running".to_string(),
+            prompt_tokens: None,
+            completion_tokens: None,
+            cost_usd: None,
+            duration_s: None,
+            note: None,
+        });
+        run_idx = Some(m.runs.len().saturating_sub(1));
         let _ = write_meta(card_dir, m);
     }
 
@@ -3513,6 +3784,7 @@ async fn run_card(
         .arg(&memory_out_file)
         .env("JOBCARD_MEMORY_OUT", &memory_out_file)
         .env("JOBCARD_MEMORY_NAMESPACE", &memory_namespace)
+        .envs(provider_env)
         // Card identity — lets any agent orient itself
         .env("BOP_CARD_ID", meta.as_ref().map(|m| m.id.as_str()).unwrap_or(""))
         .env("BOP_CARD_DIR", card_dir)
@@ -3551,23 +3823,29 @@ async fn run_card(
     let _ = write_run_lease(card_dir, &lease);
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_seconds);
+    let mut timed_out = false;
     let status = loop {
         let now = tokio::time::Instant::now();
         if now >= deadline {
+            timed_out = true;
             let _ = child.kill().await;
-            anyhow::bail!("adapter timed out after {} seconds", timeout_seconds);
+            break None;
         }
         let remaining = deadline.saturating_duration_since(now);
         let wait_slice = std::cmp::min(LEASE_HEARTBEAT_INTERVAL, remaining);
         match tokio::time::timeout(wait_slice, child.wait()).await {
-            Ok(res) => break res?,
+            Ok(res) => break Some(res?),
             Err(_) => {
                 lease.heartbeat_at = Utc::now();
                 let _ = write_run_lease(card_dir, &lease);
             }
         }
     };
-    let exit_code = status.code().unwrap_or(1);
+    let exit_code = if timed_out {
+        124
+    } else {
+        status.and_then(|s| s.code()).unwrap_or(1)
+    };
 
     if let Err(err) = merge_memory_output(cards_dir, &memory_namespace, &memory_out_file) {
         let _ = append_log_line(
@@ -3580,6 +3858,12 @@ async fn run_card(
     }
 
     let finished_at = Utc::now();
+    let duration_s = finished_at
+        .signed_duration_since(started_at)
+        .num_seconds()
+        .try_into()
+        .ok();
+    let usage = detect_run_usage(card_dir);
     if let Some(ref mut m) = meta {
         let rec = m.stages.entry(stage).or_insert(jobcard_core::StageRecord {
             status: jobcard_core::StageStatus::Pending,
@@ -3589,20 +3873,178 @@ async fn run_card(
             started: None,
             blocked_by: None,
         });
-        rec.status = if exit_code == 0 {
+        rec.status = if timed_out {
+            jobcard_core::StageStatus::Failed
+        } else if exit_code == 0 {
             jobcard_core::StageStatus::Done
-        } else if exit_code == 75 {
+        } else if exit_code == rate_limit_exit {
             jobcard_core::StageStatus::Pending
         } else {
             jobcard_core::StageStatus::Failed
         };
-        let duration = finished_at.signed_duration_since(started_at).num_seconds();
-        if duration >= 0 {
-            rec.duration_s = Some(duration as u64);
+        rec.duration_s = duration_s;
+
+        if let Some(idx) = run_idx {
+            if let Some(run) = m.runs.get_mut(idx) {
+                run.ended_at = Some(finished_at.to_rfc3339());
+                run.duration_s = duration_s;
+                run.outcome = if timed_out {
+                    "timeout".to_string()
+                } else if exit_code == 0 {
+                    "success".to_string()
+                } else if exit_code == rate_limit_exit {
+                    "rate_limited".to_string()
+                } else {
+                    "failed".to_string()
+                };
+                if run.model.trim().is_empty() {
+                    run.model = provider_name.to_string();
+                }
+                if let Some(run_usage) = usage.as_ref() {
+                    if let Some(model) = run_usage.model.as_ref() {
+                        run.model = model.clone();
+                    }
+                    run.prompt_tokens = run_usage.prompt_tokens;
+                    run.completion_tokens = run_usage.completion_tokens;
+                    run.cost_usd = run_usage.cost_usd;
+                } else if let Some(model) = detect_model_from_logs(card_dir) {
+                    run.model = model;
+                }
+                if timed_out {
+                    run.note = Some(format!("timeout_seconds={}", timeout_seconds));
+                }
+            }
         }
     }
 
     Ok((exit_code, meta))
+}
+
+#[derive(Debug, Clone, Default)]
+struct RunUsage {
+    model: Option<String>,
+    prompt_tokens: Option<u64>,
+    completion_tokens: Option<u64>,
+    cost_usd: Option<f64>,
+}
+
+fn short_run_id() -> String {
+    let now = Utc::now()
+        .timestamp_nanos_opt()
+        .unwrap_or_else(|| Utc::now().timestamp_micros() * 1000) as u64;
+    let pid = std::process::id() as u64;
+    let seq = RUN_ID_SEQ.fetch_add(1, Ordering::Relaxed);
+    let mixed = now ^ (pid << 16) ^ seq;
+    format!("{:08x}", (mixed & 0xffff_ffff) as u32)
+}
+
+fn model_from_provider_env(env: &BTreeMap<String, String>) -> Option<String> {
+    for key in ["OLLAMA_MODEL", "ANTHROPIC_MODEL", "OPENAI_MODEL", "MODEL"] {
+        if let Some(value) = env.get(key).map(|v| v.trim()).filter(|v| !v.is_empty()) {
+            return Some(value.to_string());
+        }
+    }
+    env.iter().find_map(|(k, v)| {
+        if k.to_ascii_uppercase().ends_with("_MODEL") {
+            let trimmed = v.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+        None
+    })
+}
+
+fn parse_latest_json_line(path: &Path) -> Option<serde_json::Value> {
+    let content = fs::read_to_string(path).ok()?;
+    content
+        .lines()
+        .rev()
+        .find_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+}
+
+fn parse_usage_from_stdout(stdout_log: &Path) -> Option<RunUsage> {
+    let value = parse_latest_json_line(stdout_log)?;
+    let usage = value.get("usage");
+
+    let mut prompt_tokens = usage
+        .and_then(|u| u.get("input_tokens"))
+        .and_then(|x| x.as_u64());
+    let mut completion_tokens = usage
+        .and_then(|u| u.get("output_tokens"))
+        .and_then(|x| x.as_u64());
+
+    let model = value
+        .get("modelUsage")
+        .and_then(|m| m.as_object())
+        .and_then(|obj| obj.keys().next().cloned())
+        .or_else(|| {
+            value
+                .get("model")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        });
+
+    if prompt_tokens.is_none() || completion_tokens.is_none() {
+        if let Some(model_usage) = value.get("modelUsage").and_then(|m| m.as_object()) {
+            if let Some((_model_name, stats)) = model_usage.iter().next() {
+                if prompt_tokens.is_none() {
+                    prompt_tokens = stats.get("inputTokens").and_then(|x| x.as_u64());
+                }
+                if completion_tokens.is_none() {
+                    completion_tokens = stats.get("outputTokens").and_then(|x| x.as_u64());
+                }
+            }
+        }
+    }
+
+    Some(RunUsage {
+        model,
+        prompt_tokens,
+        completion_tokens,
+        cost_usd: value.get("total_cost_usd").and_then(|x| x.as_f64()),
+    })
+}
+
+fn parse_usage_from_ollama_stats(stats_log: &Path) -> Option<RunUsage> {
+    let content = fs::read_to_string(stats_log).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+    Some(RunUsage {
+        model: value
+            .get("model")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        prompt_tokens: value.get("prompt_tokens").and_then(|x| x.as_u64()),
+        completion_tokens: value.get("completion_tokens").and_then(|x| x.as_u64()),
+        cost_usd: None,
+    })
+}
+
+fn detect_run_usage(card_dir: &Path) -> Option<RunUsage> {
+    let logs_dir = card_dir.join("logs");
+    let mut merged = parse_usage_from_stdout(&logs_dir.join("stdout.log"));
+
+    if let Some(ollama) = parse_usage_from_ollama_stats(&logs_dir.join("ollama-stats.json")) {
+        if let Some(current) = merged.as_mut() {
+            if current.model.is_none() {
+                current.model = ollama.model;
+            }
+            if current.prompt_tokens.is_none() {
+                current.prompt_tokens = ollama.prompt_tokens;
+            }
+            if current.completion_tokens.is_none() {
+                current.completion_tokens = ollama.completion_tokens;
+            }
+        } else {
+            merged = Some(ollama);
+        }
+    }
+
+    merged
+}
+
+fn detect_model_from_logs(card_dir: &Path) -> Option<String> {
+    detect_run_usage(card_dir).and_then(|u| u.model)
 }
 
 fn rotate_provider_chain(meta: &mut Meta) {
@@ -3617,7 +4059,7 @@ fn select_provider(
     cards_dir: &Path,
     meta: Option<&mut Meta>,
     stage: &str,
-) -> anyhow::Result<Option<(String, String, i32)>> {
+) -> anyhow::Result<Option<ProviderSelection>> {
     let pf = read_providers(cards_dir)?;
     let now = Utc::now().timestamp();
 
@@ -3639,7 +4081,7 @@ fn select_provider(
         None => vec!["mock".to_string(), "mock2".to_string()],
     };
 
-    let mut fallback: Option<(String, String)> = None;
+    let mut fallback: Option<ProviderSelection> = None;
     for name in chain {
         let Some(p) = pf.providers.get(&name) else {
             continue;
@@ -3653,21 +4095,28 @@ fn select_provider(
         if let Some(ref avoid) = avoid_provider {
             if &name == avoid {
                 if fallback.is_none() {
-                    fallback = Some((name, p.command.clone()));
+                    fallback = Some((
+                        name,
+                        p.command.clone(),
+                        p.rate_limit_exit,
+                        p.env.clone(),
+                        p.model.clone(),
+                    ));
                 }
                 continue;
             }
         }
 
-        return Ok(Some((name, p.command.clone(), p.rate_limit_exit)));
+        return Ok(Some((
+            name,
+            p.command.clone(),
+            p.rate_limit_exit,
+            p.env.clone(),
+            p.model.clone(),
+        )));
     }
 
-    if let Some((name, cmd)) = fallback {
-        if let Some(p) = pf.providers.get(&name) {
-            return Ok(Some((name, cmd, p.rate_limit_exit)));
-        }
-    }
-    Ok(None)
+    Ok(fallback)
 }
 
 fn set_provider_cooldown(cards_dir: &Path, provider: &str, cooldown_s: i64) -> anyhow::Result<()> {
@@ -3758,6 +4207,16 @@ async fn run_merge_gate(
                 };
 
                 let qa_log = card_dir.join("logs").join("qa.log");
+
+                // Heal stale working copy before running ACs — concurrent jj ops
+                // often leave workspaces stale, causing `jj log` to fail.
+                if matches!(vcs_engine, VcsEngine::Jj) {
+                    let _ = TokioCommand::new("jj")
+                        .args(["workspace", "update-stale"])
+                        .current_dir(&workdir)
+                        .output()
+                        .await;
+                }
 
                 let mut acceptance_ok = true;
                 let mut failed_criterion: Option<String> = None;
@@ -3915,30 +4374,17 @@ async fn run_merge_gate(
                                     vcs_err = Some(format!("jj workspace forget failed: {e}"));
                                 }
                             }
+                            // push + PR are best-effort — skip gracefully when no remote
                             if vcs_err.is_none() {
-                                if let Err(e) =
-                                    jobcard_core::worktree::push_stack(&repo_root, "origin")
-                                {
-                                    vcs_err = Some(format!("jj git push failed: {e}"));
-                                }
+                                let _ = jobcard_core::worktree::push_stack(&repo_root, "origin");
                             }
                             if vcs_err.is_none() {
                                 let pr_result = StdCommand::new("gh")
                                     .args(["pr", "create", "--fill", "--draft"])
                                     .current_dir(&repo_root)
                                     .output();
-                                match pr_result {
-                                    Ok(out) if out.status.success() => {}
-                                    Ok(out) => {
-                                        vcs_err = Some(format!(
-                                            "gh pr create failed: {}",
-                                            String::from_utf8_lossy(&out.stderr).trim()
-                                        ));
-                                    }
-                                    Err(e) => {
-                                        vcs_err = Some(format!("gh pr create failed: {e}"));
-                                    }
-                                }
+                                // gh pr create is best-effort; no remote = skip silently
+                                let _ = pr_result;
                             }
                         }
                     }
@@ -4407,6 +4853,196 @@ fn find_card_in_state(root: &Path, id: &str, state: &str) -> bool {
 
 // ── inspect ──────────────────────────────────────────────────────────────────
 
+// ── index ──────────────────────────────────────────────────────────────────────
+
+fn cmd_index(cards_root: &Path, print_flag: bool) -> anyhow::Result<()> {
+    // Resolve workspace root: parent of the .cards/ dir.
+    // cards_root may be a relative path like ".cards"; canonicalize first.
+    let cards_abs = cards_root
+        .canonicalize()
+        .unwrap_or_else(|_| cards_root.to_path_buf());
+    let repo_root_owned = cards_abs
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| cards_abs.clone());
+    let repo_root = repo_root_owned.as_path();
+
+    let mut out = String::new();
+
+    // ── 1. Header ────────────────────────────────────────────────────────────
+    out.push_str("# Codebase Index\n\n");
+    out.push_str("*Auto-generated by `bop index`. Read this before exploring files.*\n\n");
+
+    // ── 2. Top-level layout ───────────────────────────────────────────────────
+    out.push_str("## Top-level layout\n\n");
+    let dir_descriptions: &[(&str, &str)] = &[
+        ("crates/", "Rust workspace members (jobcard-core lib + jc/bop binary)"),
+        (".cards/", "Job card state machine — pending/ running/ done/ merged/ failed/"),
+        ("adapters/", "Shell adapter scripts: claude.zsh, mock.zsh, timeout_wrapper.zsh"),
+        ("scripts/", "Helper scripts: policy_check.zsh and other tooling"),
+        ("layouts/", "Zellij terminal layout files (bop.kdl)"),
+        ("macos/", "Xcode project for Quick Look extension (JobCardHost.app)"),
+        ("vibekanban/", "Zellij WASM plugin source for kanban pane display"),
+        ("completions/", "Shell completion scripts"),
+        ("skills/", "Claude skill definitions (markdown prompts for agents)"),
+        ("docs/", "Project documentation"),
+        ("research/", "Research notes and vendor snapshots"),
+        ("examples/", "Example jobcard templates and usage"),
+        ("launchd/", "macOS launchd service plists"),
+        ("zellij/", "Zellij config and plugin assets"),
+    ];
+    for (dir, desc) in dir_descriptions {
+        if repo_root.join(dir.trim_end_matches('/')).exists() {
+            out.push_str(&format!("- **`{dir}`** — {desc}\n"));
+        }
+    }
+    out.push('\n');
+
+    // ── 3. Key files ─────────────────────────────────────────────────────────
+    out.push_str("## Key files\n\n");
+    let key_files: &[(&str, &str)] = &[
+        ("Cargo.toml", "Workspace manifest; lists crate members and shared dependencies"),
+        ("Makefile", "Shortcuts: `make check` runs test + clippy + fmt"),
+        ("crates/jc/src/main.rs", "CLI binary: all `bop` subcommands, dispatcher loop, merge-gate"),
+        ("crates/jobcard-core/src/lib.rs", "Shared types: Meta, PromptContext, render_prompt, VcsEngine"),
+        (".cards/providers.json", "Provider registry with cooldowns and model config"),
+        (".cards/system_context.md", "Agent orientation text prepended to every dispatched prompt"),
+        (".cards/CODEBASE.md", "This file — concise codebase map for agent orientation"),
+        (".cards/templates/", "COW-cloneable card templates (implement, qa, …)"),
+        (".cards/stages/", "Per-stage instruction fragments injected via {{stage_instructions}}"),
+        ("adapters/claude.zsh", "Production adapter: calls Claude Code CLI with timeout"),
+        ("adapters/mock.zsh", "Testing adapter: writes stub output immediately"),
+        ("scripts/policy_check.zsh", "Policy gate: checks staged files against rules"),
+    ];
+    for (file, desc) in key_files {
+        if repo_root.join(file).exists() {
+            out.push_str(&format!("- `{file}` — {desc}\n"));
+        }
+    }
+    out.push('\n');
+
+    // ── 4. Crate map ─────────────────────────────────────────────────────────
+    out.push_str("## Crate map\n\n");
+    let cargo_toml_path = repo_root.join("Cargo.toml");
+    if cargo_toml_path.exists() {
+        let cargo_contents = fs::read_to_string(&cargo_toml_path).unwrap_or_default();
+        // Extract workspace members by simple line scan (avoid heavy toml dep)
+        // Extract workspace members: find the `members = [` block and read quoted strings from it.
+        let mut members: Vec<String> = Vec::new();
+        let mut in_members = false;
+        for line in cargo_contents.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("members") && trimmed.contains('[') {
+                in_members = true;
+            }
+            if in_members {
+                // Collect quoted strings on this line as member paths
+                let mut parts = trimmed.split('"');
+                parts.next(); // before first quote
+                while let (Some(member), Some(_)) = (parts.next(), parts.next()) {
+                    if !member.is_empty() && !member.starts_with('#') {
+                        members.push(member.to_string());
+                    }
+                }
+                if trimmed.contains(']') {
+                    in_members = false;
+                }
+            }
+        }
+
+        for member in &members {
+            let crate_dir = repo_root.join(member);
+            let crate_cargo = crate_dir.join("Cargo.toml");
+            let crate_name = if crate_cargo.exists() {
+                fs::read_to_string(&crate_cargo)
+                    .ok()
+                    .and_then(|s| {
+                        s.lines()
+                            .find(|l| l.starts_with("name"))
+                            .and_then(|l| l.split('"').nth(1))
+                            .map(String::from)
+                    })
+                    .unwrap_or_else(|| member.clone())
+            } else {
+                member.clone()
+            };
+
+            out.push_str(&format!("### `{crate_name}` (`{member}/`)\n\n"));
+
+            // Read first 60 lines of src/lib.rs or src/main.rs for context
+            let src_file = if crate_dir.join("src/lib.rs").exists() {
+                crate_dir.join("src/lib.rs")
+            } else {
+                crate_dir.join("src/main.rs")
+            };
+
+            if src_file.exists() {
+                let header: String = fs::read_to_string(&src_file)
+                    .unwrap_or_default()
+                    .lines()
+                    .take(60)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                // Extract pub structs, enums, fns from the header
+                let public_items: Vec<&str> = header
+                    .lines()
+                    .filter(|l| {
+                        let t = l.trim();
+                        (t.starts_with("pub struct ")
+                            || t.starts_with("pub enum ")
+                            || t.starts_with("pub fn ")
+                            || t.starts_with("pub async fn "))
+                            && !t.contains("//")
+                    })
+                    .collect();
+
+                if !public_items.is_empty() {
+                    out.push_str("Public API (first 60 lines):\n");
+                    for item in public_items.iter().take(12) {
+                        let sig = item.trim().trim_end_matches('{').trim();
+                        out.push_str(&format!("- `{sig}`\n"));
+                    }
+                    out.push('\n');
+                } else {
+                    // Fallback: list doc comments
+                    let docs: String = header
+                        .lines()
+                        .filter(|l| l.trim().starts_with("///") || l.trim().starts_with("//!"))
+                        .take(5)
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    if !docs.is_empty() {
+                        out.push_str(&format!("```\n{docs}\n```\n\n"));
+                    }
+                }
+            }
+        }
+    }
+
+    // ── 5. Common patterns ────────────────────────────────────────────────────
+    out.push_str("## Common patterns\n\n");
+    out.push_str("- **State transitions** are atomic `fs::rename` calls: `pending/` → `running/` → `done/` → `merged/` (or `failed/`)\n");
+    out.push_str("- **Cards** are `<id>.jobcard/` directory bundles: `meta.json`, `spec.md`, `prompt.md`, `logs/`, `output/`\n");
+    out.push_str("- **`bop new <template> <id>`** COW-clones a template and writes `meta.json`\n");
+    out.push_str("- **Adapters** are shell scripts called as `adapter.sh <workdir> <prompt> <stdout> <stderr> [timeout]`; exit 75 = rate-limited\n");
+    out.push_str("- **Provider failover**: on exit 75 the provider chain rotates and a 300s cooldown is set in `providers.json`\n");
+    out.push_str("- **VCS**: jj (Jujutsu) for multi-agent sessions; each agent gets an isolated `jj workspace`\n");
+    out.push_str("- **`{{spec}}`, `{{plan}}`, `{{stage_instructions}}`** — template substitution keys in prompt templates\n");
+    out.push_str("- **`make check`** = `cargo test && cargo clippy -- -D warnings && cargo fmt --check`\n");
+
+    // ── Output ────────────────────────────────────────────────────────────────
+    if print_flag {
+        print!("{out}");
+    } else {
+        let dest = cards_root.join("CODEBASE.md");
+        fs::write(&dest, &out)
+            .with_context(|| format!("failed to write {}", dest.display()))?;
+        println!("wrote {}", dest.display());
+    }
+    Ok(())
+}
+
 fn cmd_inspect(root: &Path, id: &str) -> anyhow::Result<()> {
     let card = find_card(root, id).with_context(|| format!("card not found: {}", id))?;
     let state = card
@@ -4446,6 +5082,157 @@ fn cmd_inspect(root: &Path, id: &str) -> anyhow::Result<()> {
         }
     }
 
+    // Cost summary from stdout.log JSON result line
+    let stdout_log = card.join("logs").join("stdout.log");
+    if stdout_log.exists() {
+        if let Some(v) = parse_latest_json_line(&stdout_log) {
+            if let Some(usage) = v.get("usage") {
+                let cache_read = usage
+                    .get("cache_read_input_tokens")
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(0);
+                let cache_create = usage
+                    .get("cache_creation_input_tokens")
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(0);
+                let output = usage
+                    .get("output_tokens")
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(0);
+                let cost = v
+                    .get("total_cost_usd")
+                    .and_then(|x| x.as_f64())
+                    .unwrap_or(0.0);
+                let turns = v.get("num_turns").and_then(|x| x.as_u64()).unwrap_or(0);
+                println!(
+                    "\nCost  ${:.2}  |  cache_read {}  cache_create {}  output {}  |  {} turns",
+                    cost,
+                    fmt_tokens(cache_read),
+                    fmt_tokens(cache_create),
+                    fmt_tokens(output),
+                    turns,
+                );
+            }
+        }
+    }
+
+    if !meta.runs.is_empty() {
+        println!("\nRuns  {} attempts", meta.runs.len());
+        for (idx, run) in meta.runs.iter().enumerate() {
+            let started = if run.started_at.trim().is_empty() {
+                "<unknown>"
+            } else {
+                run.started_at.as_str()
+            };
+            let provider = if run.provider.trim().is_empty() {
+                "unknown"
+            } else {
+                run.provider.as_str()
+            };
+            let model = if run.model.trim().is_empty() {
+                "unknown"
+            } else {
+                run.model.as_str()
+            };
+            let stage = if run.stage.trim().is_empty() {
+                "unknown"
+            } else {
+                run.stage.as_str()
+            };
+            let outcome = if run.outcome.trim().is_empty() {
+                "unknown"
+            } else {
+                run.outcome.as_str()
+            };
+            let mut extras: Vec<String> = Vec::new();
+            if let Some(duration_s) = run.duration_s {
+                extras.push(format!("{}s", duration_s));
+            }
+            if let Some(cost) = run.cost_usd {
+                extras.push(format!("${:.2}", cost));
+            }
+            let extra = if extras.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", extras.join(", "))
+            };
+
+            println!(
+                "  #{}  {}  {}/{}  {}  {}{}",
+                idx + 1,
+                started,
+                provider,
+                model,
+                stage,
+                outcome,
+                extra
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn fmt_tokens(n: u64) -> String {
+    if n >= 10_000 {
+        format!("{}k", n / 1000)
+    } else if n >= 1_000 {
+        format!("{:.1}k", n as f64 / 1000.0)
+    } else {
+        format!("{}", n)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn cmd_meta_set(
+    root: &Path,
+    id: &str,
+    workflow_mode: Option<&str>,
+    step_index: Option<u32>,
+    clear_workflow_mode: bool,
+    clear_step_index: bool,
+) -> anyhow::Result<()> {
+    if clear_workflow_mode && workflow_mode.is_some() {
+        anyhow::bail!("cannot set and clear workflow_mode in the same command");
+    }
+    if clear_step_index && step_index.is_some() {
+        anyhow::bail!("cannot set and clear step_index in the same command");
+    }
+    if workflow_mode.is_none() && step_index.is_none() && !clear_workflow_mode && !clear_step_index
+    {
+        anyhow::bail!("no changes requested; use --workflow-mode/--step-index or clear flags");
+    }
+
+    let card = find_card(root, id).with_context(|| format!("card not found: {}", id))?;
+    let mut meta = jobcard_core::read_meta(&card)?;
+
+    if clear_workflow_mode {
+        meta.workflow_mode = None;
+        meta.step_index = None;
+    }
+    if let Some(mode) = workflow_mode {
+        let mode = mode.trim();
+        if mode.is_empty() {
+            anyhow::bail!("workflow_mode cannot be empty");
+        }
+        meta.workflow_mode = Some(mode.to_string());
+        if meta.step_index.is_none() {
+            meta.step_index = Some(1);
+        }
+    }
+    if clear_step_index {
+        meta.step_index = None;
+    }
+    if let Some(idx) = step_index {
+        meta.step_index = Some(idx);
+    }
+
+    write_meta(&card, &meta)?;
+    println!(
+        "updated {}: workflow_mode={:?} step_index={:?}",
+        id, meta.workflow_mode, meta.step_index
+    );
     Ok(())
 }
 

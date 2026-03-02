@@ -5,3 +5,6 @@ implement	context7,graphiti-memory,auto-claude	linear	Coder default mapping	auto
 qa	context7,graphiti-memory,auto-claude	linear,electron,puppeteer	QA reviewer/fixer mapping	auto-claude agent_mcp_matrix.tsv
 utility	-	context7	PR reviewer and analysis use context7	auto-claude agent_mcp_matrix.tsv
 ideation	-	context7	roadmap_discovery uses context7	auto-claude agent_mcp_matrix.tsv
+roadmap	-	context7	roadmap_features uses context7	auto-claude prompts catalog
+pr-fix	context7,graphiti-memory,auto-claude	linear	Fixer flow for PR findings	auto-claude prompts catalog
+mr-fix	context7,graphiti-memory,auto-claude	linear	Fixer flow for MR findings	bop adaptation

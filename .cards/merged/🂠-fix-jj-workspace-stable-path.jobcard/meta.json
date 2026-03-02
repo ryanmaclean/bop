@@ -1,0 +1,53 @@
+{
+  "id": "fix-jj-workspace-stable-path",
+  "created": "2026-03-02T03:47:01.780877Z",
+  "stage": "implement",
+  "timeout_seconds": 3600,
+  "provider_chain": [
+    "claude"
+  ],
+  "stages": {
+    "implement": {
+      "status": "done",
+      "agent": "adapters/claude.zsh",
+      "provider": "claude",
+      "duration_s": 65,
+      "started": "2026-03-02T04:44:28.293736Z"
+    }
+  },
+  "acceptance_criteria": [
+    "cargo build",
+    "cargo clippy -- -D warnings",
+    "grep -q '\\.workspaces' crates/jc/src/main.rs",
+    "jj log -r 'main..@-' | grep -q ."
+  ],
+  "worktree_branch": "job/fix-jj-workspace-stable-path",
+  "template_namespace": "implement",
+  "vcs_engine": "jj",
+  "workspace_name": "ws-fix-jj-workspace-stable-path-1772426667948",
+  "workspace_path": ".cards/running/🂠-fix-jj-workspace-stable-path.jobcard/workspace",
+  "change_ref": "@  wuqprqqmyxmo\n│\n~",
+  "policy_result": "pass",
+  "retry_count": 0,
+  "failure_reason": "policy_violation",
+  "validation_summary": {
+    "total": 0,
+    "valid": 0,
+    "invalid": 0,
+    "alert_count": 1,
+    "critical_alerts": 1,
+    "health": "down"
+  },
+  "stage_chain": [
+    "implement"
+  ],
+  "stage_models": {
+    "implement": "sonnet"
+  },
+  "stage_providers": {
+    "implement": "claude"
+  },
+  "stage_budgets": {
+    "implement": 40000
+  }
+}

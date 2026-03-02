@@ -108,6 +108,8 @@ if policy_path.exists() and tomllib is not None:
     if isinstance(loaded, dict):
         policy.update(loaded)
 
+RUNTIME_STATES = ("pending", "running", "done", "failed", "merged")
+
 
 def run(cmd, cwd=None):
     return subprocess.run(cmd, cwd=cwd, text=True, capture_output=True)
@@ -149,6 +151,32 @@ def parse_numstat(raw: str):
     return rows
 
 
+def normalize_rel(path: str) -> str:
+    p = path.replace("\\", "/").lstrip("./")
+    while "//" in p:
+        p = p.replace("//", "/")
+    return p.rstrip("/")
+
+
+cards_rel = None
+try:
+    cards_rel = normalize_rel(str(cards_dir.resolve().relative_to(repo_root)))
+except Exception:
+    if not cards_dir.is_absolute():
+        cards_rel = normalize_rel(str(cards_dir))
+
+
+def runtime_roots():
+    roots = [f".cards/{s}" for s in RUNTIME_STATES]
+    if cards_rel:
+        roots.extend(f"{cards_rel}/{s}" for s in RUNTIME_STATES)
+    uniq = []
+    for r in roots:
+        if r not in uniq:
+            uniq.append(r)
+    return uniq
+
+
 if mode == "staged":
     git_ctx = repo_root
     diff_base_cmd = ["git", "-C", str(git_ctx), "diff", "--cached"]
@@ -187,6 +215,20 @@ changed_loc = sum(a + d for a, d, _ in numstat)
 
 reasons = []
 
+# Runtime card directories should not be committed as source changes.
+for p in sorted(set(changed_paths)):
+    p_norm = normalize_rel(p)
+    for root in runtime_roots():
+        if not p_norm.startswith(root + "/"):
+            continue
+        if ".jobcard/" not in p_norm:
+            continue
+        if p_norm.endswith("/meta.json"):
+            reasons.append(f"runtime card meta changed in VCS diff: {p}")
+        else:
+            reasons.append(f"runtime card path changed in VCS diff: {p}")
+        break
+
 # Rule 1: top-level file allowlist for additions.
 allow_top = set(policy.get("allow_new_top_level_files", []))
 for status, path in ns:
@@ -223,11 +265,29 @@ decision_path = None
 if mode == "card":
     card_dir = pathlib.Path(card_dir_env).resolve()
     meta_path = card_dir / "meta.json"
+    for required in ("meta.json", "logs", "output"):
+        target = card_dir / required
+        if not target.exists():
+            reasons.append(f"card bundle missing required path: {target}")
+
     if meta_path.exists():
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            if not isinstance(meta, dict):
+                reasons.append(f"invalid meta.json object: {meta_path}")
+                meta = {}
         except Exception:
             reasons.append(f"invalid meta.json: {meta_path}")
+
+    wf = meta.get("workflow_mode")
+    if wf is not None and (not isinstance(wf, str) or not wf.strip()):
+        reasons.append("meta.workflow_mode must be a non-empty string when set")
+    step = meta.get("step_index")
+    if step is not None:
+        if not isinstance(step, int) or step < 1:
+            reasons.append("meta.step_index must be an integer >= 1 when set")
+        if wf is None:
+            reasons.append("meta.step_index requires meta.workflow_mode")
 
     # Rule 3: changed paths must stay in policy scope (if provided).
     scope_paths = meta.get("policy_scope") or []

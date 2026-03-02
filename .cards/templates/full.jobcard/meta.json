@@ -1,8 +1,10 @@
 {
   "id": "REPLACE_ID",
-  "created": null,
+  "created": "2026-03-01T00:00:00Z",
   "agent_type": null,
   "stage": "spec",
+  "workflow_mode": "full-spec",
+  "step_index": 1,
   "priority": null,
   "glyph": null,
   "token": null,
