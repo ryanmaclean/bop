@@ -689,6 +689,13 @@ struct ProvidersFile {
     providers: std::collections::BTreeMap<String, Provider>,
 }
 
+type ProviderSelection = (
+    String,
+    String,
+    i32,
+    std::collections::BTreeMap<String, String>,
+);
+
 #[derive(Debug, Clone)]
 struct WorkspaceInfo {
     name: String,
@@ -2957,10 +2964,15 @@ async fn run_dispatcher(
                         let _ = write_meta(&running_path, meta);
                     }
 
-                    let (exit_code, mut meta) =
-                        run_card(cards_dir, &running_path, &provider_cmd, &provider_name, &provider_env)
-                            .await
-                            .unwrap_or((1, None));
+                    let (exit_code, mut meta) = run_card(
+                        cards_dir,
+                        &running_path,
+                        &provider_cmd,
+                        &provider_name,
+                        &provider_env,
+                    )
+                    .await
+                    .unwrap_or((1, None));
 
                     let is_rate_limited = exit_code == rate_limit_exit;
 
@@ -3425,7 +3437,7 @@ fn select_provider(
     cards_dir: &Path,
     meta: Option<&mut Meta>,
     stage: &str,
-) -> anyhow::Result<Option<(String, String, i32, std::collections::BTreeMap<String, String>)>> {
+) -> anyhow::Result<Option<ProviderSelection>> {
     let pf = read_providers(cards_dir)?;
     let now = Utc::now().timestamp();
 
@@ -3467,7 +3479,12 @@ fn select_provider(
             }
         }
 
-        return Ok(Some((name, p.command.clone(), p.rate_limit_exit, p.env.clone())));
+        return Ok(Some((
+            name,
+            p.command.clone(),
+            p.rate_limit_exit,
+            p.env.clone(),
+        )));
     }
 
     if let Some((name, cmd, env)) = fallback {
