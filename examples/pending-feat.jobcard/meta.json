@@ -1,0 +1,20 @@
+{
+  "id": "pending-feat",
+  "created": "2026-03-01T00:00:00Z",
+  "stage": "implement",
+  "glyph": "🂻",
+  "title": "Pending Feature",
+  "description": "A feature card waiting to be picked up by the dispatcher.",
+  "provider_chain": ["claude", "ollama"],
+  "stages": {
+    "implement": { "status": "pending" }
+  },
+  "acceptance_criteria": ["make check"],
+  "labels": [{"name": "example", "kind": "scope"}],
+  "subtasks": [
+    {"id": "s1", "title": "Write failing test", "done": false},
+    {"id": "s2", "title": "Implement function", "done": false},
+    {"id": "s3", "title": "Commit", "done": false}
+  ],
+  "progress": 0
+}

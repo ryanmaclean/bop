@@ -1,0 +1,28 @@
+{
+  "id": "running-feat",
+  "created": "2026-03-01T00:00:00Z",
+  "stage": "implement",
+  "glyph": "🂻",
+  "title": "Running Feature",
+  "description": "An agent is actively working on this card inside a zellij session.",
+  "provider_chain": ["claude"],
+  "stages": {
+    "implement": {
+      "status": "running",
+      "agent": "adapters/claude.zsh",
+      "provider": "claude",
+      "started": "2026-03-01T01:00:00Z"
+    }
+  },
+  "acceptance_criteria": ["make check"],
+  "zellij_session": "bop-running-feat",
+  "zellij_pane": "1",
+  "worktree_branch": "job/running-feat",
+  "labels": [{"name": "example", "kind": "scope"}, {"name": "in-flight", "kind": "effort"}],
+  "subtasks": [
+    {"id": "s1", "title": "Write failing test", "done": true},
+    {"id": "s2", "title": "Implement function", "done": false},
+    {"id": "s3", "title": "Commit", "done": false}
+  ],
+  "progress": 33
+}

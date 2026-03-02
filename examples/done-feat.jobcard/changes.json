@@ -1,0 +1,8 @@
+{
+  "branch": "job/done-feat",
+  "files_changed": [
+    {"path": "src/hello.rs", "status": "added"},
+    {"path": "src/main.rs", "status": "modified"}
+  ],
+  "stats": {"files_changed": 2, "insertions": 42, "deletions": 3}
+}
