@@ -1865,6 +1865,15 @@ fn cmd_doctor(cards_root: &Path) -> anyhow::Result<()> {
         }
     }
 
+    // ── zellij plugin ──────────────────────────────────────────────────────
+    let home = std::env::var("HOME").unwrap_or_default();
+    let plugin_path = Path::new(&home).join(".config/zellij/plugins/bop.wasm");
+    if plugin_path.exists() {
+        println!("ok\tzellij plugin ({})", plugin_path.display());
+    } else {
+        println!("missing\tzellij plugin (run `bop factory install`)");
+    }
+
     // ── adapters ────────────────────────────────────────────────────────────
     println!("\n── adapters ──");
     let adapters_dir = cards_root.parent().unwrap_or(cards_root).join("adapters");
