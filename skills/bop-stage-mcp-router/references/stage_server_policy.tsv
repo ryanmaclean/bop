@@ -1,0 +1,7 @@
+stage	required_servers	optional_servers	notes	source
+spec	-	context7	Used by spec_researcher only	auto-claude agent_mcp_matrix.tsv
+plan	context7,graphiti-memory,auto-claude	linear	Planner default mapping	auto-claude agent_mcp_matrix.tsv
+implement	context7,graphiti-memory,auto-claude	linear	Coder default mapping	auto-claude agent_mcp_matrix.tsv
+qa	context7,graphiti-memory,auto-claude	linear,electron,puppeteer	QA reviewer/fixer mapping	auto-claude agent_mcp_matrix.tsv
+utility	-	context7	PR reviewer and analysis use context7	auto-claude agent_mcp_matrix.tsv
+ideation	-	context7	roadmap_discovery uses context7	auto-claude agent_mcp_matrix.tsv

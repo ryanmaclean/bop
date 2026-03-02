@@ -1,0 +1,6 @@
+stage	allowed_paths	forbidden_paths
+spec	spec.md,prompt.md,output/*	rename in running/,arbitrary files outside card
+plan	spec.md,prompt.md,output/*	destructive edits to logs/,manual state folder moves
+implement	output/*,logs/*,worktree/*	manual meta corruption,non-atomic meta writes
+qa	output/*,logs/*,qa report artifacts	state folder edits bypassing bop commands
+any	meta.json via atomic protocol only	non-atomic partial writes to meta.json

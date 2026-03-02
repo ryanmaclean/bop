@@ -20,6 +20,9 @@ if [[ "$stderr_log" != /* ]]; then
     stderr_log="$orig_dir/$stderr_log"
 fi
 
+# Allow spawning claude from within a Claude Code session
+unset CLAUDECODE
+
 claude -p "$(cat "$prompt_file")" \
   --dangerously-skip-permissions \
   --output-format json \

@@ -1,0 +1,8 @@
+workflow_mode	recommended_template	recommended_stage_chain	primary_stage	notes
+default-feature	implement	implement,qa	implement	standard feature/fix flow
+full-spec	full	spec,plan,implement,qa	spec	for ambiguous or larger work
+ideation	ideation	ideation,qa	ideation	idea generation with QA sanity review
+roadmap	roadmap	roadmap,qa	roadmap	roadmap authoring + review
+pr-fix	pr-fix	implement,qa	implement	fix findings from GitHub PR review
+mr-fix	mr-fix	implement,qa	implement	fix findings from GitLab MR review
+qa-only	qa-only	qa	qa	review-only flow

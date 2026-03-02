@@ -19,8 +19,6 @@
 .worktrees/
 
 # Exploration / research scratch (not part of the build)
-research/
-skills/
 emoji_personas.md
 
 # Finder custom icons (contain \r in filename)
