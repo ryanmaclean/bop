@@ -1,0 +1,105 @@
+{
+  "id": "jobcard-spec-v1",
+  "created": "2026-03-01T00:00:00Z",
+  "glyph": "\ud83c\udcb1",
+  "title": "Write jobcard-spec-v1.md \u2014 the format spec",
+  "description": "Like Apache Iceberg defines a table format, this defines the jobcard format. Any agent/tool that can write JSON + directories can produce or consume cards without the CLI.",
+  "labels": [
+    {
+      "name": "Architecture",
+      "kind": "domain"
+    },
+    {
+      "name": "Spec",
+      "kind": "scope"
+    }
+  ],
+  "priority": 1,
+  "progress": 0,
+  "subtasks": [
+    {
+      "id": "schema",
+      "title": "JSON schema for meta.json (required + optional fields)",
+      "done": false
+    },
+    {
+      "id": "bundle",
+      "title": "Directory bundle convention (.jobcard/ structure)",
+      "done": false
+    },
+    {
+      "id": "states",
+      "title": "State machine: pending/running/done/failed/merged",
+      "done": false
+    },
+    {
+      "id": "producer",
+      "title": "Minimal producer contract (what any creator must write)",
+      "done": false
+    },
+    {
+      "id": "consumer",
+      "title": "Minimal consumer contract (what any runtime must honour)",
+      "done": false
+    },
+    {
+      "id": "example",
+      "title": "20-line shell example: create + queue a card, no CLI",
+      "done": false
+    }
+  ],
+  "stage": "spec",
+  "stages": {
+    "spec": {
+      "status": "pending",
+      "agent": null
+    },
+    "plan": {
+      "status": "pending",
+      "agent": null
+    },
+    "implement": {
+      "status": "pending",
+      "agent": null
+    },
+    "qa": {
+      "status": "blocked",
+      "agent": null,
+      "blocked_by": "implement"
+    }
+  },
+  "acceptance_criteria": [
+    "test -f docs/jobcard-spec-v1.md",
+    "wc -l docs/jobcard-spec-v1.md | awk '{print ($1 <= 500)}'"
+  ],
+  "decision_required": true,
+  "provider_chain": [
+    "claude"
+  ],
+  "retry_count": 0,
+  "stage_chain": [
+    "spec",
+    "plan",
+    "implement",
+    "qa"
+  ],
+  "stage_models": {
+    "spec": "opus",
+    "plan": "opus",
+    "implement": "opus",
+    "qa": "opus"
+  },
+  "stage_providers": {
+    "spec": "claude",
+    "plan": "claude",
+    "implement": "claude",
+    "qa": "claude"
+  },
+  "stage_budgets": {
+    "spec": 32000,
+    "plan": 32000,
+    "implement": 32000,
+    "qa": 32000
+  },
+  "token": "\u2665"
+}

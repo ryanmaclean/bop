@@ -1,0 +1,39 @@
+{
+  "id": "bop-test-the-dogfood-script",
+  "created": "2026-03-02T01:21:38.746159Z",
+  "glyph": "🂫",
+  "stage": "spec",
+  "provider_chain": [
+    "claude"
+  ],
+  "stages": {
+    "spec": {
+      "status": "failed",
+      "agent": "adapters/claude.zsh",
+      "provider": "claude",
+      "duration_s": 2995,
+      "started": "2026-03-02T03:48:07.364506Z"
+    }
+  },
+  "worktree_branch": "job/bop-test-the-dogfood-script",
+  "template_namespace": "implement",
+  "vcs_engine": "jj",
+  "workspace_name": "ws-bop-test-the-dogfood-script-1772423286947",
+  "workspace_path": ".cards/running/bop-test-the-dogfood-script.jobcard/workspace",
+  "change_ref": "@  mnsxlqwwuoys\n│\n~",
+  "retry_count": 0,
+  "zellij_session": "bop-bop-test-the-dogfood-script",
+  "zellij_pane": "1",
+  "stage_chain": [
+    "spec"
+  ],
+  "stage_models": {
+    "spec": "opus"
+  },
+  "stage_providers": {
+    "spec": "claude"
+  },
+  "stage_budgets": {
+    "spec": 32000
+  }
+}

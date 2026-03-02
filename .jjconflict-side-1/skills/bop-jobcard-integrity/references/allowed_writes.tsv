@@ -1,0 +1,10 @@
+stage	allowed_paths	forbidden_paths
+spec	spec.md,prompt.md,output/*	rename in running/,arbitrary files outside card
+plan	spec.md,prompt.md,output/*	destructive edits to logs/,manual state folder moves
+ideation	spec.md,prompt.md,output/*	code changes before selected approach
+roadmap	spec.md,prompt.md,output/*	implementation edits during roadmap stage
+implement	output/*,logs/*,worktree/*	manual meta corruption,non-atomic meta writes
+pr-fix	output/*,logs/*,worktree/*	unscoped rewrites unrelated to review findings
+mr-fix	output/*,logs/*,worktree/*	unscoped rewrites unrelated to review findings
+qa	output/*,logs/*,qa report artifacts	state folder edits bypassing bop commands
+any	meta.json via `bop meta set` or atomic protocol; links.md/Logs.webloc/Session.webloc are bop-managed	non-atomic partial writes to meta.json

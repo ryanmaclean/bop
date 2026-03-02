@@ -1,0 +1,82 @@
+name: JobCard Wait
+description: Poll the JobCard API until a job completes. Fails the step if the job fails.
+
+branding:
+  icon: clock
+  color: blue
+
+inputs:
+  api-url:
+    description: Base URL of the JobCard API server (e.g. http://runner:8765)
+    required: true
+  job-id:
+    description: Job ID to wait for
+    required: true
+  poll-interval-seconds:
+    description: Seconds to wait between status polls
+    required: false
+    default: '10'
+  timeout-minutes:
+    description: Maximum minutes to wait before failing
+    required: false
+    default: '60'
+
+outputs:
+  state:
+    description: Final state of the job (done, failed, merged)
+    value: ${{ steps.wait.outputs.state }}
+
+runs:
+  using: composite
+  steps:
+    - name: Poll for completion
+      id: wait
+      shell: bash
+      run: |
+        DEADLINE=$(( $(date +%s) + ${{ inputs.timeout-minutes }} * 60 ))
+        JOB_ID="${{ inputs.job-id }}"
+        API_URL="${{ inputs.api-url }}"
+
+        echo "Waiting for job: $JOB_ID (timeout: ${{ inputs.timeout-minutes }}m)"
+
+        while true; do
+          NOW=$(date +%s)
+          if [ "$NOW" -ge "$DEADLINE" ]; then
+            echo "::error::Timed out waiting for job $JOB_ID after ${{ inputs.timeout-minutes }} minutes"
+            exit 1
+          fi
+
+          HTTP_CODE=$(curl -s -o /tmp/jc-status.json -w "%{http_code}" \
+            "$API_URL/jobs/$JOB_ID")
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::warning::Status poll returned HTTP $HTTP_CODE — retrying"
+            sleep "${{ inputs.poll-interval-seconds }}"
+            continue
+          fi
+
+          STATE=$(jq -r '.job.state' /tmp/jc-status.json)
+          echo "Job $JOB_ID state: $STATE"
+
+          case "$STATE" in
+            done|merged)
+              echo "state=$STATE" >> "$GITHUB_OUTPUT"
+              echo "Job $JOB_ID completed successfully (state: $STATE)"
+              exit 0
+              ;;
+            failed)
+              REASON=$(jq -r '.job.failure_reason // "unknown"' /tmp/jc-status.json)
+              echo "state=failed" >> "$GITHUB_OUTPUT"
+              echo "::error::Job $JOB_ID failed: $REASON"
+              exit 1
+              ;;
+            pending|running)
+              echo "Job still in progress (state: $STATE) — waiting ${{ inputs.poll-interval-seconds }}s"
+              sleep "${{ inputs.poll-interval-seconds }}"
+              ;;
+            *)
+              echo "::warning::Unexpected state '$STATE' — retrying"
+              sleep "${{ inputs.poll-interval-seconds }}"
+              ;;
+          esac
+        done

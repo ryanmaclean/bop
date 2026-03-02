@@ -1,0 +1,17 @@
+{{system_context}}
+
+---
+
+{{stage_instructions}}
+
+---
+
+Card: {{id}} {{glyph}}
+Stage: {{stage}} ({{stage_index}} of {{stage_count}})
+
+---
+
+{{spec}}
+
+Acceptance criteria:
+{{acceptance_criteria}}

@@ -1,0 +1,23 @@
+name: Repo Health
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  health:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build and quality gates
+        run: make check
+
+      - name: Policy check (staged scope)
+        run: scripts/policy_check.zsh --staged --cards-dir .cards

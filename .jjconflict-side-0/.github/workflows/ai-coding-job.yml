@@ -1,0 +1,77 @@
+name: AI Coding Job
+
+# Trigger an AI coding job whenever a PR is labeled "ai-implement".
+# The job runs on a self-hosted runner that has the JobCard daemon running.
+# On completion, output files are uploaded as a workflow artifact.
+
+on:
+  pull_request:
+    types: [labeled]
+
+jobs:
+  ai-coding:
+    if: github.event.label.name == 'ai-implement'
+    runs-on: self-hosted  # Must be the runner with jc daemon + jc serve
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build job spec from PR
+        id: spec
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          # Use env vars (not inline expressions) to avoid command injection
+          SPEC="Implement the feature described in PR #${PR_NUMBER}: ${PR_TITLE}"$'\n\n'"Branch: ${PR_BRANCH}"
+          # Store as a multi-line output safely
+          {
+            echo "spec<<SPEC_EOF"
+            echo "$SPEC"
+            echo "SPEC_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create JobCard job
+        id: create
+        uses: ./.github/actions/jobcard-create
+        with:
+          api-url: http://127.0.0.1:8765
+          template: implement
+          spec: ${{ steps.spec.outputs.spec }}
+          acceptance-criteria: '["Tests pass","Linter clean","PR description updated"]'
+
+      - name: Wait for completion
+        uses: ./.github/actions/jobcard-wait
+        with:
+          api-url: http://127.0.0.1:8765
+          job-id: ${{ steps.create.outputs.job-id }}
+          timeout-minutes: 45
+
+      - name: Retrieve output
+        uses: ./.github/actions/jobcard-output
+        with:
+          api-url: http://127.0.0.1:8765
+          job-id: ${{ steps.create.outputs.job-id }}
+          output-dir: ai-output
+
+      - name: Comment on PR with result
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const jobId = process.env.JOB_ID;
+            let body = `## AI Coding Job Result\n\nJob \`${jobId}\` completed.\n`;
+            const reportPath = 'ai-output/qa_report.md';
+            if (fs.existsSync(reportPath)) {
+              body += '\n### QA Report\n\n' + fs.readFileSync(reportPath, 'utf8');
+            }
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+        env:
+          JOB_ID: ${{ steps.create.outputs.job-id }}

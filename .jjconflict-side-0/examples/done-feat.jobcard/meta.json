@@ -1,0 +1,28 @@
+{
+  "id": "done-feat",
+  "created": "2026-03-01T00:00:00Z",
+  "stage": "qa",
+  "glyph": "🂻",
+  "token": "♠",
+  "title": "Done Feature",
+  "description": "Implementation complete. QA passed. Ready for merge-gate review.",
+  "stage_chain": ["implement", "qa"],
+  "stage_models": { "implement": "opus", "qa": "sonnet" },
+  "stage_providers": { "implement": "claude", "qa": "claude" },
+  "stage_budgets": { "implement": 32000, "qa": 8000 },
+  "provider_chain": ["claude"],
+  "stages": {
+    "implement": { "status": "done", "provider": "claude", "duration_s": 134 },
+    "qa": { "status": "done", "provider": "claude" }
+  },
+  "acceptance_criteria": ["cargo test", "cargo clippy -- -D warnings"],
+  "policy_result": "pass",
+  "worktree_branch": "job/done-feat",
+  "labels": [{"name": "example", "kind": "scope"}, {"name": "2h", "kind": "effort"}],
+  "subtasks": [
+    {"id": "s1", "title": "Write failing test", "done": true},
+    {"id": "s2", "title": "Implement function", "done": true},
+    {"id": "s3", "title": "Commit", "done": true}
+  ],
+  "progress": 100
+}

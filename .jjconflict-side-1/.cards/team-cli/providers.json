@@ -1,0 +1,12 @@
+{
+  "providers": {
+    "claude": {
+      "command": "adapters/claude.zsh",
+      "rate_limit_exit": 75
+    },
+    "mock": {
+      "command": "adapters/mock.zsh",
+      "rate_limit_exit": 75
+    }
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "branch": "@  oxytouxrmltl\n│\n~",
+  "files_changed": [
+    {
+      "path": "\".cards/pending/\\360\\237\\202\\240-short-cli-flags.jobcard/Info.plist\"",
+      "status": "deleted"
+    },
+    {
+      "path": "\".cards/pending/\\360\\237\\202\\240-short-cli-flags.jobcard/Logs.webloc\"",
+      "status": "deleted"
+    },
+    {
+      "path": "\".cards/pending/\\360\\237\\202\\240-short-cli-flags.jobcard/QuickLook/Thumbnail.png\"",
+      "status": "deleted"
+    },
+    {
+      "path": "\".cards/pending/\\360\\237\\202\\240-short-cli-flags.jobcard/links.md\"",
+      "status": "deleted"
+    },
+    {
+      "path": "\".cards/pending/\\360\\237\\202\\240-short-cli-flags.jobcard/meta.json\"",
+      "status": "deleted"
+    },
+    {
+      "path": "\".cards/pending/\\360\\237\\202\\240-short-cli-flags.jobcard/prompt.md\"",
+      "status": "deleted"
+    },
+    {
+      "path": "\".cards/pending/\\360\\237\\202\\240-short-cli-flags.jobcard/spec.md\"",
+      "status": "deleted"
+    },
+    {
+      "path": ".cards/providers.json",
+      "status": "modified"
+    },
+    {
+      "path": "adapters/claude.zsh",
+      "status": "modified"
+    },
+    {
+      "path": "macos/macos.xcodeproj/project.pbxproj",
+      "status": "modified"
+    }
+  ],
+  "stats": {
+    "files_changed": 10,
+    "insertions": 15,
+    "deletions": 132
+  }
+}

@@ -1,0 +1,5 @@
+repo_url=https://github.com/stackblitz-labs/bolt.diy
+local_clone=/Users/studio/bop/research/vendor/bolt.diy
+commit=2e254ac19a696394030601bc602f54945b12bfc4
+commit_short=2e254ac
+exported_at=2026-03-02T03:21:46Z

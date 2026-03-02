@@ -1,0 +1,30 @@
+{
+  "id": "REPLACE_ID",
+  "created": "2026-03-01T00:00:00Z",
+  "agent_type": null,
+  "stage": "implement",
+  "workflow_mode": "default-feature",
+  "step_index": 1,
+  "priority": null,
+  "glyph": null,
+  "token": null,
+  "stage_chain": ["implement"],
+  "stage_models": {
+    "implement": "ollama-local"
+  },
+  "stage_providers": {
+    "implement": "ollama-local"
+  },
+  "stage_budgets": {
+    "implement": 4000
+  },
+  "provider_chain": ["ollama-local"],
+  "acceptance_criteria": [
+    "cargo test",
+    "cargo clippy -- -D warnings"
+  ],
+  "worktree_branch": "job/REPLACE_ID",
+  "timeout_seconds": 600,
+  "retry_count": 0,
+  "failure_reason": null
+}

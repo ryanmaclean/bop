@@ -1,0 +1,5 @@
+profile_id	name	description	icon	default_model	default_thinking	spec_model	planning_model	coding_model	qa_model	spec_thinking	planning_thinking	coding_thinking	qa_thinking	source
+auto	Auto (Optimized)	Uses Opus across all phases with optimized thinking levels	Sparkles	opus	high	opus	opus	opus	opus	high	high	low	low	out/renderer/assets/index-3inA-y1N.js:464-474
+complex	Complex Tasks	For intricate, multi-step implementations requiring deep analysis	Brain	opus	high	opus	opus	opus	opus	high	high	high	high	out/renderer/assets/index-3inA-y1N.js:475-484
+balanced	Balanced	Good balance of speed and quality for most tasks	Scale	sonnet	medium	sonnet	sonnet	sonnet	sonnet	medium	medium	medium	medium	out/renderer/assets/index-3inA-y1N.js:485-494
+quick	Quick Edits	Fast iterations for simple changes and quick fixes	Zap	haiku	low	haiku	haiku	haiku	haiku	low	low	low	low	out/renderer/assets/index-3inA-y1N.js:495-504

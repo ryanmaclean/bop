@@ -1,0 +1,100 @@
+{
+  "id": "ql-interactive",
+  "glyph": "\ud83c\udcae",
+  "title": "Interactive Quick Look preview",
+  "description": "Wire Stop/Approve buttons in the QL SwiftUI card to JobCardHost via jobcard:// URL scheme so clicks dispatch jc commands.",
+  "labels": [
+    {
+      "name": "macOS",
+      "kind": "domain"
+    },
+    {
+      "name": "High Impact",
+      "kind": "effort"
+    }
+  ],
+  "progress": 0,
+  "subtasks": [
+    {
+      "id": "url-scheme",
+      "title": "Register jobcard:// scheme in JobCardHost Info.plist",
+      "done": false
+    },
+    {
+      "id": "host-handler",
+      "title": "Handle URLs in JobCardHostApp.swift \u2192 exec jc commands",
+      "done": false
+    },
+    {
+      "id": "ql-buttons",
+      "title": "Wire Stop and Approve buttons in PreviewViewController to open URLs",
+      "done": false
+    },
+    {
+      "id": "entitlements",
+      "title": "Remove sandbox entitlement from JobCardHost so it can exec jc",
+      "done": false
+    },
+    {
+      "id": "approve-btn",
+      "title": "Add Approve button when meta.decision_required == true",
+      "done": false
+    }
+  ],
+  "created": "2026-03-01T00:00:00Z",
+  "stage": "spec",
+  "priority": 2,
+  "provider_chain": [
+    "claude"
+  ],
+  "stages": {
+    "spec": {
+      "status": "done",
+      "agent": "human"
+    },
+    "plan": {
+      "status": "pending",
+      "agent": null
+    },
+    "implement": {
+      "status": "blocked",
+      "agent": null,
+      "blocked_by": "plan"
+    },
+    "qa": {
+      "status": "blocked",
+      "agent": null,
+      "blocked_by": "implement"
+    }
+  },
+  "acceptance_criteria": [
+    "xcodebuild -scheme macos -destination 'platform=macOS' build 2>&1 | grep -q 'BUILD SUCCEEDED'"
+  ],
+  "decision_required": false,
+  "retry_count": 0,
+  "stage_chain": [
+    "spec",
+    "plan",
+    "implement",
+    "qa"
+  ],
+  "stage_models": {
+    "spec": "opus",
+    "plan": "opus",
+    "implement": "opus",
+    "qa": "opus"
+  },
+  "stage_providers": {
+    "spec": "claude",
+    "plan": "claude",
+    "implement": "claude",
+    "qa": "claude"
+  },
+  "stage_budgets": {
+    "spec": 32000,
+    "plan": 32000,
+    "implement": 32000,
+    "qa": 32000
+  },
+  "token": "\u2663"
+}

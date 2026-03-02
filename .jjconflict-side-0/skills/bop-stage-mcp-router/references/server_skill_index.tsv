@@ -1,0 +1,7 @@
+server_id	skill_name	skill_path	primary_use
+context7	bop-mcp-context7	/Users/studio/bop/skills/bop-mcp-context7/SKILL.md	documentation lookup
+graphiti-memory	bop-mcp-graphiti-memory	/Users/studio/bop/skills/bop-mcp-graphiti-memory/SKILL.md	cross-session knowledge
+auto-claude	bop-mcp-jobcard-tools	/Users/studio/bop/skills/bop-mcp-jobcard-tools/SKILL.md	build progress and card memory
+linear	bop-mcp-linear	/Users/studio/bop/skills/bop-mcp-linear/SKILL.md	project and issue sync
+electron	bop-mcp-electron	/Users/studio/bop/skills/bop-mcp-electron/SKILL.md	desktop QA automation
+puppeteer	bop-mcp-puppeteer	/Users/studio/bop/skills/bop-mcp-puppeteer/SKILL.md	web QA automation

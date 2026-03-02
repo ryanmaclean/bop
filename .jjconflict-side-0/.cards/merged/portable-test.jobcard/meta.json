@@ -1,0 +1,33 @@
+{
+  "id": "portable-test",
+  "created": "2026-03-01T07:40:00Z",
+  "stage": "implement",
+  "provider_chain": [
+    "claude"
+  ],
+  "stages": {
+    "implement": {
+      "status": "done",
+      "agent": "adapters/claude.sh",
+      "provider": "claude",
+      "duration_s": 79,
+      "started": "2026-03-01T07:40:34.293653Z"
+    }
+  },
+  "worktree_branch": "job/portable-test",
+  "retry_count": 0,
+  "stage_chain": [
+    "implement"
+  ],
+  "stage_models": {
+    "implement": "opus"
+  },
+  "stage_providers": {
+    "implement": "claude"
+  },
+  "stage_budgets": {
+    "implement": 32000
+  },
+  "token": "\u2660",
+  "glyph": "\ud83c\udcab"
+}

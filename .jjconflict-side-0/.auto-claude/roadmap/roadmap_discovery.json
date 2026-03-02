@@ -1,0 +1,125 @@
+{
+  "project_name": "JobCard - Heterogeneous Agent Orchestrator",
+  "project_type": "cli",
+  "tech_stack": {
+    "primary_language": "Rust",
+    "frameworks": ["Tokio (async runtime)", "Clap (CLI parsing)"],
+    "key_dependencies": ["anyhow", "chrono", "clap", "serde", "serde_json", "thiserror", "walkdir"]
+  },
+  "target_audience": {
+    "primary_persona": "Software developers and AI engineers who want to automate coding tasks using multiple AI agents in parallel",
+    "secondary_personas": [
+      "Engineering teams wanting to parallelize AI-assisted development workflows",
+      "DevOps engineers integrating AI coding agents into CI/CD pipelines",
+      "Solo developers managing complex multi-stage AI coding tasks"
+    ],
+    "pain_points": [
+      "Managing multiple AI agents (Claude, Codex, Aider, etc.) across different tasks is manual and error-prone",
+      "No reliable way to track state of long-running AI coding jobs",
+      "Rate limiting from a single provider stalls entire workflows",
+      "Hard to audit what an AI agent did, when, and with what output",
+      "No automated quality gate before AI-generated code is merged"
+    ],
+    "goals": [
+      "Run parallel AI coding jobs without manual supervision",
+      "Automatically failover between AI providers when rate-limited",
+      "Get clean audit logs and output artifacts from every job",
+      "Merge AI-produced code only when acceptance criteria pass",
+      "Keep the system simple, transparent, and crash-recoverable"
+    ],
+    "usage_context": "Used locally on macOS (primary) or Linux by individual developers or small teams who want to delegate coding tasks to AI agents while they work on other things. Run as daemons via launchd/systemd or invoked ad-hoc from the CLI."
+  },
+  "product_vision": {
+    "one_liner": "A filesystem-first orchestrator that runs parallel AI coding agents as first-class macOS document bundles, with automatic provider failover and merge-gated quality control.",
+    "problem_statement": "Developers using AI coding agents (Claude, Codex, Aider, etc.) must manually manage job state, handle rate limits, check outputs, and merge results—a fragile, manual process that doesn't scale to multiple concurrent agents.",
+    "value_proposition": "JobCard uses the filesystem itself as the state machine, making every job's status, history, and output visible in Finder, queryable via Spotlight, and recoverable after crashes with a simple `mv`. No database, no daemon memory, no opaque state—just files.",
+    "success_metrics": [
+      ">95% job success rate across parallel agent runs",
+      "Zero data loss on crash—jobs return to pending via atomic rename",
+      "Developers can run 10+ concurrent AI jobs without manual intervention",
+      "<1s CLI response time for all status and control commands",
+      "1,000+ active developers using the tool"
+    ]
+  },
+  "current_state": {
+    "maturity": "mvp",
+    "existing_features": [
+      "Core CLI (`jc`) with init, new, status, validate, dispatcher, merge-gate commands",
+      "Dispatcher loop with parallel job execution and provider failover",
+      "Merge gate with acceptance criteria validation and git integration",
+      "Adapter system for Claude, Codex, Goose, Aider, OpenCode, Ollama, and Mock",
+      "Job card template system with COW clones (APFS/Btrfs reflink)",
+      "macOS Quick Look plugin support and UTI registration",
+      "Launchd plist services for daemon management",
+      "Orphan reaper for crashed jobs",
+      "Provider cooldown management (300s on rate-limit, exit code 75)",
+      "realtime module with feed validation types and unit tests",
+      "APFS xattr-based PID tracking",
+      "Provider chain rotation on rate-limit"
+    ],
+    "known_gaps": [
+      "Missing CLI commands: retry, kill, logs, inspect, clean, providers, worktree",
+      "No global or project-level config file (~/.jobcard/config.yaml)",
+      "No shell auto-completion (bash/zsh/fish)",
+      "No colored/progress terminal output",
+      "Model lookup system not yet implemented (designed in MODEL_LOOKUP.md)",
+      "realtime module not wired into dispatcher or CLI",
+      "No web UI or REST API",
+      "No multi-user or team collaboration features",
+      "No cross-job context sharing or persistent agent memory",
+      "Test coverage below target 90%"
+    ],
+    "technical_debt": [
+      "All CLI commands implemented in a single main.rs (needs splitting into modules)",
+      "Two stub crates exist but are not implemented",
+      "No async processing—dispatcher uses synchronous file polling",
+      "No unit tests for jc CLI commands (only realtime module has tests)",
+      "Provider config format is minimal; no schema validation"
+    ]
+  },
+  "competitive_context": {
+    "alternatives": [
+      "Aider (direct coding assistant, no orchestration layer)",
+      "Auto-Claude / Auto-Build (spec→plan→implement pipeline, less filesystem-native)",
+      "LangChain / LangGraph (Python-based agent orchestration, higher complexity)",
+      "Vibe Kanban (pluggable executor, visual kanban focus)",
+      "GitHub Copilot Workspace (cloud-hosted, opaque state, single provider)",
+      "Devin / SWE-agent (autonomous coding agents, no local control plane)",
+      "Gas Town (multi-agent orchestration, inspiration for JobCard)"
+    ],
+    "differentiators": [
+      "Filesystem IS the state machine—no database, no opaque in-process state",
+      "macOS document bundles (UTI) with Finder/Spotlight/Quick Look integration",
+      "Zero-cost COW template cloning via APFS/Btrfs reflink",
+      "Automatic provider failover with cooldown across multiple AI backends",
+      "Crash recovery is a single `mv` command—no log replay needed",
+      "No GC languages in the critical path (Rust dispatcher, shell adapters)",
+      "Multi-stage jobs (spec→plan→implement→QA) with different agents per stage"
+    ],
+    "market_position": "A low-ceremony, crash-safe local orchestrator for developers who want to run multiple AI coding agents in parallel without adopting a heavy framework. Sits between simple CLI wrappers (Aider) and complex cloud platforms (Devin), targeting developers who value auditability, simplicity, and macOS-native integration.",
+    "competitor_pain_points": [],
+    "competitor_analysis_available": false
+  },
+  "constraints": {
+    "technical": [
+      "APFS COW clones require macOS 12+ (Linux falls back to Btrfs reflink or regular copy)",
+      "Quick Look plugin and UTI registration are macOS-only features",
+      "Adapter scripts are shell-based, limiting portability to POSIX systems",
+      "No database backend limits query/filter capabilities on large job sets",
+      "Filesystem polling has latency vs. event-based approaches (FSEvents/inotifywait)"
+    ],
+    "resources": [
+      "Appears to be a solo or very small team project (no git history, single main.rs pattern)",
+      "Early-stage with no established community or contributor base yet",
+      "Bootstrap-friendly business model implied—no external funding assumed"
+    ],
+    "dependencies": [
+      "AI provider APIs (Anthropic Claude, OpenAI Codex, Ollama local)",
+      "Git (required for worktree-per-job approach)",
+      "macOS 12+ for full feature set (APFS, Quick Look, launchd)",
+      "Rust 1.70+ for building the CLI",
+      "Optional: Ollama for local model support"
+    ]
+  },
+  "created_at": "2026-03-01T00:00:00Z"
+}

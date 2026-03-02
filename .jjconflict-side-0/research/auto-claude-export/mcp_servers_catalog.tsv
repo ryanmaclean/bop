@@ -1,0 +1,7 @@
+server_id	display_name	primary_transport	activation_gate	default_in_agent_configs	tool_count	runtime_definition_source	ui_definition_source
+context7	Context7	command (npx @upstash/context7-mcp)	CONTEXT7_ENABLED != false	true	2	backend/core/client.py + backend/agents/tools_pkg/models.py	out/renderer/assets/index-3inA-y1N.js:133313-133319
+graphiti-memory	Graphiti Memory	http (GRAPHITI_MCP_URL)	GRAPHITI_MCP_URL must be set	true (filtered if env missing)	5	backend/core/client.py + backend/agents/tools_pkg/models.py	out/renderer/assets/index-3inA-y1N.js:133320-133331
+auto-claude	Auto-Claude Tools	custom in-process MCP server	tools_pkg availability + required by agent	true for build/qa	6	backend/agents/tools_pkg/registry.py + backend/core/client.py	out/renderer/assets/index-3inA-y1N.js:133332-133344
+linear	Linear	http (https://mcp.linear.app/mcp)	LINEAR_API_KEY + LINEAR_MCP_ENABLED != false + project linear setting	optional	5+ (UI excerpt)	backend/core/client.py + backend/agents/tools_pkg/models.py	out/renderer/assets/index-3inA-y1N.js:133345-133357
+electron	Electron MCP	command (npm exec electron-mcp-server)	ELECTRON_MCP_ENABLED == true + electron project capability	optional (qa)	4	backend/core/client.py + backend/agents/tools_pkg/models.py	out/renderer/assets/index-3inA-y1N.js:133358-133368
+puppeteer	Puppeteer MCP	command (npx puppeteer-mcp-server)	PUPPETEER_MCP_ENABLED == true + web frontend capability	optional (qa)	8	backend/core/client.py + backend/agents/tools_pkg/models.py	out/renderer/assets/index-3inA-y1N.js:133369-133383

@@ -1,0 +1,697 @@
+{
+  "id": "roadmap-20260301T000000Z",
+  "project_name": "JobCard - Heterogeneous Agent Orchestrator",
+  "version": "1.0",
+  "vision": "A filesystem-first orchestrator that runs parallel AI coding agents as first-class macOS document bundles, with automatic provider failover and merge-gated quality control.",
+  "target_audience": {
+    "primary": "Software developers and AI engineers who want to automate coding tasks using multiple AI agents in parallel",
+    "secondary": [
+      "Engineering teams wanting to parallelize AI-assisted development workflows",
+      "DevOps engineers integrating AI coding agents into CI/CD pipelines",
+      "Solo developers managing complex multi-stage AI coding tasks"
+    ]
+  },
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "Foundation / MVP Polish",
+      "description": "Close critical gaps in the existing MVP: missing CLI commands, developer ergonomics (colored output, auto-completion, config file), and test coverage. Makes the tool genuinely usable day-to-day without falling back to raw filesystem inspection.",
+      "order": 1,
+      "status": "planned",
+      "features": [
+        "feature-1",
+        "feature-2",
+        "feature-3",
+        "feature-4",
+        "feature-5",
+        "feature-6",
+        "feature-7",
+        "feature-8"
+      ],
+      "milestones": [
+        {
+          "id": "milestone-1-1",
+          "title": "Job Control Commands Live",
+          "description": "Developers can retry failed jobs, kill runaway agents, stream live logs, and inspect job state entirely through the CLI without touching the filesystem directly.",
+          "features": ["feature-1", "feature-7"],
+          "status": "planned"
+        },
+        {
+          "id": "milestone-1-2",
+          "title": "Polished Developer Experience",
+          "description": "Colored status output, shell auto-completion, and a global config file make jc feel like a first-class CLI tool rather than an MVP prototype.",
+          "features": ["feature-2", "feature-3", "feature-6", "feature-8"],
+          "status": "planned"
+        },
+        {
+          "id": "milestone-1-3",
+          "title": "Maintainable Codebase",
+          "description": "main.rs is split into per-command modules, test coverage reaches 90%+, and CI enforces coverage and lint thresholds.",
+          "features": ["feature-4", "feature-5"],
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "phase-2",
+      "name": "Enhancement",
+      "description": "Implement designed-but-not-built systems (model lookup, realtime integration), improve observability with structured audit logs, add provider management CLI, and replace synchronous polling with event-based watching for lower latency.",
+      "order": 2,
+      "status": "planned",
+      "features": [
+        "feature-9",
+        "feature-10",
+        "feature-11",
+        "feature-12",
+        "feature-13",
+        "feature-14"
+      ],
+      "milestones": [
+        {
+          "id": "milestone-2-1",
+          "title": "Model & Provider Management",
+          "description": "Developers can manage providers and model aliases entirely through CLI commands. The model lookup system maps short names to provider-specific IDs.",
+          "features": ["feature-9", "feature-10"],
+          "status": "planned"
+        },
+        {
+          "id": "milestone-2-2",
+          "title": "Observability & Auditability",
+          "description": "Every job produces a structured JSON audit log. The realtime feed validator is wired into the dispatcher. Developers can answer 'what did this agent do and why did it fail?' without grepping raw logs.",
+          "features": ["feature-11", "feature-14"],
+          "status": "planned"
+        },
+        {
+          "id": "milestone-2-3",
+          "title": "Event-Driven Dispatcher",
+          "description": "Dispatcher switches from polling to FSEvents/inotify for <100ms job pickup latency and near-zero idle CPU usage.",
+          "features": ["feature-12", "feature-13"],
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "phase-3",
+      "name": "Scale / Growth",
+      "description": "Add a terminal UI for live multi-job visibility, a REST API for external integrations, cross-job context sharing for multi-stage pipelines, and CI/CD integration hooks. Enables team use and programmatic automation.",
+      "order": 3,
+      "status": "planned",
+      "features": [
+        "feature-15",
+        "feature-16",
+        "feature-17",
+        "feature-18",
+        "feature-19"
+      ],
+      "milestones": [
+        {
+          "id": "milestone-3-1",
+          "title": "Live Dashboard",
+          "description": "Developers can run `jc dashboard` and see all jobs updating in real-time in their terminal—no need to repeatedly run `jc status`.",
+          "features": ["feature-15"],
+          "status": "planned"
+        },
+        {
+          "id": "milestone-3-2",
+          "title": "Programmable Interface",
+          "description": "REST API enables external tools (scripts, GitHub Actions, webhooks) to create jobs, poll status, and retrieve outputs without invoking the CLI binary.",
+          "features": ["feature-16", "feature-19"],
+          "status": "planned"
+        },
+        {
+          "id": "milestone-3-3",
+          "title": "Multi-stage Pipeline Context",
+          "description": "Jobs can read outputs from predecessor jobs and write to a shared context store, enabling true spec→plan→implement→QA pipelines where each agent builds on the previous.",
+          "features": ["feature-17", "feature-18"],
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "phase-4",
+      "name": "Future / Vision",
+      "description": "Long-horizon features: web UI, multi-user collaboration, and AI-assisted job card generation. Deferred until the core tool has proven product-market fit with a developer community.",
+      "order": 4,
+      "status": "planned",
+      "features": [
+        "feature-20",
+        "feature-21",
+        "feature-22"
+      ],
+      "milestones": [
+        {
+          "id": "milestone-4-1",
+          "title": "Web Dashboard",
+          "description": "Browser-based UI for visualizing job state, browsing outputs, and managing providers—enables non-terminal users and remote monitoring.",
+          "features": ["feature-20"],
+          "status": "planned"
+        },
+        {
+          "id": "milestone-4-2",
+          "title": "Team & AI Features",
+          "description": "Multi-user job queues and AI-assisted job card generation lower the barrier for teams and non-expert users.",
+          "features": ["feature-21", "feature-22"],
+          "status": "planned"
+        }
+      ]
+    }
+  ],
+  "features": [
+    {
+      "id": "feature-1",
+      "title": "Job Control CLI Commands (retry, kill, logs, inspect)",
+      "description": "Add the missing day-to-day job management commands: `jc retry <id>` moves a failed card back to pending; `jc kill <id>` sends SIGTERM to the agent PID and moves the card to failed; `jc logs <id>` streams stdout/stderr logs; `jc inspect <id>` renders the full job card state as human-readable output.",
+      "rationale": "Without these commands, developers must manually `mv` card directories and `kill` PIDs—the exact manual error-prone workflow JobCard exists to eliminate. This is the single highest-leverage gap in the current MVP.",
+      "priority": "must",
+      "complexity": "medium",
+      "impact": "high",
+      "phase_id": "phase-1",
+      "dependencies": [],
+      "status": "idea",
+      "acceptance_criteria": [
+        "Given a failed job, when `jc retry <id>` is run, then the card is atomically moved to pending/ and re-queued",
+        "Given a running job, when `jc kill <id>` is run, then SIGTERM is sent to the agent PID within 1s and the card moves to failed/ with reason='killed'",
+        "Given any job, when `jc logs <id>` is run, then stdout and stderr are streamed to the terminal with --follow support",
+        "Given any job, when `jc inspect <id>` is run, then meta.json, spec.md, and log summary are rendered as human-readable output",
+        "All commands return non-zero exit codes on failure with descriptive error messages"
+      ],
+      "user_stories": [
+        "As an AI engineer, I want to retry a failed job without touching the filesystem so that I can recover from transient errors quickly",
+        "As a developer, I want to kill a runaway agent job so that I can free up API quota and move on",
+        "As a developer, I want to stream live logs from a running job so that I can monitor agent progress without opening files manually"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-2",
+      "title": "Colored Terminal Output and Progress Display",
+      "description": "Replace plain-text CLI output with color-coded, structured display: pending=yellow, running=blue/spinning, done=green, failed=red. Add a progress summary line to `jc status` showing counts per state. Support NO_COLOR / TERM=dumb for CI environments.",
+      "rationale": "Color and visual hierarchy dramatically reduce the cognitive load of scanning job state across many concurrent agents. This is table-stakes UX for any developer CLI tool in 2026—its absence makes the tool feel unfinished.",
+      "priority": "must",
+      "complexity": "low",
+      "impact": "high",
+      "phase_id": "phase-1",
+      "dependencies": [],
+      "status": "idea",
+      "acceptance_criteria": [
+        "jc status displays each job with a color matching its state (pending/running/done/failed)",
+        "A summary line shows 'X running, Y pending, Z done, W failed' counts",
+        "When TERM=dumb or NO_COLOR=1, output is plain ASCII without ANSI codes",
+        "Spinner animation shown for running jobs when stdout is a TTY",
+        "Colors use an accessible palette (avoid red/green only for colorblind users)"
+      ],
+      "user_stories": [
+        "As a developer running 10+ parallel jobs, I want color-coded status output so that I can instantly spot failed jobs without reading every line",
+        "As a DevOps engineer running jc in CI, I want plain-text output when NO_COLOR is set so that logs don't contain ANSI escape codes"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-3",
+      "title": "Global Config File (~/.jobcard/config.yaml)",
+      "description": "Introduce a user-level config file at `~/.jobcard/config.yaml` (and project-level `.jobcard/config.yaml`) supporting: default provider chain, max concurrent jobs, cooldown duration, log retention policy, and default template. Config is merged with project-level settings taking precedence.",
+      "rationale": "Without config, every project must manually set up providers.json with identical settings. Config eliminates repetitive setup and makes global preferences (e.g., always prefer Claude, limit to 5 concurrent jobs) persistent across all projects.",
+      "priority": "must",
+      "complexity": "medium",
+      "impact": "high",
+      "phase_id": "phase-1",
+      "dependencies": [],
+      "status": "idea",
+      "acceptance_criteria": [
+        "~/.jobcard/config.yaml is read on every jc invocation; project-level .jobcard/config.yaml overrides global values",
+        "`jc config get <key>` and `jc config set <key> <value>` commands read/write the config file",
+        "Config supports: default_provider_chain, max_concurrent, cooldown_seconds, log_retention_days, default_template",
+        "Missing or malformed config produces a clear error with the expected schema",
+        "Config file is created with sensible defaults on first `jc init`"
+      ],
+      "user_stories": [
+        "As a solo developer, I want to set my default provider chain once globally so that every new project uses Claude→Codex failover without manual setup",
+        "As a team lead, I want project-level config to override global settings so that each project can have its own concurrency limits"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-4",
+      "title": "CLI Module Refactoring (Split main.rs into Modules)",
+      "description": "Refactor `crates/jc/src/main.rs` into per-command modules (e.g., `cmd/init.rs`, `cmd/dispatcher.rs`, `cmd/merge_gate.rs`, etc.) and shared utilities (`util/fs.rs`, `util/meta.rs`). Implement the two existing stub crates if they have defined purposes.",
+      "rationale": "The current single-file structure makes it impossible to write focused unit tests, creates merge conflicts in team settings, and will become unmanageable as new commands are added. This is the foundational technical debt that blocks all future feature work.",
+      "priority": "must",
+      "complexity": "medium",
+      "impact": "medium",
+      "phase_id": "phase-1",
+      "dependencies": [],
+      "status": "idea",
+      "acceptance_criteria": [
+        "Each CLI command has its own module file under crates/jc/src/cmd/",
+        "Shared filesystem and meta utilities are extracted to crates/jc/src/util/",
+        "All existing functionality passes existing tests after refactor",
+        "No single source file exceeds 300 lines",
+        "Stub crates are either implemented or removed from the workspace"
+      ],
+      "user_stories": [
+        "As a contributor, I want each command in its own file so that I can understand and test one command at a time without reading 1000+ lines of main.rs",
+        "As a maintainer, I want modular code so that I can add new commands without risk of breaking unrelated functionality"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-5",
+      "title": "Test Coverage Improvement (Target 90%+)",
+      "description": "Add unit tests for all jc CLI command logic, integration tests for the dispatcher state machine transitions, and property-based tests for meta.json serialization. Set up cargo-tarpaulin in CI to enforce the 90% coverage threshold.",
+      "rationale": "Currently only the realtime module has tests. Any refactor or new feature risks silent regressions. Reaching 90% coverage gives confidence to iterate quickly—critical for a solo/small team project where manual QA is expensive.",
+      "priority": "must",
+      "complexity": "high",
+      "impact": "medium",
+      "phase_id": "phase-1",
+      "dependencies": ["feature-4"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "cargo test --all reports ≥90% line coverage (measured by cargo-tarpaulin)",
+        "All state machine transitions (pending→running→done/failed, retry, orphan reap) have integration tests",
+        "CLI command handlers have unit tests with mock filesystem (using tempdir)",
+        "CI pipeline fails if coverage drops below 90%",
+        "cargo clippy -- -D warnings passes with zero warnings"
+      ],
+      "user_stories": [
+        "As a maintainer, I want 90%+ test coverage so that I can refactor and add features without manual regression testing",
+        "As a contributor, I want comprehensive tests so that my PRs don't accidentally break existing behavior"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-6",
+      "title": "Shell Auto-completion (bash/zsh/fish)",
+      "description": "Generate shell completion scripts for bash, zsh, and fish using clap's built-in completion generation. Provide a `jc completions <shell>` command and document installation steps in README. Include completion for dynamic values like job IDs and template names.",
+      "rationale": "Tab-completion is the single biggest daily ergonomics improvement for any CLI tool. Typing `jc status <TAB>` to get job ID completions eliminates the need to run `jc status` first just to get the ID. Essential for developer adoption.",
+      "priority": "should",
+      "complexity": "low",
+      "impact": "medium",
+      "phase_id": "phase-1",
+      "dependencies": ["feature-4"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "`jc completions bash|zsh|fish` outputs a valid completion script for the specified shell",
+        "Completions cover all commands, subcommands, and flags",
+        "Job ID arguments complete against live job IDs from the filesystem",
+        "Template name arguments complete against available templates in .cards/templates/",
+        "Installation instructions for each shell are documented in README"
+      ],
+      "user_stories": [
+        "As a developer, I want tab-completion for jc commands so that I don't have to memorize all subcommands and flags",
+        "As a developer, I want job ID completion so that I can target specific jobs without copy-pasting IDs from jc status"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-7",
+      "title": "Clean Command for Job Lifecycle Management",
+      "description": "Add `jc clean` to remove completed job cards from `done/` and `merged/` directories, with options: `--failed` to also clean failed jobs, `--older-than <days>` to prune by age, and `--dry-run` to preview what would be removed. Respects log retention policy from config.",
+      "rationale": "Long-running setups accumulate thousands of completed job cards that consume disk space and slow down `jc status`. Without a clean command, developers must manually `rm -rf` card directories—defeating the purpose of the CLI abstraction.",
+      "priority": "should",
+      "complexity": "low",
+      "impact": "medium",
+      "phase_id": "phase-1",
+      "dependencies": ["feature-3"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "`jc clean` removes all cards in done/ and merged/ with confirmation prompt",
+        "`jc clean --dry-run` lists cards that would be removed without deleting",
+        "`jc clean --failed` also removes cards from failed/",
+        "`jc clean --older-than 7d` only removes cards older than 7 days",
+        "Clean respects log_retention_days from config as the default --older-than value",
+        "Summary printed: 'Removed N cards, freed X MB'"
+      ],
+      "user_stories": [
+        "As a developer running jc daily, I want to clean up completed jobs older than a week so that my .cards/ directory doesn't grow unbounded",
+        "As a developer, I want --dry-run so that I can verify what will be deleted before actually removing it"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-8",
+      "title": "Providers CLI Commands (list, add, remove, status)",
+      "description": "Add `jc providers` subcommands: `list` to show all configured providers with status and cooldown remaining; `add <name> <adapter> [--model <model>]` to register a new provider; `remove <name>` to deregister; `status` to show per-provider usage stats and active cooldowns.",
+      "rationale": "Currently, managing providers requires manually editing providers.json—a JSON file with no validation. The providers CLI makes provider management safe and discoverable, which is critical since provider selection directly impacts job success rates and costs.",
+      "priority": "should",
+      "complexity": "medium",
+      "impact": "medium",
+      "phase_id": "phase-1",
+      "dependencies": ["feature-3"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "`jc providers list` shows all providers with name, adapter, model, and cooldown_remaining",
+        "`jc providers add <name> --adapter <script> --model <id>` adds a provider to providers.json with validation",
+        "`jc providers remove <name>` removes a provider with confirmation if it has active jobs",
+        "`jc providers status` shows per-provider job counts, success rate, and current cooldown",
+        "providers.json is validated against a schema on every read/write"
+      ],
+      "user_stories": [
+        "As an AI engineer, I want to list my configured providers and their cooldown status so that I know which providers are available right now",
+        "As a developer, I want to add a new provider via CLI so that I don't have to remember the JSON schema for providers.json"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-9",
+      "title": "Worktree CLI Commands (create, list, clean)",
+      "description": "Add `jc worktree` subcommands to manage the git worktrees associated with job cards: `create <id>` to manually create a worktree for a job; `list` to show all worktrees with their associated job IDs and status; `clean` to remove orphaned worktrees whose job cards no longer exist.",
+      "rationale": "Worktrees are a core part of the JobCard isolation model but have no CLI management today. Orphaned worktrees from failed jobs accumulate silently and consume disk space. These commands make worktree lifecycle a first-class concern.",
+      "priority": "should",
+      "complexity": "medium",
+      "impact": "medium",
+      "phase_id": "phase-2",
+      "dependencies": ["feature-1"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "`jc worktree list` shows all worktrees with job ID, branch name, and job status",
+        "`jc worktree clean` removes worktrees whose job cards are in done/, merged/, or don't exist",
+        "`jc worktree create <id>` creates a git worktree for an existing pending/running job",
+        "Orphaned worktrees (no corresponding job card) are flagged in `jc worktree list`",
+        "`jc worktree clean --dry-run` previews removals without deleting"
+      ],
+      "user_stories": [
+        "As a developer, I want to list all git worktrees associated with my jobs so that I can understand what branches are active",
+        "As a developer, I want to clean up orphaned worktrees from failed jobs so that my git repository stays clean"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-10",
+      "title": "Model Lookup System Implementation",
+      "description": "Implement the model lookup system designed in MODEL_LOOKUP.md: a registry mapping short model aliases (e.g., 'claude-fast', 'gpt4o') to provider-specific model IDs, with per-provider capability metadata (context window, supports-tools, cost-tier). Expose via `jc models list|search` commands.",
+      "rationale": "Different providers use different model ID formats (e.g., claude-3-5-sonnet-20241022 vs. gpt-4o-2024-11-20). A lookup registry lets job cards reference abstract model names, enabling provider-agnostic job templates that work across any configured provider.",
+      "priority": "should",
+      "complexity": "medium",
+      "impact": "medium",
+      "phase_id": "phase-2",
+      "dependencies": ["feature-8"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "A model registry file (~/.jobcard/models.yaml or built-in) maps aliases to provider-specific IDs",
+        "`jc models list` shows all registered model aliases with provider mappings",
+        "`jc models search <query>` filters models by name or capability",
+        "Job card templates can use model aliases (e.g., model: 'claude-fast') that resolve at dispatch time",
+        "Unknown model aliases produce a clear error at dispatch time with suggestions"
+      ],
+      "user_stories": [
+        "As an AI engineer, I want to use model aliases in my job templates so that I can switch providers without updating every template",
+        "As a developer, I want to search available models by capability so that I can choose the right model for each task stage"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-11",
+      "title": "Realtime Feed Validation Integration",
+      "description": "Wire the existing `jobcard_core::realtime` module into the dispatcher and CLI: validate feed records during job execution, surface alert violations in `jc status` output and structured logs, and expose `jc validate --realtime` for manual feed validation.",
+      "rationale": "The realtime module is fully implemented with tests but completely disconnected from the running system. Wiring it in provides the quality signal the module was designed for—catching data quality issues before they propagate into downstream jobs.",
+      "priority": "should",
+      "complexity": "medium",
+      "impact": "medium",
+      "phase_id": "phase-2",
+      "dependencies": ["feature-4"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "Dispatcher calls realtime::validate_record for each output record produced by a job",
+        "Alert violations from realtime::check_alerts are written to the job's structured audit log",
+        "Jobs with critical alert violations can optionally be moved to failed/ (configurable threshold)",
+        "`jc validate --realtime <id>` runs feed validation on a completed job's output",
+        "jc status shows a validation summary badge (✓/⚠/✗) for jobs with realtime output"
+      ],
+      "user_stories": [
+        "As a data engineer, I want feed validation alerts surfaced in jc status so that I know immediately if an agent produced bad data",
+        "As an AI engineer, I want the dispatcher to optionally fail jobs that exceed validation error thresholds so that bad output never reaches the merge gate"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-12",
+      "title": "Provider Schema Validation",
+      "description": "Define a JSON Schema for providers.json and validate it on every read in the dispatcher and CLI. Produce actionable error messages for missing required fields, invalid adapter paths, or malformed cooldown entries. Add `jc providers validate` command for explicit validation.",
+      "rationale": "A malformed providers.json currently causes cryptic runtime panics or silent failures that are hard to debug. Schema validation at load time transforms opaque crashes into clear, actionable error messages—critical for a tool that non-expert users will configure.",
+      "priority": "should",
+      "complexity": "low",
+      "impact": "medium",
+      "phase_id": "phase-2",
+      "dependencies": ["feature-8"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "providers.json is validated against a schema every time it is read",
+        "Validation errors include the field path and expected type (e.g., 'providers[0].adapter: expected string, got null')",
+        "`jc providers validate` runs schema validation and exits 0 (valid) or 1 (invalid) with errors",
+        "Invalid providers.json prevents dispatcher startup with a clear error message",
+        "Schema is documented alongside the providers.json format in README"
+      ],
+      "user_stories": [
+        "As a developer configuring a new provider, I want clear validation errors so that I don't spend 20 minutes debugging a typo in providers.json",
+        "As a DevOps engineer, I want `jc providers validate` in my pre-commit hook so that invalid provider configs are caught before deployment"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-13",
+      "title": "Event-Driven File Watching (FSEvents / inotify)",
+      "description": "Replace the synchronous filesystem polling loop in the dispatcher with platform-native event watchers: FSEvents on macOS and inotifywait on Linux. Fall back to polling on unsupported platforms. Reduce job pickup latency from poll-interval (default ~1s) to <100ms and eliminate idle CPU usage.",
+      "rationale": "Polling every second wastes CPU when no jobs are queued and adds latency when jobs arrive. FSEvents/inotify deliver events within milliseconds of filesystem changes, enabling near-instant job pickup at near-zero CPU cost—directly improves the experience of running 10+ concurrent jobs.",
+      "priority": "could",
+      "complexity": "medium",
+      "impact": "medium",
+      "phase_id": "phase-2",
+      "dependencies": ["feature-4"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "Dispatcher uses FSEvents on macOS 12+ and inotifywait on Linux when available",
+        "Job pickup latency (time from card appearing in pending/ to dispatcher action) is <100ms on event-driven path",
+        "Idle CPU usage drops to <1% when no jobs are queued",
+        "Graceful fallback to 1s polling on unsupported platforms with a log warning",
+        "Existing dispatcher behavior (orphan reaper, cooldown checks) still runs on a timer alongside event watching"
+      ],
+      "user_stories": [
+        "As a developer running the dispatcher as a daemon, I want near-zero idle CPU so that jc doesn't drain my laptop battery",
+        "As an AI engineer submitting many jobs rapidly, I want <100ms job pickup so that parallel agents start as fast as possible"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-14",
+      "title": "Structured JSON Audit Logs",
+      "description": "Emit a structured NDJSON audit log (logs/audit.ndjson) for every job, capturing: dispatch timestamp, provider selected, model used, exit code, token usage (if reported by adapter), duration, provider failover events, and merge gate results. Expose via `jc logs <id> --audit`.",
+      "rationale": "Currently, the only audit trail is raw stdout/stderr. Structured logs enable post-hoc analysis (which provider succeeds most? which templates have highest failure rates?), cost attribution, and compliance for teams that need to track AI usage.",
+      "priority": "should",
+      "complexity": "medium",
+      "impact": "high",
+      "phase_id": "phase-2",
+      "dependencies": ["feature-1", "feature-4"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "Every job produces logs/audit.ndjson with one JSON object per significant event",
+        "Audit events include: dispatched, provider_selected, provider_failover, completed, merge_gate_passed, merge_gate_failed",
+        "Each event includes: timestamp (ISO 8601), job_id, event_type, provider, model, and event-specific fields",
+        "`jc logs <id> --audit` pretty-prints the audit log with timestamps and event summaries",
+        "Token usage is captured if the adapter reports it via a structured header or file"
+      ],
+      "user_stories": [
+        "As an engineering manager, I want structured audit logs so that I can track which AI providers are most reliable for our workflows",
+        "As a developer debugging a failed job, I want the audit log to tell me which provider was used, how long it ran, and what the exit code was"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-15",
+      "title": "Terminal UI (TUI) Dashboard",
+      "description": "Add a `jc dashboard` command that opens a ratatui-based TUI showing all jobs in real-time: a table view with job ID, state, provider, duration, and last log line; keyboard shortcuts for inspecting, retrying, and killing jobs; and auto-refresh via FSEvents/inotify.",
+      "rationale": "Repeatedly running `jc status` to monitor 10+ concurrent jobs is tedious. A live TUI dashboard gives developers at-a-glance visibility into all running agents without leaving the terminal—a significant quality-of-life improvement for power users.",
+      "priority": "could",
+      "complexity": "high",
+      "impact": "high",
+      "phase_id": "phase-3",
+      "dependencies": ["feature-2", "feature-13", "feature-1"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "`jc dashboard` opens a full-terminal TUI that auto-updates when job state changes",
+        "Table shows: job ID, state (color-coded), provider, elapsed time, last log line",
+        "Press 'r' on a selected job to retry, 'k' to kill, 'l' to open log view, 'q' to quit",
+        "Log view shows streaming job stdout/stderr with scroll support",
+        "TUI falls back gracefully to `jc status` output if terminal is too small or non-interactive"
+      ],
+      "user_stories": [
+        "As a developer running 10+ parallel agents, I want a live dashboard so that I can monitor all jobs at a glance and intervene when one fails",
+        "As an AI engineer, I want keyboard shortcuts in the dashboard so that I can retry or kill jobs without switching to a separate terminal"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-16",
+      "title": "REST API for External Integration",
+      "description": "Add an optional HTTP server mode (`jc serve --port 8080`) exposing REST endpoints: GET /jobs (list), GET /jobs/:id (inspect), POST /jobs (create), POST /jobs/:id/retry, DELETE /jobs/:id (kill), GET /jobs/:id/logs (stream). Enables programmatic integration without the CLI binary.",
+      "rationale": "A REST API unlocks integration with GitHub Actions, custom dashboards, monitoring tools, and team automation scripts. It's the bridge between JobCard as a local CLI and JobCard as a platform component in larger automation workflows.",
+      "priority": "could",
+      "complexity": "high",
+      "impact": "high",
+      "phase_id": "phase-3",
+      "dependencies": ["feature-1", "feature-3"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "`jc serve --port 8080` starts an HTTP server backed by the local .cards/ directory",
+        "GET /jobs returns all jobs with state, provider, and timestamps",
+        "POST /jobs accepts a JSON body with template, id, and spec to create a new job",
+        "GET /jobs/:id/logs streams stdout/stderr as Server-Sent Events",
+        "Server binds to localhost by default; --bind flag for remote access with documented security warning",
+        "OpenAPI spec is generated and served at GET /openapi.json"
+      ],
+      "user_stories": [
+        "As a DevOps engineer, I want a REST API so that my GitHub Actions workflow can create jobs and poll for completion without shelling out to the jc binary",
+        "As a developer, I want to query job state from my own dashboard scripts so that I can build custom monitoring on top of JobCard"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-17",
+      "title": "Cross-job Context Sharing",
+      "description": "Add a shared context store (per-project `.cards/context/`) that jobs can read from and write to. Dispatchers pass context keys to adapters via environment variables. Enables multi-stage pipelines where the QA agent reads the implementation agent's output summary as structured context.",
+      "rationale": "Multi-stage jobs (spec→plan→implement→QA) currently have no structured way to pass information between stages. Each adapter must rediscover context by reading raw output files. A shared context store enables true pipeline composition with typed data hand-off.",
+      "priority": "could",
+      "complexity": "high",
+      "impact": "high",
+      "phase_id": "phase-3",
+      "dependencies": ["feature-3", "feature-4"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "Jobs can declare `context_reads: [key1, key2]` and `context_writes: [key3]` in meta.json",
+        "Dispatcher passes context values as JOBCARD_CTX_<KEY> environment variables to the adapter",
+        "Adapter can write context updates to a designated output file (context-out.json) which the dispatcher persists to .cards/context/",
+        "Context values are versioned; reads always get the latest value for a key",
+        "`jc context list` shows all context keys and their current values"
+      ],
+      "user_stories": [
+        "As an AI engineer, I want my QA agent to automatically receive the implementation agent's output summary as structured context so that it can write targeted tests",
+        "As a developer, I want context to persist across job retries so that a retried job doesn't lose the work from previous successful stages"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-18",
+      "title": "Persistent Agent Memory Store",
+      "description": "Add a per-project agent memory store (`.cards/memory/`) that persists key-value facts across job runs. Agents can read the memory store at the start of each run (injected into prompt context) and write learned facts at the end. Supports retrieval-augmented prompting for recurring tasks.",
+      "rationale": "AI agents currently have no memory between runs—each job starts with a blank slate. A persistent memory store enables agents to remember project conventions, past decisions, and learned patterns, dramatically improving output quality for recurring tasks on the same codebase.",
+      "priority": "could",
+      "complexity": "high",
+      "impact": "medium",
+      "phase_id": "phase-3",
+      "dependencies": ["feature-17"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "A memory store is maintained at .cards/memory/<namespace>.json for each job template namespace",
+        "Dispatcher injects memory store contents into the prompt template via {{memory}} placeholder",
+        "Adapters can write memory updates to a designated file (memory-out.json) which the dispatcher merges into the store",
+        "Memory entries have a TTL and are pruned after expiry",
+        "`jc memory list|get|set|delete` commands expose manual memory management"
+      ],
+      "user_stories": [
+        "As an AI engineer, I want agents to remember project conventions across runs so that I don't have to repeat the same context in every job spec",
+        "As a developer, I want to manually seed the memory store with project-specific facts so that agents start with correct assumptions"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-19",
+      "title": "CI/CD Integration Hooks (GitHub Actions / GitLab CI)",
+      "description": "Provide official GitHub Actions (create-job, wait-for-job, get-job-output) and a GitLab CI template for integrating JobCard into automated pipelines. Jobs run on a self-hosted runner with a JobCard daemon; the CI action creates jobs and polls for completion via the REST API.",
+      "rationale": "CI/CD integration expands JobCard from a local developer tool to a team automation platform. It enables use cases like automatically creating AI coding jobs on PR creation and merging approved code—which is the killer workflow for engineering teams.",
+      "priority": "could",
+      "complexity": "medium",
+      "impact": "high",
+      "phase_id": "phase-3",
+      "dependencies": ["feature-16"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "A `jobcard-create` GitHub Action creates a job via the REST API and outputs the job ID",
+        "A `jobcard-wait` GitHub Action polls for job completion and fails the CI step if the job fails",
+        "A `jobcard-output` GitHub Action retrieves job output artifacts and makes them available as step outputs",
+        "A GitLab CI YAML template provides equivalent functionality",
+        "Actions are published to GitHub Marketplace and documented with example workflows"
+      ],
+      "user_stories": [
+        "As a DevOps engineer, I want a GitHub Action to create a JobCard job from CI so that AI coding tasks are triggered automatically on PR creation",
+        "As an engineering team lead, I want CI to fail if the AI agent's output doesn't pass acceptance criteria so that no unapproved AI code reaches main"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-20",
+      "title": "Web UI Dashboard",
+      "description": "A browser-based dashboard (served by `jc serve --ui`) for visualizing job state, browsing job outputs, managing providers, and viewing audit logs. Built as a lightweight single-page app (likely WASM or simple HTML+JS). Primarily for non-terminal users and remote monitoring.",
+      "rationale": "A web UI broadens JobCard's appeal to developers who prefer graphical interfaces and enables remote monitoring without SSH. It also serves as the foundation for future team collaboration features.",
+      "priority": "could",
+      "complexity": "high",
+      "impact": "medium",
+      "phase_id": "phase-4",
+      "dependencies": ["feature-16", "feature-15"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "`jc serve --ui` serves a web dashboard at http://localhost:8080/ui",
+        "Dashboard shows live job status with auto-refresh via WebSocket or SSE",
+        "Clicking a job shows its full details: spec, logs, output, audit trail",
+        "Providers page shows all configured providers with status and cooldowns",
+        "UI is functional without JavaScript enabled (server-side rendered fallback)"
+      ],
+      "user_stories": [
+        "As a developer, I want a web UI so that I can monitor running agents from my phone while away from my desk",
+        "As a team lead, I want to share a dashboard URL with non-technical stakeholders to show AI coding progress"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-21",
+      "title": "Multi-user Team Collaboration",
+      "description": "Add shared job queues, user attribution (who created which job), role-based access control, and team notifications (Slack/email on job completion or failure). Requires a persistent backend beyond the local filesystem.",
+      "rationale": "Team features are a significant architectural departure from the filesystem-first model and require a backend infrastructure investment. Deferred until JobCard has proven product-market fit and has a community that demands team features.",
+      "priority": "wont",
+      "complexity": "high",
+      "impact": "medium",
+      "phase_id": "phase-4",
+      "dependencies": ["feature-16"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "Multiple users can share a job queue via a central JobCard server",
+        "Each job is attributed to the user who created it",
+        "Notifications are sent to configured Slack channels on job completion/failure",
+        "Role-based access controls who can create, kill, or clean jobs"
+      ],
+      "user_stories": [
+        "As an engineering team, I want shared job queues so that multiple developers can submit and monitor AI coding jobs from a central server",
+        "As a team lead, I want Slack notifications when AI jobs complete so that I know when to review outputs"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-22",
+      "title": "AI-assisted Job Card Generation",
+      "description": "Natural language interface (`jc create --from-description 'Add a dark mode toggle to the settings page'`) that uses an LLM to generate a complete job card (spec.md, template selection, provider chain, acceptance criteria) from a plain-text description.",
+      "rationale": "Lowering the barrier to creating well-formed job cards is valuable long-term but requires significant prompt engineering and could produce inconsistent results in early iterations. Deferred to phase 4 when the core tool is mature and job card schemas are stable.",
+      "priority": "wont",
+      "complexity": "high",
+      "impact": "medium",
+      "phase_id": "phase-4",
+      "dependencies": ["feature-10", "feature-3"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "`jc create --from-description '<text>'` generates a complete job card draft",
+        "Generated cards include spec.md, acceptance_criteria, and suggested template",
+        "User is shown the generated card for review before it is written to pending/",
+        "Generation uses the configured default provider"
+      ],
+      "user_stories": [
+        "As a solo developer, I want to describe a coding task in plain English and have JobCard generate a job card so that I don't have to manually write specs",
+        "As a non-expert user, I want AI-assisted card creation so that I can use JobCard without learning the job card schema"
+      ],
+      "competitor_insight_ids": []
+    }
+  ],
+  "metadata": {
+    "created_at": "2026-03-01T00:00:00Z",
+    "updated_at": "2026-03-01T00:00:00Z",
+    "generated_by": "roadmap_features agent",
+    "prioritization_framework": "MoSCoW",
+    "competitor_analysis_used": false
+  }
+}

@@ -1,0 +1,36 @@
+// JobCard zellij layout
+// Launch with: zellij --layout zellij/jobcard.kdl
+
+layout {
+  default_tab_template {
+    children
+    pane size=1 borderless=true {
+      plugin location="file:target/jobcard-status.wasm" {
+        cards_dir ".cards"
+      }
+    }
+  }
+
+  tab name="Dispatchers" focus=true {
+    pane split_direction="horizontal" {
+      pane name="team-cli" command="jc" {
+        args "--cards-dir" ".cards/team-cli" "dispatcher"
+              "--adapter" "adapters/claude.zsh"
+      }
+      pane name="team-arch" command="jc" {
+        args "--cards-dir" ".cards/team-arch" "dispatcher"
+              "--adapter" "adapters/claude.zsh"
+      }
+      pane name="team-quality" command="jc" {
+        args "--cards-dir" ".cards/team-quality" "dispatcher"
+              "--adapter" "adapters/claude.zsh"
+      }
+    }
+  }
+
+  tab name="vibekanban" {
+    pane command="npx" {
+      args "vibe-kanban" "--config" "vibekanban/config.json"
+    }
+  }
+}

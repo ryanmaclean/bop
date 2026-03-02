@@ -1,0 +1,14 @@
+{
+  "providers": {
+    "codex": {
+      "command": "adapters/codex.zsh",
+      "rate_limit_exit": 75,
+      "cooldown_until_epoch_s": 1772392937
+    },
+    "mock": {
+      "command": "adapters/mock.zsh",
+      "rate_limit_exit": 75,
+      "cooldown_until_epoch_s": 1772392827
+    }
+  }
+}

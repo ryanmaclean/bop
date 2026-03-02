@@ -1,0 +1,24 @@
+# Hard anti-slop policy for JobCard workflows.
+# Filesystem remains source of truth; this policy blocks unsafe churn.
+
+# Top-level files that may be introduced by cards/PRs.
+allow_new_top_level_files = [
+  "README.md",
+  "Cargo.lock",
+  "deny.toml",
+  "plan.md"
+]
+
+# Hard size caps.
+max_changed_files = 120
+max_changed_loc = 4000
+
+# Decision records become mandatory above these thresholds.
+nontrivial_changed_files = 12
+nontrivial_changed_loc = 600
+
+# Governance behavior.
+decision_required_if_cli_change = true
+require_decision_for_nontrivial = true
+enforce_scope_without_policy_scope = false
+skip_when_no_git = true
