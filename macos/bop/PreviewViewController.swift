@@ -233,13 +233,13 @@ fileprivate struct JobCardPreview: View {
             HStack(alignment: .top, spacing: 16) {
                 if let g = m.glyph {
                     Text(g)
-                        .font(.system(size: 32))
-                        .frame(width: 36, height: 36)
+                        .font(.system(size: 72))
+                        .fixedSize()
                         .padding(.top, 2)
                 } else {
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(Color.cardBorder, lineWidth: 2)
-                        .frame(width: 24, height: 24)
+                        .frame(width: 48, height: 48)
                         .padding(.top, 2)
                 }
                 
