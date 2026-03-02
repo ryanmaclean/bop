@@ -1,3 +1,4 @@
+pub mod cardchars;
 pub mod config;
 pub mod realtime;
 pub mod worktree;
@@ -79,6 +80,11 @@ pub struct Meta {
     /// Jokers (🃏🂿🃟) = wildcard/emergency. Trump cards = cross-team escalation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub glyph: Option<String>,
+
+    /// BMP-safe token for terminal, filenames, pane titles.
+    /// Suit symbol: ♠♥♦♣ for CLI/Arch/Quality/Platform.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
 
     /// Human-readable display title (defaults to `id` when absent).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -467,5 +473,21 @@ mod tests {
         // But should still round-trip fine
         let back = read_meta(dir.path()).unwrap();
         assert!(back.stage_chain.is_empty());
+    }
+
+    #[test]
+    fn meta_token_field_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = Meta {
+            id: "tok1".into(),
+            created: chrono::Utc::now(),
+            stage: "implement".into(),
+            glyph: Some("\u{1F0AB}".into()),
+            token: Some("\u{2660}".into()),
+            ..Default::default()
+        };
+        write_meta(dir.path(), &m).unwrap();
+        let back = read_meta(dir.path()).unwrap();
+        assert_eq!(back.token.as_deref(), Some("\u{2660}"));
     }
 }

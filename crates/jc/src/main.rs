@@ -33,6 +33,10 @@ enum Command {
     New {
         template: String,
         id: String,
+        /// Team for glyph suit assignment (cli, arch, quality, platform).
+        /// Auto-detected from card directory if omitted.
+        #[arg(long)]
+        team: Option<String>,
     },
     Status {
         #[arg(default_value = "")]
@@ -108,6 +112,12 @@ enum Command {
     /// Show meta, spec, and a log summary for a card.
     Inspect {
         id: String,
+    },
+    /// List cards with glyphs, stages, and progress.
+    List {
+        /// Filter: pending, running, done, failed, merged, active (default), all.
+        #[arg(long, default_value = "active")]
+        state: String,
     },
     /// Run policy gates.
     Policy {
@@ -903,6 +913,7 @@ fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
             failure_reason: None,
             validation_summary: None,
             glyph: None,
+            token: None,
             title: None,
             description: None,
             labels: vec![],
@@ -937,6 +948,7 @@ fn create_card(
     template: &str,
     id: &str,
     spec_override: Option<&str>,
+    team_override: Option<&str>,
 ) -> anyhow::Result<PathBuf> {
     ensure_cards_layout(cards_dir)?;
 
@@ -960,7 +972,9 @@ fn create_card(
         anyhow::bail!("template not found: {}", template);
     }
 
-    let card_dir = cards_dir.join("pending").join(format!("🂠-{}.jobcard", id));
+    let card_dir = cards_dir
+        .join("pending")
+        .join(format!("{}-{}.jobcard", jobcard_core::cardchars::CARD_BACK, id));
     if card_dir.exists() {
         anyhow::bail!("card already exists: {}", id);
     }
@@ -995,6 +1009,7 @@ fn create_card(
         failure_reason: None,
         validation_summary: None,
         glyph: None,
+        token: None,
         title: None,
         description: None,
         labels: vec![],
@@ -1017,6 +1032,29 @@ fn create_card(
     meta.retry_count = Some(0);
     meta.failure_reason = None;
 
+    // Auto-assign glyph + token if not already set by template
+    if meta.glyph.is_none() {
+        use jobcard_core::cardchars::{self, Team};
+        let team = match team_override {
+            Some("cli") => Team::Cli,
+            Some("arch") => Team::Arch,
+            Some("quality") => Team::Quality,
+            Some("platform") => Team::Platform,
+            Some(other) => {
+                eprintln!("warning: unknown team '{}', defaulting to cli", other);
+                Team::Cli
+            }
+            None => cardchars::team_from_path(&card_dir),
+        };
+        let used = cardchars::collect_used_glyphs(cards_dir);
+        if let Some((glyph, token)) = cardchars::next_glyph(team, &used) {
+            meta.glyph = Some(glyph);
+            meta.token = Some(token);
+        } else {
+            eprintln!("warning: suit full for {:?}, no glyph assigned", team);
+        }
+    }
+
     write_meta(&card_dir, &meta)?;
 
     if !card_dir.join("spec.md").exists() {
@@ -1028,6 +1066,17 @@ fn create_card(
 
     if let Some(spec) = spec_override {
         fs::write(card_dir.join("spec.md"), spec)?;
+    }
+
+    // Rename card dir from 🂠 placeholder to actual glyph prefix
+    if let Some(ref g) = meta.glyph {
+        let new_name = format!("{}-{}.jobcard", g, id);
+        let new_dir = card_dir.parent().unwrap().join(&new_name);
+        if !new_dir.exists() {
+            fs::rename(&card_dir, &new_dir)?;
+            render_card_thumbnail(&new_dir);
+            return Ok(new_dir);
+        }
     }
 
     render_card_thumbnail(&card_dir);
@@ -2006,14 +2055,7 @@ fn cmd_doctor(cards_root: &Path) -> anyhow::Result<()> {
 }
 
 fn print_status_summary(root: &Path) -> anyhow::Result<()> {
-    for dir in ["pending", "running", "done", "merged", "failed"] {
-        let p = root.join(dir);
-        if p.exists() {
-            let count = fs::read_dir(&p).map(|rd| rd.count()).unwrap_or(0);
-            println!("{}\t{}", dir, count);
-        }
-    }
-    Ok(())
+    list_cards(root, "active")
 }
 
 fn resolve_config_path() -> PathBuf {
@@ -2057,8 +2099,8 @@ async fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Command::New { template, id } => {
-            create_card(&root, &template, &id, None)?;
+        Command::New { template, id, team } => {
+            create_card(&root, &template, &id, None, team.as_deref())?;
             Ok(())
         }
         Command::Status { id } => {
@@ -2143,6 +2185,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Approve { id } => cmd_approve(&root, &id),
         Command::Logs { id, follow } => cmd_logs(&root, &id, follow).await,
         Command::Inspect { id } => cmd_inspect(&root, &id),
+        Command::List { state } => list_cards(&root, &state),
         Command::Policy { action } => match action {
             PolicyAction::Check { id, staged } => cmd_policy_check(&root, id.as_deref(), staged),
         },
@@ -2212,8 +2255,10 @@ fn glyph_suit(g: &str) -> &'static str {
 }
 
 fn is_joker(g: &str) -> bool {
-    let cp = g.chars().next().map(|c| c as u32).unwrap_or(0);
-    matches!(cp, 0x1F0BF | 0x1F0CF | 0x1F0DF | 0x1F093)
+    g.chars()
+        .next()
+        .map(jobcard_core::cardchars::is_joker)
+        .unwrap_or(false)
 }
 
 fn cmd_poker_open(root: &Path, id: &str) -> anyhow::Result<()> {
@@ -2851,6 +2896,7 @@ fn maybe_advance_stage(cards_dir: &Path, done_card_dir: &Path) {
         created: Utc::now(),
         stage: next_stage.clone(),
         glyph: meta.glyph.clone(),
+        token: meta.token.clone(),
         title: meta.title.clone(),
         description: meta.description.clone(),
         labels: meta.labels.clone(),
@@ -3923,6 +3969,94 @@ fn cmd_inspect(root: &Path, id: &str) -> anyhow::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn list_cards(root: &Path, state_filter: &str) -> anyhow::Result<()> {
+    let states: Vec<&str> = match state_filter {
+        "all" => vec!["pending", "running", "done", "failed", "merged"],
+        "active" => vec!["pending", "running", "done"],
+        other => vec![other],
+    };
+
+    for state in &states {
+        print_state_group(root, state, None)?;
+
+        // Also check team-* directories
+        if let Ok(entries) = fs::read_dir(root) {
+            let mut team_dirs: Vec<_> = entries
+                .flatten()
+                .filter(|e| {
+                    let name = e.file_name();
+                    let s = name.to_string_lossy();
+                    e.path().is_dir() && s.starts_with("team-")
+                })
+                .collect();
+            team_dirs.sort_by_key(|e| e.file_name());
+            for entry in team_dirs {
+                print_state_group(
+                    &entry.path(),
+                    state,
+                    Some(&entry.file_name().to_string_lossy()),
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn print_state_group(dir: &Path, state: &str, team_prefix: Option<&str>) -> anyhow::Result<()> {
+    let state_dir = dir.join(state);
+    if !state_dir.exists() {
+        return Ok(());
+    }
+
+    let mut cards: Vec<jobcard_core::Meta> = Vec::new();
+    if let Ok(entries) = fs::read_dir(&state_dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                if let Ok(meta) = jobcard_core::read_meta(&p) {
+                    cards.push(meta);
+                }
+            }
+        }
+    }
+
+    let header = match team_prefix {
+        Some(team) => format!("{}/{}", team, state),
+        None => state.to_string(),
+    };
+
+    println!("{} ({})", header, cards.len());
+    for meta in &cards {
+        let glyph = meta.glyph.as_deref().unwrap_or("  ");
+        let token = meta.token.as_deref().unwrap_or(" ");
+        let id_display = if meta.id.len() > 32 {
+            &meta.id[..32]
+        } else {
+            &meta.id
+        };
+        let pri = meta
+            .priority
+            .map(|p| format!("P{}", p))
+            .unwrap_or_else(|| "--".into());
+        let pct = meta.progress.unwrap_or(0);
+        let filled = (pct as usize * 8) / 100;
+        let bar: String = (0..8)
+            .map(|i| if i < filled { '\u{2588}' } else { '\u{2591}' })
+            .collect();
+        let pct_str = if pct > 0 {
+            format!("{}%", pct)
+        } else {
+            String::new()
+        };
+        println!(
+            "  {} {}  {:<32}  {:<12} {:<3} {} {}",
+            glyph, token, id_display, meta.stage, pri, bar, pct_str
+        );
+    }
+    println!();
     Ok(())
 }
 
