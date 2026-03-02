@@ -107,6 +107,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             runInTerminal("bop logs \(qid) --follow")
         case "logs":
             runInTerminal("bop logs \(qid)")
+        case "stop":
+            runInTerminal("bop kill \(qid)")
         case "spec":
             // Open spec.md from the card in the default editor
             if let cardDir = findCardDirectory(id: id) {

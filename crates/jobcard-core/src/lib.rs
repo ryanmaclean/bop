@@ -6,6 +6,7 @@ pub use config::{load_config, Config};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -104,6 +105,22 @@ pub struct Meta {
     pub agent_type: Option<String>,
 
     pub stage: String,
+
+    /// Card behavior/type discriminator.
+    /// Example: `roadmap` or `roadmap_feature`.
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub card_type: Option<String>,
+
+    /// Relative or absolute path to an external metadata JSON payload.
+    /// For roadmap cards this commonly points to `roadmap.json` or
+    /// `output/roadmap.json`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_source: Option<String>,
+
+    /// Optional key used to select an item from external metadata.
+    /// For roadmap feature cards this typically matches `features[].id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_key: Option<String>,
 
     /// High-level workflow family used for stage routing and agent behavior.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -240,9 +257,196 @@ pub fn meta_path(card_dir: &Path) -> PathBuf {
     card_dir.join("meta.json")
 }
 
+fn value_as_non_empty_string(v: Option<&Value>) -> Option<String> {
+    v.and_then(|x| x.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
+fn normalize_roadmap_status(raw: &str) -> Option<String> {
+    let key = raw.trim().to_lowercase().replace('-', "_").replace(' ', "_");
+    match key.as_str() {
+        "under_review" | "review" | "underreview" => Some("under_review".to_string()),
+        "planned" | "plan" => Some("planned".to_string()),
+        "in_progress" | "inprogress" | "active" | "doing" => Some("in_progress".to_string()),
+        "done" | "completed" | "complete" => Some("done".to_string()),
+        _ => None,
+    }
+}
+
+fn roadmap_priority_to_rank(raw: &str) -> Option<i64> {
+    let key = raw.trim().to_lowercase().replace('-', "_").replace(' ', "_");
+    match key.as_str() {
+        "must" | "must_have" | "critical" => Some(1),
+        "should" | "should_have" | "important" => Some(2),
+        "could" | "could_have" | "nice_to_have" => Some(3),
+        _ => None,
+    }
+}
+
+fn resolve_metadata_source(card_dir: &Path, meta: &Meta) -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(source) = meta.metadata_source.as_ref().map(|s| s.trim()) {
+        if !source.is_empty() {
+            let p = PathBuf::from(source);
+            if p.is_absolute() {
+                candidates.push(p);
+            } else {
+                candidates.push(card_dir.join(p));
+            }
+        }
+    }
+    candidates.push(card_dir.join("roadmap.json"));
+    candidates.push(card_dir.join("output").join("roadmap.json"));
+    candidates.into_iter().find(|p| p.exists())
+}
+
+fn hydrate_roadmap_from_json(meta: &mut Meta, json: &Value) {
+    if let Some(obj) = json.as_object() {
+        if meta.title.is_none() {
+            meta.title = value_as_non_empty_string(
+                obj.get("project_name")
+                    .or_else(|| obj.get("title"))
+                    .or_else(|| obj.get("name")),
+            );
+        }
+        if meta.description.is_none() {
+            meta.description = value_as_non_empty_string(
+                obj.get("vision")
+                    .or_else(|| obj.get("summary"))
+                    .or_else(|| obj.get("description")),
+            );
+        }
+    }
+    if meta.workflow_mode.is_none() {
+        meta.workflow_mode = Some("roadmap".to_string());
+    }
+}
+
+fn hydrate_roadmap_feature_from_json(meta: &mut Meta, json: &Value) {
+    let Some(obj) = json.as_object() else {
+        return;
+    };
+    let Some(features) = obj.get("features").and_then(|v| v.as_array()) else {
+        return;
+    };
+    let lookup = meta
+        .metadata_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(meta.id.as_str());
+    let Some(feature) = features.iter().find(|f| {
+        f.as_object()
+            .and_then(|fo| fo.get("id"))
+            .and_then(|v| v.as_str())
+            .map(|id| id == lookup)
+            .unwrap_or(false)
+    }) else {
+        return;
+    };
+    let Some(fo) = feature.as_object() else {
+        return;
+    };
+
+    if meta.title.is_none() {
+        meta.title = value_as_non_empty_string(fo.get("title").or_else(|| fo.get("name")));
+    }
+    if meta.description.is_none() {
+        meta.description = value_as_non_empty_string(fo.get("description"));
+    }
+    if meta.priority.is_none() {
+        meta.priority = fo
+            .get("priority")
+            .and_then(|v| v.as_str())
+            .and_then(roadmap_priority_to_rank);
+    }
+    if meta.acceptance_criteria.is_empty() {
+        if let Some(arr) = fo.get("acceptance_criteria").and_then(|v| v.as_array()) {
+            meta.acceptance_criteria = arr
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect();
+        }
+    }
+    if meta.labels.is_empty() {
+        let mut labels = Vec::new();
+
+        if let Some(priority_raw) = fo.get("priority").and_then(|v| v.as_str()) {
+            let p = priority_raw.trim().to_lowercase();
+            if !p.is_empty() {
+                labels.push(Label {
+                    name: p,
+                    kind: Some("priority".to_string()),
+                });
+            }
+        }
+        if let Some(status_raw) = fo.get("status").and_then(|v| v.as_str()) {
+            if let Some(status) = normalize_roadmap_status(status_raw) {
+                labels.push(Label {
+                    name: status.clone(),
+                    kind: Some("status".to_string()),
+                });
+                if matches!(meta.stage.as_str(), "roadmap" | "roadmap_feature" | "feature") {
+                    meta.stage = status;
+                }
+            }
+        }
+        if let Some(phase) = value_as_non_empty_string(fo.get("phase").or_else(|| fo.get("phase_id")))
+        {
+            labels.push(Label {
+                name: phase,
+                kind: Some("phase".to_string()),
+            });
+        }
+        if !labels.is_empty() {
+            meta.labels = labels;
+        }
+    }
+    if meta.workflow_mode.is_none() {
+        meta.workflow_mode = Some("roadmap".to_string());
+    }
+}
+
+fn hydrate_typed_metadata(card_dir: &Path, meta: &mut Meta) {
+    let Some(card_type) = meta
+        .card_type
+        .as_deref()
+        .map(str::trim)
+        .map(str::to_lowercase)
+    else {
+        return;
+    };
+    if card_type.is_empty() {
+        return;
+    }
+    let Some(source_path) = resolve_metadata_source(card_dir, meta) else {
+        return;
+    };
+    let Ok(raw) = fs::read_to_string(source_path) else {
+        return;
+    };
+    let Ok(json) = serde_json::from_str::<Value>(&raw) else {
+        return;
+    };
+
+    match card_type.as_str() {
+        "roadmap" => hydrate_roadmap_from_json(meta, &json),
+        "roadmap_feature" | "roadmap-feature" | "roadmap_feature_card" => {
+            hydrate_roadmap_feature_from_json(meta, &json)
+        }
+        _ => {}
+    }
+}
+
 pub fn read_meta(card_dir: &Path) -> anyhow::Result<Meta> {
     let bytes = fs::read(meta_path(card_dir))?;
-    let meta: Meta = serde_json::from_slice(&bytes)?;
+    let mut meta: Meta = serde_json::from_slice(&bytes)?;
+    hydrate_typed_metadata(card_dir, &mut meta);
     meta.validate()
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
     Ok(meta)

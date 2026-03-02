@@ -7,7 +7,11 @@
   ],
   "stages": {
     "implement": {
-      "status": "pending"
+      "status": "done",
+      "agent": "adapters/claude.zsh",
+      "provider": "claude",
+      "duration_s": 180,
+      "started": "2026-03-02T04:51:38.262121Z"
     }
   },
   "acceptance_criteria": [
@@ -17,7 +21,19 @@
     "jj log -r 'main..@-' | grep -q ."
   ],
   "vcs_engine": "jj",
-  "failure_reason": "workspace_prepare_failed: jj workspace add failed: Error: Cannot access /Users/studio/bop/.workspaces/ws-token-cost-in-inspect-1772427053073\nCaused by: No such file or directory (os error 2)\n",
+  "workspace_name": "ws-token-cost-in-inspect-1772427097799",
+  "workspace_path": "/Users/studio/bop/.workspaces/ws-token-cost-in-inspect-1772427097799",
+  "change_ref": "@  lypsnummkmkk\n│\n~",
+  "policy_result": "failed",
+  "failure_reason": "acceptance_criteria_failed",
+  "validation_summary": {
+    "total": 0,
+    "valid": 0,
+    "invalid": 0,
+    "alert_count": 1,
+    "critical_alerts": 1,
+    "health": "down"
+  },
   "stage_chain": [
     "implement"
   ],

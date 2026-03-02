@@ -1,20 +1,27 @@
-# Implement Template — Example Spec
+# Roadmap Request
 
-> This template skips spec/plan stages and goes straight to code.
-> Use for well-understood tasks where the requirements are already clear.
+Describe the product/context you want a roadmap for.
 
-## Overview
-Describe what needs to be built or changed.
+## Product Context
+- Project name:
+- Who it serves:
+- Primary problem:
 
-## Requirements
-- Requirement 1
-- Requirement 2
+## Desired Outcome
+- What should this roadmap help decide?
+- Time horizon (e.g., 3 months / 6 months / 12 months):
+- Team and constraints:
 
-## Scope
-- IN: what this card covers
-- OUT: what it does NOT cover
+## Optional Inputs
+- Competitors to consider:
+- Existing priorities:
+- Hard constraints (budget, compliance, platform):
 
 ## Acceptance Criteria
-- [ ] Code compiles (`cargo build`)
-- [ ] Tests pass (`cargo test`)
-- [ ] Lints clean (`cargo clippy -- -D warnings`)
+- [ ] Analyze phase summarizes current state and constraints
+- [ ] Discover phase captures user/market signals
+- [ ] Generate phase provides a milestone roadmap with risks and dependencies
+- [ ] Generate phase outputs `output/roadmap.json` with statuses (`under_review`, `planned`, `in_progress`, `done`)
+- [ ] Roadmap features include priorities (`must`, `should`, `could`)
+- [ ] Roadmap features are assigned to explicit phases
+- [ ] QA phase checks clarity, sequencing, and handoff quality

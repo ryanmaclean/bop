@@ -49,6 +49,21 @@ private struct MetaSubtask: Codable {
 private struct MetaStageRecord: Codable {
     let status: String
     let agent: String?
+    let provider: String?
+    let durationS: Int?
+    let started: String?
+
+    enum CodingKeys: String, CodingKey {
+        case status, agent, provider, started
+        case durationS = "duration_s"
+    }
+}
+
+private struct RoadmapSnapshot {
+    let statusCounts: [String: Int]
+    let priorityCounts: [String: Int]
+    let phaseCount: Int
+    let featureCount: Int
 }
 
 // MARK: - Palette
@@ -99,6 +114,13 @@ private let roadmapStageOrder: [(key: String, label: String)] = [
     ("qa",       "QA"),
 ]
 
+private let featureLifecycleStageOrder: [(key: String, label: String)] = [
+    ("under_review", "Under Review"),
+    ("planned", "Planned"),
+    ("in_progress", "In Progress"),
+    ("done", "Done"),
+]
+
 private func stageDisplayName(_ key: String) -> String {
     switch key.lowercased() {
     case "spec": return "Spec"
@@ -109,6 +131,10 @@ private func stageDisplayName(_ key: String) -> String {
     case "discover": return "Discover"
     case "generate": return "Generate"
     case "roadmap": return "Roadmap"
+    case "under_review": return "Under Review"
+    case "planned": return "Planned"
+    case "in_progress": return "In Progress"
+    case "done": return "Done"
     default:
         let lower = key.lowercased()
         guard let first = lower.first else { return key }
@@ -207,6 +233,131 @@ private func relativeTime(_ iso: String?) -> String {
     return "\(dt / 86400)d ago"
 }
 
+private func parseISODate(_ iso: String?) -> Date? {
+    guard let s = iso else { return nil }
+    let f1 = ISO8601DateFormatter()
+    f1.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let f2 = ISO8601DateFormatter()
+    return f1.date(from: s) ?? f2.date(from: s)
+}
+
+private func relativeTimeFromDate(_ date: Date?) -> String {
+    guard let d = date else { return "unknown" }
+    let dt = Int(-d.timeIntervalSinceNow)
+    if dt < 60 { return "just now" }
+    if dt < 3600 { return "\(dt / 60)m ago" }
+    if dt < 86400 { return "\(dt / 3600)h ago" }
+    return "\(dt / 86400)d ago"
+}
+
+private func formatElapsed(_ seconds: Int) -> String {
+    let s = max(0, seconds)
+    let h = s / 3600
+    let m = (s % 3600) / 60
+    let sec = s % 60
+    if h > 0 {
+        return String(format: "%d:%02d:%02d", h, m, sec)
+    }
+    return String(format: "%d:%02d", m, sec)
+}
+
+private func detectToolTag(in text: String) -> String? {
+    let lines = text.split(separator: "\n").map(String.init).reversed()
+    for line in lines {
+        if let r = line.range(of: #"\[Tool:\s*([^\]]+)\]"#, options: .regularExpression) {
+            let payload = String(line[r]).replacingOccurrences(of: "[Tool:", with: "").replacingOccurrences(of: "]", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !payload.isEmpty { return payload }
+        }
+        if let r = line.range(of: #"functions\.([a-zA-Z0-9_-]+)"#, options: .regularExpression) {
+            let raw = String(line[r])
+            return raw.replacingOccurrences(of: "functions.", with: "")
+        }
+    }
+    return nil
+}
+
+private func normalizeRoadmapStatus(_ raw: String) -> String? {
+    let key = raw
+        .lowercased()
+        .replacingOccurrences(of: "-", with: "_")
+        .replacingOccurrences(of: " ", with: "_")
+    switch key {
+    case "under_review", "review", "underreview":
+        return "under_review"
+    case "planned", "plan":
+        return "planned"
+    case "in_progress", "inprogress", "active", "doing":
+        return "in_progress"
+    case "done", "completed", "complete":
+        return "done"
+    default:
+        return nil
+    }
+}
+
+private func normalizeRoadmapPriority(_ raw: String) -> String? {
+    let key = raw
+        .lowercased()
+        .replacingOccurrences(of: "-", with: "_")
+        .replacingOccurrences(of: " ", with: "_")
+    switch key {
+    case "must", "must_have", "critical":
+        return "must"
+    case "should", "should_have", "important":
+        return "should"
+    case "could", "could_have", "nice_to_have":
+        return "could"
+    default:
+        return nil
+    }
+}
+
+private func parseRoadmapSnapshot(from cardURL: URL) -> RoadmapSnapshot? {
+    let roadmapURL = cardURL.appendingPathComponent("output/roadmap.json")
+    guard
+        let data = try? Data(contentsOf: roadmapURL),
+        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else { return nil }
+
+    let featureItems = (obj["features"] as? [Any]) ?? []
+    var statusCounts: [String: Int] = [:]
+    var priorityCounts: [String: Int] = [:]
+    var phaseSet = Set<String>()
+    var featureCount = 0
+
+    for item in featureItems {
+        guard let feature = item as? [String: Any] else { continue }
+        featureCount += 1
+
+        if let rawStatus = feature["status"] as? String,
+           let status = normalizeRoadmapStatus(rawStatus) {
+            statusCounts[status, default: 0] += 1
+        }
+        if let rawPriority = feature["priority"] as? String,
+           let priority = normalizeRoadmapPriority(rawPriority) {
+            priorityCounts[priority, default: 0] += 1
+        }
+
+        if let phase = feature["phase"] as? String, !phase.isEmpty {
+            phaseSet.insert(phase)
+        } else if let phase = feature["phase_id"] as? String, !phase.isEmpty {
+            phaseSet.insert(phase)
+        } else if let phaseNum = feature["phase"] as? NSNumber {
+            phaseSet.insert(phaseNum.stringValue)
+        }
+    }
+
+    let explicitPhases = (obj["phases"] as? [Any])?.count ?? 0
+    let phaseCount = max(explicitPhases, phaseSet.count)
+
+    return RoadmapSnapshot(
+        statusCounts: statusCounts,
+        priorityCounts: priorityCounts,
+        phaseCount: phaseCount,
+        featureCount: featureCount
+    )
+}
+
 // MARK: - Card view
 
 fileprivate enum CardTab: String, CaseIterable {
@@ -221,6 +372,9 @@ fileprivate struct JobCardPreview: View {
     var meta: JobCardMeta?
     var logs: String = ""
     var bundleFiles: [String] = []
+    var lastActivityAt: Date? = nil
+    var activeTool: String? = nil
+    var roadmapSnapshot: RoadmapSnapshot? = nil
 
     @State private var selectedTab: CardTab = .overview
 
@@ -250,6 +404,11 @@ fileprivate struct JobCardPreview: View {
         return URL(string: "bop://card/\(id)/\(logsAction)")
     }
 
+    private var stopURL: URL? {
+        guard isRunning, let id = meta?.id else { return nil }
+        return URL(string: "bop://card/\(id)/stop")
+    }
+
     private var logsButtonText: String { isDoneLike ? "Logs" : "Tail" }
 
     private var logsHelpText: String {
@@ -265,12 +424,18 @@ fileprivate struct JobCardPreview: View {
         if m.workflowMode?.lowercased() == "roadmap" {
             return true
         }
-        return ["analyze", "discover", "generate", "roadmap"].contains(m.stage.lowercased())
+        return [
+            "analyze", "discover", "generate", "roadmap",
+            "under_review", "planned", "in_progress", "done",
+        ].contains(m.stage.lowercased())
     }
 
     private func displayStageOrder(for m: JobCardMeta) -> [(key: String, label: String)] {
         if let chain = m.stageChain, !chain.isEmpty {
             return chain.map { (key: $0, label: stageDisplayName($0)) }
+        }
+        if normalizeRoadmapStatus(m.stage) != nil {
+            return featureLifecycleStageOrder
         }
         return isRoadmapWorkflow ? roadmapStageOrder : defaultStageOrder
     }
@@ -285,11 +450,45 @@ fileprivate struct JobCardPreview: View {
         }
         switch m.stage.lowercased() {
         case "analyze": return 20
-        case "discover": return 50
-        case "generate": return 80
-        case "qa": return 95
+        case "discover": return 40
+        case "generate": return 60
+        case "qa": return 85
+        case "under_review": return 15
+        case "planned": return 35
+        case "in_progress": return 65
+        case "done": return 100
         default: return 0
         }
+    }
+
+    private func elapsedTimeText(_ m: JobCardMeta) -> String {
+        let start = parseISODate(m.stages?[m.stage]?.started) ?? parseISODate(m.created)
+        guard let start else { return "0:00" }
+        return formatElapsed(Int(Date().timeIntervalSince(start)))
+    }
+
+    private func lastActivityText() -> String {
+        relativeTimeFromDate(lastActivityAt)
+    }
+
+    private func statusCount(_ key: String) -> Int {
+        roadmapSnapshot?.statusCounts[key] ?? 0
+    }
+
+    private func priorityCount(_ key: String) -> Int {
+        roadmapSnapshot?.priorityCounts[key] ?? 0
+    }
+
+    @ViewBuilder
+    private func metricPill(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundColor(.textSecondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color.pillPurpleBg.opacity(0.65))
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(Color.cardBorder.opacity(0.6), lineWidth: 1))
     }
 
     private func roadmapStatusTitle(_ m: JobCardMeta) -> String {
@@ -298,6 +497,10 @@ fileprivate struct JobCardPreview: View {
         case "discover": return "Discovering"
         case "generate": return "Generating"
         case "qa": return "Reviewing"
+        case "under_review": return "Under Review"
+        case "planned": return "Planned"
+        case "in_progress": return "In Progress"
+        case "done": return "Done"
         default: return displayStageName(m.stage)
         }
     }
@@ -312,6 +515,14 @@ fileprivate struct JobCardPreview: View {
             return "Generating milestone roadmap and execution plan."
         case "qa":
             return "Verifying roadmap quality and handoff readiness."
+        case "under_review":
+            return "Reviewing generated features before planning."
+        case "planned":
+            return "Prioritized and phase-assigned, ready to execute."
+        case "in_progress":
+            return "Executing selected roadmap features."
+        case "done":
+            return "Roadmap execution complete for this scope."
         default:
             return "Roadmap workflow in progress."
         }
@@ -323,6 +534,10 @@ fileprivate struct JobCardPreview: View {
         case "discover": return "person.2.circle"
         case "generate": return "wand.and.stars"
         case "qa": return "checkmark.shield"
+        case "under_review": return "eye.circle"
+        case "planned": return "calendar.circle"
+        case "in_progress": return "play.circle"
+        case "done": return "checkmark.circle"
         default: return "map"
         }
     }
@@ -496,17 +711,21 @@ fileprivate struct JobCardPreview: View {
                     .help("Attach to zellij session: \(session)")
                 }
                 if isRunning {
-                    HStack(spacing: 6) {
-                        Image(systemName: "square.fill")
-                            .font(.system(size: 11))
-                        Text("Stop")
-                            .font(.system(size: 13, weight: .bold))
+                    if let stopURL {
+                        Link(destination: stopURL) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "square")
+                                    .font(.system(size: 11))
+                                Text("Stop")
+                                    .font(.system(size: 13, weight: .bold))
+                            }
+                            .foregroundColor(.stopText)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.stopBg)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
                     }
-                    .foregroundColor(.stopText)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.stopBg)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
             }
             .padding(.horizontal, 24)
@@ -601,13 +820,71 @@ fileprivate struct JobCardPreview: View {
                     Text(roadmapStatusSubtitle(m))
                         .font(.system(size: 14))
                         .foregroundColor(.textSecondary)
+                    if let activeTool {
+                        Text("[Tool: \(activeTool)]")
+                            .font(.system(size: 13, design: .monospaced))
+                            .foregroundColor(.stagePending)
+                    }
                 }
 
                 Spacer()
+                if let stopURL {
+                    Link(destination: stopURL) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "square")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("Stop")
+                                .font(.system(size: 13, weight: .bold))
+                        }
+                        .foregroundColor(.stopText)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.stopBg)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                }
+            }
 
+            HStack(spacing: 8) {
+                Text("Progress")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.textSecondary)
+                Image(systemName: "clock")
+                    .font(.system(size: 12))
+                    .foregroundColor(.stagePending)
+                Text(elapsedTimeText(m))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.textSecondary)
+                Text("·")
+                    .foregroundColor(.textMuted)
+                Text("last activity \(lastActivityText())")
+                    .font(.system(size: 13))
+                    .foregroundColor(.stagePending)
+                Spacer()
+                Circle()
+                    .fill(Color.stagePending)
+                    .frame(width: 10, height: 10)
+                Text("Processing")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.stagePending)
                 Text("\(progress)%")
-                    .font(.system(size: 19, weight: .bold))
+                    .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.textPrimary)
+            }
+
+            if let snapshot = roadmapSnapshot, snapshot.featureCount > 0 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        metricPill("Under Review \(statusCount("under_review"))")
+                        metricPill("Planned \(statusCount("planned"))")
+                        metricPill("In Progress \(statusCount("in_progress"))")
+                        metricPill("Done \(statusCount("done"))")
+                        metricPill("\(priorityCount("must")) must")
+                        metricPill("\(priorityCount("should")) should")
+                        metricPill("\(priorityCount("could")) could")
+                        metricPill("\(snapshot.phaseCount) phases")
+                    }
+                }
             }
 
             GeometryReader { geo in
@@ -790,13 +1067,36 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         }
 
         var logs = ""
-        let logUrl = url.appendingPathComponent("logs/stdout.log")
-        if let data = try? Data(contentsOf: logUrl),
+        var combinedLogs = ""
+        var lastActivityAt: Date?
+        let stdoutUrl = url.appendingPathComponent("logs/stdout.log")
+        let stderrUrl = url.appendingPathComponent("logs/stderr.log")
+
+        if let data = try? Data(contentsOf: stdoutUrl),
            let text = String(data: data, encoding: .utf8) {
             logs = text.components(separatedBy: .newlines).suffix(100)
                 .joined(separator: "\n")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
+            combinedLogs += text
         }
+        if let data = try? Data(contentsOf: stderrUrl),
+           let text = String(data: data, encoding: .utf8) {
+            combinedLogs += "\n" + text
+        }
+
+        let fm = FileManager.default
+        for logPath in [stdoutUrl.path, stderrUrl.path] {
+            if let attrs = try? fm.attributesOfItem(atPath: logPath),
+               let mod = attrs[.modificationDate] as? Date {
+                if let curr = lastActivityAt {
+                    if mod > curr { lastActivityAt = mod }
+                } else {
+                    lastActivityAt = mod
+                }
+            }
+        }
+        let activeTool = detectToolTag(in: combinedLogs)
+        let roadmapSnapshot = parseRoadmapSnapshot(from: url)
 
         // Enumerate bundle files (top-level only, skip logs/ and output/ dirs)
         var bundleFiles: [String] = []
@@ -807,7 +1107,15 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         }
 
         DispatchQueue.main.async {
-            self.hostingView.rootView = JobCardPreview(url: url, meta: meta, logs: logs, bundleFiles: bundleFiles)
+            self.hostingView.rootView = JobCardPreview(
+                url: url,
+                meta: meta,
+                logs: logs,
+                bundleFiles: bundleFiles,
+                lastActivityAt: lastActivityAt,
+                activeTool: activeTool,
+                roadmapSnapshot: roadmapSnapshot
+            )
             self.preferredContentSize = NSSize(width: 820, height: 720)
             handler(nil)
         }

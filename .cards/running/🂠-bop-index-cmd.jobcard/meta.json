@@ -7,7 +7,10 @@
   ],
   "stages": {
     "implement": {
-      "status": "pending"
+      "status": "running",
+      "agent": "adapters/claude.zsh",
+      "provider": "claude",
+      "started": "2026-03-02T04:54:47.880334Z"
     }
   },
   "acceptance_criteria": [
@@ -17,6 +20,9 @@
     "jj log -r 'main..@-' | grep -q ."
   ],
   "vcs_engine": "jj",
+  "workspace_name": "ws-bop-index-cmd-1772427287309",
+  "workspace_path": "/Users/studio/bop/.workspaces/ws-bop-index-cmd-1772427287309",
+  "change_ref": "@  zzrxptlvzyty\n│\n~",
   "failure_reason": "workspace_prepare_failed: jj workspace add failed: Error: Cannot access /Users/studio/bop/.workspaces/ws-bop-index-cmd-1772427055707\nCaused by: No such file or directory (os error 2)\n",
   "stage_chain": [
     "implement"

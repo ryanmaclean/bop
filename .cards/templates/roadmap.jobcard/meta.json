@@ -32,5 +32,6 @@
   "worktree_branch": "job/REPLACE_ID",
   "timeout_seconds": 1800,
   "retry_count": 0,
-  "failure_reason": null
+  "failure_reason": null,
+  "spawn_to": "drafts"
 }

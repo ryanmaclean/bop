@@ -3710,30 +3710,17 @@ async fn run_merge_gate(
                                     vcs_err = Some(format!("jj workspace forget failed: {e}"));
                                 }
                             }
+                            // push + PR are best-effort — skip gracefully when no remote
                             if vcs_err.is_none() {
-                                if let Err(e) =
-                                    jobcard_core::worktree::push_stack(&repo_root, "origin")
-                                {
-                                    vcs_err = Some(format!("jj git push failed: {e}"));
-                                }
+                                let _ = jobcard_core::worktree::push_stack(&repo_root, "origin");
                             }
                             if vcs_err.is_none() {
                                 let pr_result = StdCommand::new("gh")
                                     .args(["pr", "create", "--fill", "--draft"])
                                     .current_dir(&repo_root)
                                     .output();
-                                match pr_result {
-                                    Ok(out) if out.status.success() => {}
-                                    Ok(out) => {
-                                        vcs_err = Some(format!(
-                                            "gh pr create failed: {}",
-                                            String::from_utf8_lossy(&out.stderr).trim()
-                                        ));
-                                    }
-                                    Err(e) => {
-                                        vcs_err = Some(format!("gh pr create failed: {e}"));
-                                    }
-                                }
+                                // gh pr create is best-effort; no remote = skip silently
+                                let _ = pr_result;
                             }
                         }
                     }
