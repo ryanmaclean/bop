@@ -17,11 +17,15 @@ fileprivate struct JobCardMeta: Codable {
     let stages: [String: MetaStageRecord]?
     let glyph: String?
     let acceptanceCriteria: [String]?
+    let zellijSession: String?
+    let zellijPane: String?
 
     enum CodingKeys: String, CodingKey {
         case id, title, description, stage, priority, created, labels, progress, subtasks, stages
         case glyph
         case acceptanceCriteria = "acceptance_criteria"
+        case zellijSession = "zellij_session"
+        case zellijPane = "zellij_pane"
     }
 }
 
@@ -64,6 +68,8 @@ private extension Color {
     
     static let stopBg        = Color(red: 0.98, green: 0.45, blue: 0.50) // Coral
     static let stopText      = Color.black
+    static let attachBg      = Color(red: 0.10, green: 0.72, blue: 0.42) // Green
+    static let attachText    = Color.black
     
     static let barEmpty      = Color(red: 0.25, green: 0.16, blue: 0.42)
     static let barFill       = Color(red: 0.85, green: 0.45, blue: 0.95) // Pinkish purple
@@ -331,6 +337,23 @@ fileprivate struct JobCardPreview: View {
                 
                 Spacer()
                 
+                if isRunning, let session = m.zellijSession,
+                   let url = URL(string: "bop://card/\(m.id)/session") {
+                    Link(destination: url) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "terminal")
+                                .font(.system(size: 11))
+                            Text("Attach")
+                                .font(.system(size: 13, weight: .bold))
+                        }
+                        .foregroundColor(.attachText)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.attachBg)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .help("Attach to zellij session: \(session)")
+                }
                 if isRunning {
                     HStack(spacing: 6) {
                         Image(systemName: "square.fill")
