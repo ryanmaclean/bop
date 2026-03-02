@@ -2884,14 +2884,16 @@ fn approve_card(root: &Path, id: &str) -> anyhow::Result<()> {
 // ── logs ─────────────────────────────────────────────────────────────────────
 
 async fn cmd_logs(root: &Path, id: &str, follow: bool) -> anyhow::Result<()> {
+    use std::io::IsTerminal;
     let card = find_card(root, id).with_context(|| format!("card not found: {}", id))?;
     let stdout_log = card.join("logs").join("stdout.log");
     let stderr_log = card.join("logs").join("stderr.log");
+    let is_tty = std::io::stdout().is_terminal();
 
     if !follow {
         // Print all existing content once
-        print_log_section("stdout", &stdout_log)?;
-        print_log_section("stderr", &stderr_log)?;
+        print_log_section("stdout", &stdout_log, is_tty)?;
+        print_log_section("stderr", &stderr_log, is_tty)?;
         return Ok(());
     }
 
@@ -2905,14 +2907,14 @@ async fn cmd_logs(root: &Path, id: &str, follow: bool) -> anyhow::Result<()> {
     let mut buf = Vec::new();
     stdout_file.read_to_end(&mut buf)?;
     if !buf.is_empty() {
-        print!("{}", String::from_utf8_lossy(&buf));
+        print!("{}", colorize_chunk(&buf, is_tty));
     }
     let mut stdout_pos = stdout_file.stream_position()?;
     buf.clear();
 
     stderr_file.read_to_end(&mut buf)?;
     if !buf.is_empty() {
-        eprint!("{}", String::from_utf8_lossy(&buf));
+        eprint!("{}", colorize_chunk(&buf, is_tty));
     }
     let mut stderr_pos = stderr_file.stream_position()?;
 
@@ -2938,7 +2940,7 @@ async fn cmd_logs(root: &Path, id: &str, follow: bool) -> anyhow::Result<()> {
         buf.clear();
         stdout_file.read_to_end(&mut buf)?;
         if !buf.is_empty() {
-            print!("{}", String::from_utf8_lossy(&buf));
+            print!("{}", colorize_chunk(&buf, is_tty));
             std::io::stdout().flush()?;
             stdout_pos += buf.len() as u64;
         }
@@ -2948,7 +2950,7 @@ async fn cmd_logs(root: &Path, id: &str, follow: bool) -> anyhow::Result<()> {
         buf.clear();
         stderr_file.read_to_end(&mut buf)?;
         if !buf.is_empty() {
-            eprint!("{}", String::from_utf8_lossy(&buf));
+            eprint!("{}", colorize_chunk(&buf, is_tty));
             std::io::stderr().flush()?;
             stderr_pos += buf.len() as u64;
         }
@@ -2963,16 +2965,70 @@ async fn cmd_logs(root: &Path, id: &str, follow: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn print_log_section(label: &str, path: &Path) -> anyhow::Result<()> {
+fn colorize_log_line(line: &str) -> String {
+    const R: &str = "\x1b[0m";
+    if line.contains("ERROR") || line.contains("error:") || line.contains("FAILED") {
+        return format!("\x1b[1;31m{}{}", line, R);
+    }
+    if line.contains("WARN") || line.contains("warning:") {
+        return format!("\x1b[33m{}{}", line, R);
+    }
+    if line.contains("INFO") {
+        return format!("\x1b[36m{}{}", line, R);
+    }
+    if line.contains("DEBUG") || line.contains("TRACE") {
+        return format!("\x1b[2m{}{}", line, R);
+    }
+    if line.contains("→ merged") || line.contains("-> merged") {
+        return format!("\x1b[1;35m{}{}", line, R);
+    }
+    if line.contains("→ done") || line.contains("-> done") {
+        return format!("\x1b[1;32m{}{}", line, R);
+    }
+    if line.contains("→ failed") || line.contains("-> failed") {
+        return format!("\x1b[1;31m{}{}", line, R);
+    }
+    if line.contains("→ running") || line.contains("-> running") {
+        return format!("\x1b[1;33m{}{}", line, R);
+    }
+    line.to_string()
+}
+
+fn colorize_chunk(bytes: &[u8], is_tty: bool) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    if !is_tty {
+        return text.into_owned();
+    }
+    text.lines()
+        .map(colorize_log_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+        + if text.ends_with('\n') { "\n" } else { "" }
+}
+
+fn print_log_section(label: &str, path: &Path, is_tty: bool) -> anyhow::Result<()> {
     if !path.exists() {
         println!("=== {} (no file) ===", label);
         return Ok(());
     }
     let content = fs::read_to_string(path)?;
-    println!("=== {} ===", label);
-    print!("{}", content);
-    if !content.ends_with('\n') && !content.is_empty() {
-        println!();
+    if is_tty {
+        println!("\x1b[1m=== {} ===\x1b[0m", label);
+    } else {
+        println!("=== {} ===", label);
+    }
+    if is_tty {
+        for line in content.lines() {
+            println!("{}", colorize_log_line(line));
+        }
+        if !content.ends_with('\n') && !content.is_empty() {
+            // already printed trailing newline via println
+        }
+    } else {
+        print!("{}", content);
+        if !content.ends_with('\n') && !content.is_empty() {
+            println!();
+        }
     }
     Ok(())
 }
