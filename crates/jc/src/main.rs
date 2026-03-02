@@ -146,6 +146,19 @@ enum Command {
         #[command(subcommand)]
         action: IconsAction,
     },
+    /// Promote cards from drafts/ to pending/, making them eligible for dispatch.
+    Promote {
+        /// Card ID, or "all" to promote every draft.
+        id: String,
+    },
+    /// Import cards from a YAML file into drafts/ (or pending/ with --immediate).
+    Import {
+        /// Path to YAML file with card definitions (same format as cards.yaml).
+        source: String,
+        /// Import directly to pending/ instead of drafts/.
+        #[arg(long)]
+        immediate: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -493,6 +506,7 @@ fn maybe_hfs_compress_card(card_dir: &Path) {
 fn ensure_cards_layout(root: &Path) -> anyhow::Result<()> {
     for dir in [
         "templates",
+        "drafts",
         "pending",
         "running",
         "done",
@@ -907,6 +921,7 @@ fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
             policy_scope: vec![],
             decision_required: false,
             decision_path: None,
+            spawn_to: None,
             policy_result: None,
             timeout_seconds: None,
             retry_count: Some(0),
@@ -1003,6 +1018,7 @@ fn create_card(
         policy_scope: vec![],
         decision_required: false,
         decision_path: None,
+        spawn_to: None,
         policy_result: None,
         timeout_seconds: None,
         retry_count: Some(0),
@@ -1724,6 +1740,7 @@ fn set_card_icon(path: &Path) {
 /// Stamp icons for all state dirs + cards within a single team root.
 fn sync_icons_in_root(team_root: &Path, n_cards: &mut usize, n_dirs: &mut usize) {
     const STATES: &[&str] = &[
+        "drafts",
         "pending",
         "running",
         "done",
@@ -2217,6 +2234,8 @@ async fn main() -> anyhow::Result<()> {
             IconsAction::Install => cmd_icons_install(&root),
             IconsAction::Uninstall => cmd_icons_uninstall(),
         },
+        Command::Promote { id } => cmd_promote(&root, &id),
+        Command::Import { source, immediate } => cmd_import(&root, &source, immediate),
     }
 }
 
@@ -2956,15 +2975,20 @@ fn spawn_child_cards(cards_dir: &Path, done_card_dir: &Path) {
         return;
     };
 
-    let pending_dir = cards_dir.join("pending");
-    let _ = fs::create_dir_all(&pending_dir);
+    // Read parent meta to determine child destination (pending or drafts).
+    let dest = jobcard_core::read_meta(done_card_dir)
+        .ok()
+        .and_then(|m| m.spawn_to)
+        .unwrap_or_else(|| "pending".to_string());
+    let dest_dir = cards_dir.join(&dest);
+    let _ = fs::create_dir_all(&dest_dir);
 
     for entry in entries {
         let Some(id) = entry["id"].as_str() else {
             continue;
         };
 
-        let child_dir = pending_dir.join(format!("{}.jobcard", id));
+        let child_dir = dest_dir.join(format!("{}.jobcard", id));
         if child_dir.exists() {
             continue; // don't overwrite
         }
@@ -3006,7 +3030,7 @@ fn spawn_child_cards(cards_dir: &Path, done_card_dir: &Path) {
 
         render_card_thumbnail(&child_dir);
 
-        eprintln!("[child-cards] created {}", id);
+        eprintln!("[child-cards] created {} in {}/", id, dest);
     }
 }
 
@@ -3731,6 +3755,128 @@ fn cmd_approve(root: &Path, id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+// ── promote / import ─────────────────────────────────────────────────────────
+
+fn find_card_in_dir(state_dir: &Path, id: &str) -> Option<PathBuf> {
+    let exact = state_dir.join(format!("{}.jobcard", id));
+    if exact.exists() {
+        return Some(exact);
+    }
+    let suffix = format!("-{}.jobcard", id);
+    fs::read_dir(state_dir).ok()?.flatten().find_map(|e| {
+        let p = e.path();
+        if p.is_dir()
+            && p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with(&suffix))
+        {
+            Some(p)
+        } else {
+            None
+        }
+    })
+}
+
+fn cmd_promote(root: &Path, id: &str) -> anyhow::Result<()> {
+    let drafts_dir = root.join("drafts");
+    let pending_dir = root.join("pending");
+    let _ = fs::create_dir_all(&pending_dir);
+
+    if id == "all" {
+        let mut count = 0u32;
+        if let Ok(entries) = fs::read_dir(&drafts_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir()
+                    && path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.ends_with(".jobcard"))
+                {
+                    let name = entry.file_name();
+                    fs::rename(&path, pending_dir.join(&name))?;
+                    eprintln!("promoted: {}", name.to_string_lossy());
+                    count += 1;
+                }
+            }
+        }
+        if count == 0 {
+            anyhow::bail!("no draft cards to promote");
+        }
+        eprintln!("[promote] moved {} card(s) to pending/", count);
+    } else {
+        let card = find_card_in_dir(&drafts_dir, id)
+            .with_context(|| format!("card '{}' not found in drafts/", id))?;
+        let name = card.file_name().unwrap().to_owned();
+        fs::rename(&card, pending_dir.join(&name))?;
+        eprintln!("promoted: {}", id);
+    }
+    Ok(())
+}
+
+fn cmd_import(root: &Path, source: &str, immediate: bool) -> anyhow::Result<()> {
+    let text = fs::read_to_string(source)
+        .with_context(|| format!("cannot read {}", source))?;
+    let entries: Vec<serde_yaml::Value> = serde_yaml::from_str(&text)
+        .context("invalid YAML — expected a sequence of card definitions")?;
+
+    let dest = if immediate { "pending" } else { "drafts" };
+    let dest_dir = root.join(dest);
+    fs::create_dir_all(&dest_dir)?;
+
+    let mut count = 0u32;
+    for entry in &entries {
+        let Some(id) = entry["id"].as_str() else {
+            continue;
+        };
+
+        let child_dir = dest_dir.join(format!("{}.jobcard", id));
+        if child_dir.exists() {
+            eprintln!("[import] skipping {} (already exists)", id);
+            continue;
+        }
+        fs::create_dir_all(child_dir.join("logs"))?;
+        fs::create_dir_all(child_dir.join("output"))?;
+
+        let meta = serde_json::json!({
+            "id": id,
+            "title": entry["title"].as_str().unwrap_or(id),
+            "description": entry["description"].as_str().unwrap_or(""),
+            "stage": entry["stage"].as_str().unwrap_or("spec"),
+            "priority": entry["priority"].as_i64().unwrap_or(3),
+            "created": chrono::Utc::now().to_rfc3339(),
+            "provider_chain": entry["provider_chain"].as_sequence()
+                .map(|s| s.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+                .unwrap_or_else(|| vec!["claude"]),
+            "stages": {
+                "spec": {"status": "pending", "agent": null},
+                "plan": {"status": "blocked", "agent": null},
+                "implement": {"status": "blocked", "agent": null},
+                "qa": {"status": "blocked", "agent": null}
+            },
+            "acceptance_criteria": entry["acceptance_criteria"].as_sequence()
+                .map(|s| s.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+                .unwrap_or_default(),
+            "retry_count": 0
+        });
+        fs::write(
+            child_dir.join("meta.json"),
+            serde_json::to_vec_pretty(&meta)?,
+        )?;
+
+        if let Some(desc) = entry["description"].as_str() {
+            let title = entry["title"].as_str().unwrap_or(id);
+            fs::write(child_dir.join("spec.md"), format!("# {}\n\n{}\n", title, desc))?;
+        }
+
+        render_card_thumbnail(&child_dir);
+        count += 1;
+    }
+
+    eprintln!("[import] created {} card(s) in {}/", count, dest);
+    Ok(())
+}
+
 fn approve_card(root: &Path, id: &str) -> anyhow::Result<()> {
     let card = find_card(root, id).with_context(|| format!("card not found: {}", id))?;
     let state = card
@@ -3974,8 +4120,9 @@ fn cmd_inspect(root: &Path, id: &str) -> anyhow::Result<()> {
 
 fn list_cards(root: &Path, state_filter: &str) -> anyhow::Result<()> {
     let states: Vec<&str> = match state_filter {
-        "all" => vec!["pending", "running", "done", "failed", "merged"],
+        "all" => vec!["drafts", "pending", "running", "done", "failed", "merged"],
         "active" => vec!["pending", "running", "done"],
+        "drafts" => vec!["drafts"],
         other => vec![other],
     };
 
@@ -4065,7 +4212,7 @@ fn print_state_group(dir: &Path, state: &str, team_prefix: Option<&str>) -> anyh
 fn find_card(root: &Path, id: &str) -> Option<PathBuf> {
     let suffix = format!("-{}.jobcard", id);
     let exact = format!("{}.jobcard", id);
-    for dir in ["pending", "running", "done", "merged", "failed"] {
+    for dir in ["drafts", "pending", "running", "done", "merged", "failed"] {
         let state_dir = root.join(dir);
         // Exact match (legacy / no-glyph prefix)
         let p = state_dir.join(&exact);

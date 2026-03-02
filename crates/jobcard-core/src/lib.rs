@@ -152,6 +152,10 @@ pub struct Meta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decision_path: Option<String>,
 
+    /// Where spawn_child_cards() should place children: "pending" (default) or "drafts".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawn_to: Option<String>,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy_result: Option<String>,
 
