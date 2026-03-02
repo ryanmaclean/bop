@@ -318,7 +318,7 @@ fileprivate struct JobCardPreview: View {
                     case .subtasks:
                         subtasksTab(m)
                     case .logs:
-                        logsTab()
+                        logsTab(m.id)
                     case .files:
                         filesTab()
                     }
@@ -506,18 +506,33 @@ fileprivate struct JobCardPreview: View {
     }
     
     @ViewBuilder
-    private func logsTab() -> some View {
-        if !logs.isEmpty {
-            Text(logs)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(Color.white.opacity(0.8))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(16)
-                .background(Color.black.opacity(0.4))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-        } else {
-            Text("No logs available.")
-                .foregroundColor(.textMuted)
+    private func logsTab(_ id: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !logs.isEmpty {
+                Text(logs)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(Color.white.opacity(0.8))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .background(Color.black.opacity(0.4))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                Text("No logs yet.")
+                    .foregroundColor(.textMuted)
+            }
+            if let tailURL = URL(string: "bop://card/\(id)/logs") {
+                Link(destination: tailURL) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "scroll").font(.system(size: 12))
+                        Text("Open live tail →").font(.system(size: 13, weight: .medium))
+                    }
+                    .foregroundColor(.tailText)
+                    .padding(.horizontal, 14).padding(.vertical, 7)
+                    .background(Color.tailBg)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .help("bop logs \(id) --follow")
+            }
         }
     }
     
@@ -609,7 +624,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
 
         DispatchQueue.main.async {
             self.hostingView.rootView = JobCardPreview(url: url, meta: meta, logs: logs, bundleFiles: bundleFiles)
-            self.preferredContentSize = NSSize(width: 800, height: 750)
+            self.preferredContentSize = NSSize(width: 1100, height: 900)
             handler(nil)
         }
     }
