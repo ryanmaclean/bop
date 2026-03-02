@@ -2,8 +2,14 @@
   "id": "openlineage-run-tracking",
   "created": "2026-03-01T22:00:00Z",
   "stage": "implement",
-  "provider_chain": ["claude"],
-  "stages": { "implement": { "status": "pending" } },
+  "provider_chain": [
+    "claude"
+  ],
+  "stages": {
+    "implement": {
+      "status": "pending"
+    }
+  },
   "acceptance_criteria": [
     "cargo build",
     "cargo clippy -- -D warnings",
@@ -12,8 +18,17 @@
     "jj log -r 'main..@-' | grep -q ."
   ],
   "vcs_engine": "jj",
-  "stage_chain": ["implement"],
-  "stage_models": { "implement": "sonnet" },
-  "stage_providers": { "implement": "claude" },
-  "stage_budgets": { "implement": 48000 }
+  "stage_chain": [
+    "implement"
+  ],
+  "stage_models": {
+    "implement": "sonnet"
+  },
+  "stage_providers": {
+    "implement": "claude"
+  },
+  "stage_budgets": {
+    "implement": 48000
+  },
+  "retry_count": 0
 }

@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
   <key>URL</key>
-  <string>bop://card/bop-index-cmd/tail</string>
+  <string>bop://card/bop-index-cmd/logs</string>
 </dict>
 </plist>

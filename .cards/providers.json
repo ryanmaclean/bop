@@ -24,19 +24,11 @@
       "command": "adapters/mock.zsh",
       "rate_limit_exit": 75
     },
-    "ollama-local": {
-      "command": "adapters/ollama-local.zsh",
-      "rate_limit_exit": 75
-    },
-    "opencode": {
-      "command": "adapters/opencode.zsh",
-      "rate_limit_exit": 75
-    },
-    "ollama-qwen3-coder-cloud": {
+    "ollama-deepseek-cloud": {
       "command": "adapters/ollama-local.zsh",
       "rate_limit_exit": 75,
       "env": {
-        "OLLAMA_MODEL": "qwen3-coder:480b-cloud"
+        "OLLAMA_MODEL": "deepseek-v3.1:671b-cloud"
       }
     },
     "ollama-glm4-cloud": {
@@ -46,12 +38,9 @@
         "OLLAMA_MODEL": "glm-4.6:cloud"
       }
     },
-    "ollama-deepseek-cloud": {
+    "ollama-local": {
       "command": "adapters/ollama-local.zsh",
-      "rate_limit_exit": 75,
-      "env": {
-        "OLLAMA_MODEL": "deepseek-v3.1:671b-cloud"
-      }
+      "rate_limit_exit": 75
     },
     "ollama-qwen3-30b": {
       "command": "adapters/ollama-local.zsh",
@@ -59,6 +48,17 @@
       "env": {
         "OLLAMA_MODEL": "qwen3-coder:30b"
       }
+    },
+    "ollama-qwen3-coder-cloud": {
+      "command": "adapters/ollama-local.zsh",
+      "rate_limit_exit": 75,
+      "env": {
+        "OLLAMA_MODEL": "qwen3-coder:480b-cloud"
+      }
+    },
+    "opencode": {
+      "command": "adapters/opencode.zsh",
+      "rate_limit_exit": 75
     }
   }
 }

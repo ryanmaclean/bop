@@ -17,7 +17,7 @@
     "jj log -r 'main..@-' | grep -q ."
   ],
   "vcs_engine": "jj",
-  "failure_reason": "workspace_prepare_failed: jj workspace add failed: Error: Cannot access /Users/studio/bop/.workspaces/ws-allowed-tools-flag-1772427058427\nCaused by: No such file or directory (os error 2)\n",
+  "failure_reason": null,
   "stage_chain": [
     "implement"
   ],
@@ -29,5 +29,6 @@
   },
   "stage_budgets": {
     "implement": 32000
-  }
+  },
+  "retry_count": 0
 }

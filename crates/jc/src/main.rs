@@ -1,13 +1,14 @@
 use anyhow::Context;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use clap::{Parser, Subcommand, ValueEnum};
-use jobcard_core::{write_meta, Meta, StageStatus, VcsEngine as CoreVcsEngine};
+use jobcard_core::{write_meta, Meta, RunRecord, StageStatus, VcsEngine as CoreVcsEngine};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::process::Command as TokioCommand;
 use walkdir::WalkDir;
@@ -26,6 +27,7 @@ const DEFAULT_MEMORY_TTL_SECONDS: i64 = 60 * 60 * 24 * 30;
 const LEASE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const LEASE_STALE_FLOOR: Duration = Duration::from_secs(30);
 const DISPATCHER_LOCK_REL: &str = ".locks/dispatcher.lock";
+static RUN_ID_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Subcommand, Debug)]
 enum Command {
@@ -541,16 +543,16 @@ fn render_card_thumbnail(card_dir: &Path) {
             .arg(card_dir)
             .status();
     }
+
+    compress_card(card_dir);
 }
 
-fn maybe_hfs_compress_card(card_dir: &Path) {
+fn compress_card(card_dir: &Path) {
     if !cfg!(target_os = "macos") {
         return;
     }
-    let enabled = std::env::var("BOP_HFS_COMPRESS_MERGED")
-        .map(|v| matches!(v.as_str(), "1" | "true" | "yes"))
-        .unwrap_or(false);
-    if !enabled {
+    let state = card_state_from_path(card_dir).unwrap_or_default();
+    if !matches!(state.as_str(), "done" | "failed" | "merged") {
         return;
     }
 
@@ -566,7 +568,6 @@ fn maybe_hfs_compress_card(card_dir: &Path) {
     let _ = fs::remove_dir_all(&backup);
 
     let status = StdCommand::new("ditto")
-        .arg("--clone")
         .arg("--hfsCompression")
         .arg(card_dir)
         .arg(&compressed)
@@ -694,6 +695,7 @@ type ProviderSelection = (
     String,
     i32,
     std::collections::BTreeMap<String, String>,
+    Option<String>,
 );
 
 #[derive(Debug, Clone)]
@@ -1041,6 +1043,7 @@ fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
             stage_models: Default::default(),
             stage_providers: Default::default(),
             stage_budgets: Default::default(),
+            runs: vec![],
         };
         write_meta(&implement, &meta)?;
 
@@ -1138,6 +1141,7 @@ fn create_card(
         stage_models: Default::default(),
         stage_providers: Default::default(),
         stage_budgets: Default::default(),
+        runs: vec![],
     });
 
     meta.id = id.to_string();
@@ -2949,16 +2953,21 @@ async fn run_dispatcher(
                         .map(|m| m.stage.clone())
                         .unwrap_or_else(|| "implement".to_string());
 
-                    let (provider_name, provider_cmd, rate_limit_exit, provider_env) =
-                        match select_provider(cards_dir, meta.as_mut(), &stage)? {
-                            Some(v) => v,
-                            None => {
-                                let pending_path = pending_dir.join(&name);
-                                let _ = fs::rename(&running_path, &pending_path);
-                                render_card_thumbnail(&pending_path);
-                                continue;
-                            }
-                        };
+                    let (
+                        provider_name,
+                        provider_cmd,
+                        rate_limit_exit,
+                        provider_env,
+                        provider_model,
+                    ) = match select_provider(cards_dir, meta.as_mut(), &stage)? {
+                        Some(v) => v,
+                        None => {
+                            let pending_path = pending_dir.join(&name);
+                            let _ = fs::rename(&running_path, &pending_path);
+                            render_card_thumbnail(&pending_path);
+                            continue;
+                        }
+                    };
 
                     if let Some(ref mut meta) = meta {
                         let _ = write_meta(&running_path, meta);
@@ -2970,6 +2979,8 @@ async fn run_dispatcher(
                         &provider_cmd,
                         &provider_name,
                         &provider_env,
+                        provider_model.as_deref(),
+                        rate_limit_exit,
                     )
                     .await
                     .unwrap_or((1, None));
@@ -3220,6 +3231,8 @@ async fn run_card(
     adapter: &str,
     provider_name: &str,
     provider_env: &std::collections::BTreeMap<String, String>,
+    provider_model: Option<&str>,
+    rate_limit_exit: i32,
 ) -> anyhow::Result<(i32, Option<Meta>)> {
     fs::create_dir_all(card_dir.join("logs"))?;
     fs::create_dir_all(card_dir.join("output"))?;
@@ -3298,6 +3311,9 @@ async fn run_card(
         .map(|m| m.stage.clone())
         .unwrap_or_else(|| "implement".to_string());
     let started_at = Utc::now();
+    let started_at_iso = started_at.to_rfc3339();
+    let run_id = short_run_id();
+    let mut run_idx: Option<usize> = None;
     if let Some(ref mut m) = meta {
         let rec = m
             .stages
@@ -3314,6 +3330,29 @@ async fn run_card(
         rec.started = Some(started_at);
         rec.agent = Some(adapter.to_string());
         rec.provider = Some(provider_name.to_string());
+
+        let initial_model = provider_model
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .or_else(|| model_from_provider_env(provider_env))
+            .unwrap_or_else(|| provider_name.to_string());
+        m.runs.push(RunRecord {
+            run_id: run_id.clone(),
+            stage: stage.clone(),
+            provider: provider_name.to_string(),
+            model: initial_model,
+            adapter: adapter.to_string(),
+            started_at: started_at_iso,
+            ended_at: None,
+            outcome: "running".to_string(),
+            prompt_tokens: None,
+            completion_tokens: None,
+            cost_usd: None,
+            duration_s: None,
+            note: None,
+        });
+        run_idx = Some(m.runs.len().saturating_sub(1));
         let _ = write_meta(card_dir, m);
     }
 
@@ -3371,23 +3410,29 @@ async fn run_card(
     let _ = write_run_lease(card_dir, &lease);
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_seconds);
+    let mut timed_out = false;
     let status = loop {
         let now = tokio::time::Instant::now();
         if now >= deadline {
+            timed_out = true;
             let _ = child.kill().await;
-            anyhow::bail!("adapter timed out after {} seconds", timeout_seconds);
+            break None;
         }
         let remaining = deadline.saturating_duration_since(now);
         let wait_slice = std::cmp::min(LEASE_HEARTBEAT_INTERVAL, remaining);
         match tokio::time::timeout(wait_slice, child.wait()).await {
-            Ok(res) => break res?,
+            Ok(res) => break Some(res?),
             Err(_) => {
                 lease.heartbeat_at = Utc::now();
                 let _ = write_run_lease(card_dir, &lease);
             }
         }
     };
-    let exit_code = status.code().unwrap_or(1);
+    let exit_code = if timed_out {
+        124
+    } else {
+        status.and_then(|s| s.code()).unwrap_or(1)
+    };
 
     if let Err(err) = merge_memory_output(cards_dir, &memory_namespace, &memory_out_file) {
         let _ = append_log_line(
@@ -3400,6 +3445,12 @@ async fn run_card(
     }
 
     let finished_at = Utc::now();
+    let duration_s = finished_at
+        .signed_duration_since(started_at)
+        .num_seconds()
+        .try_into()
+        .ok();
+    let usage = detect_run_usage(card_dir);
     if let Some(ref mut m) = meta {
         let rec = m.stages.entry(stage).or_insert(jobcard_core::StageRecord {
             status: jobcard_core::StageStatus::Pending,
@@ -3409,20 +3460,178 @@ async fn run_card(
             started: None,
             blocked_by: None,
         });
-        rec.status = if exit_code == 0 {
+        rec.status = if timed_out {
+            jobcard_core::StageStatus::Failed
+        } else if exit_code == 0 {
             jobcard_core::StageStatus::Done
-        } else if exit_code == 75 {
+        } else if exit_code == rate_limit_exit {
             jobcard_core::StageStatus::Pending
         } else {
             jobcard_core::StageStatus::Failed
         };
-        let duration = finished_at.signed_duration_since(started_at).num_seconds();
-        if duration >= 0 {
-            rec.duration_s = Some(duration as u64);
+        rec.duration_s = duration_s;
+
+        if let Some(idx) = run_idx {
+            if let Some(run) = m.runs.get_mut(idx) {
+                run.ended_at = Some(finished_at.to_rfc3339());
+                run.duration_s = duration_s;
+                run.outcome = if timed_out {
+                    "timeout".to_string()
+                } else if exit_code == 0 {
+                    "success".to_string()
+                } else if exit_code == rate_limit_exit {
+                    "rate_limited".to_string()
+                } else {
+                    "failed".to_string()
+                };
+                if run.model.trim().is_empty() {
+                    run.model = provider_name.to_string();
+                }
+                if let Some(run_usage) = usage.as_ref() {
+                    if let Some(model) = run_usage.model.as_ref() {
+                        run.model = model.clone();
+                    }
+                    run.prompt_tokens = run_usage.prompt_tokens;
+                    run.completion_tokens = run_usage.completion_tokens;
+                    run.cost_usd = run_usage.cost_usd;
+                } else if let Some(model) = detect_model_from_logs(card_dir) {
+                    run.model = model;
+                }
+                if timed_out {
+                    run.note = Some(format!("timeout_seconds={}", timeout_seconds));
+                }
+            }
         }
     }
 
     Ok((exit_code, meta))
+}
+
+#[derive(Debug, Clone, Default)]
+struct RunUsage {
+    model: Option<String>,
+    prompt_tokens: Option<u64>,
+    completion_tokens: Option<u64>,
+    cost_usd: Option<f64>,
+}
+
+fn short_run_id() -> String {
+    let now = Utc::now()
+        .timestamp_nanos_opt()
+        .unwrap_or_else(|| Utc::now().timestamp_micros() * 1000) as u64;
+    let pid = std::process::id() as u64;
+    let seq = RUN_ID_SEQ.fetch_add(1, Ordering::Relaxed);
+    let mixed = now ^ (pid << 16) ^ seq;
+    format!("{:08x}", (mixed & 0xffff_ffff) as u32)
+}
+
+fn model_from_provider_env(env: &BTreeMap<String, String>) -> Option<String> {
+    for key in ["OLLAMA_MODEL", "ANTHROPIC_MODEL", "OPENAI_MODEL", "MODEL"] {
+        if let Some(value) = env.get(key).map(|v| v.trim()).filter(|v| !v.is_empty()) {
+            return Some(value.to_string());
+        }
+    }
+    env.iter().find_map(|(k, v)| {
+        if k.to_ascii_uppercase().ends_with("_MODEL") {
+            let trimmed = v.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+        None
+    })
+}
+
+fn parse_latest_json_line(path: &Path) -> Option<serde_json::Value> {
+    let content = fs::read_to_string(path).ok()?;
+    content
+        .lines()
+        .rev()
+        .find_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+}
+
+fn parse_usage_from_stdout(stdout_log: &Path) -> Option<RunUsage> {
+    let value = parse_latest_json_line(stdout_log)?;
+    let usage = value.get("usage");
+
+    let mut prompt_tokens = usage
+        .and_then(|u| u.get("input_tokens"))
+        .and_then(|x| x.as_u64());
+    let mut completion_tokens = usage
+        .and_then(|u| u.get("output_tokens"))
+        .and_then(|x| x.as_u64());
+
+    let model = value
+        .get("modelUsage")
+        .and_then(|m| m.as_object())
+        .and_then(|obj| obj.keys().next().cloned())
+        .or_else(|| {
+            value
+                .get("model")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        });
+
+    if prompt_tokens.is_none() || completion_tokens.is_none() {
+        if let Some(model_usage) = value.get("modelUsage").and_then(|m| m.as_object()) {
+            if let Some((_model_name, stats)) = model_usage.iter().next() {
+                if prompt_tokens.is_none() {
+                    prompt_tokens = stats.get("inputTokens").and_then(|x| x.as_u64());
+                }
+                if completion_tokens.is_none() {
+                    completion_tokens = stats.get("outputTokens").and_then(|x| x.as_u64());
+                }
+            }
+        }
+    }
+
+    Some(RunUsage {
+        model,
+        prompt_tokens,
+        completion_tokens,
+        cost_usd: value.get("total_cost_usd").and_then(|x| x.as_f64()),
+    })
+}
+
+fn parse_usage_from_ollama_stats(stats_log: &Path) -> Option<RunUsage> {
+    let content = fs::read_to_string(stats_log).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+    Some(RunUsage {
+        model: value
+            .get("model")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        prompt_tokens: value.get("prompt_tokens").and_then(|x| x.as_u64()),
+        completion_tokens: value.get("completion_tokens").and_then(|x| x.as_u64()),
+        cost_usd: None,
+    })
+}
+
+fn detect_run_usage(card_dir: &Path) -> Option<RunUsage> {
+    let logs_dir = card_dir.join("logs");
+    let mut merged = parse_usage_from_stdout(&logs_dir.join("stdout.log"));
+
+    if let Some(ollama) = parse_usage_from_ollama_stats(&logs_dir.join("ollama-stats.json")) {
+        if let Some(current) = merged.as_mut() {
+            if current.model.is_none() {
+                current.model = ollama.model;
+            }
+            if current.prompt_tokens.is_none() {
+                current.prompt_tokens = ollama.prompt_tokens;
+            }
+            if current.completion_tokens.is_none() {
+                current.completion_tokens = ollama.completion_tokens;
+            }
+        } else {
+            merged = Some(ollama);
+        }
+    }
+
+    merged
+}
+
+fn detect_model_from_logs(card_dir: &Path) -> Option<String> {
+    detect_run_usage(card_dir).and_then(|u| u.model)
 }
 
 fn rotate_provider_chain(meta: &mut Meta) {
@@ -3459,7 +3668,7 @@ fn select_provider(
         None => vec!["mock".to_string(), "mock2".to_string()],
     };
 
-    let mut fallback: Option<(String, String, std::collections::BTreeMap<String, String>)> = None;
+    let mut fallback: Option<ProviderSelection> = None;
     for name in chain {
         let Some(p) = pf.providers.get(&name) else {
             continue;
@@ -3473,7 +3682,13 @@ fn select_provider(
         if let Some(ref avoid) = avoid_provider {
             if &name == avoid {
                 if fallback.is_none() {
-                    fallback = Some((name, p.command.clone(), p.env.clone()));
+                    fallback = Some((
+                        name,
+                        p.command.clone(),
+                        p.rate_limit_exit,
+                        p.env.clone(),
+                        p.model.clone(),
+                    ));
                 }
                 continue;
             }
@@ -3484,15 +3699,11 @@ fn select_provider(
             p.command.clone(),
             p.rate_limit_exit,
             p.env.clone(),
+            p.model.clone(),
         )));
     }
 
-    if let Some((name, cmd, env)) = fallback {
-        if let Some(p) = pf.providers.get(&name) {
-            return Ok(Some((name, cmd, p.rate_limit_exit, env)));
-        }
-    }
-    Ok(None)
+    Ok(fallback)
 }
 
 fn set_provider_cooldown(cards_dir: &Path, provider: &str, cooldown_s: i64) -> anyhow::Result<()> {
@@ -3778,7 +3989,6 @@ async fn run_merge_gate(
                 let _ = write_meta(&card_dir, &meta);
                 let merged_path = merged_dir.join(&name);
                 let _ = fs::rename(&card_dir, &merged_path);
-                maybe_hfs_compress_card(&merged_path);
                 render_card_thumbnail(&merged_path);
             }
         }
@@ -4170,12 +4380,7 @@ fn cmd_inspect(root: &Path, id: &str) -> anyhow::Result<()> {
     // Cost summary from stdout.log JSON result line
     let stdout_log = card.join("logs").join("stdout.log");
     if stdout_log.exists() {
-        let content = fs::read_to_string(&stdout_log)?;
-        let json_line = content
-            .lines()
-            .rev()
-            .find_map(|line| serde_json::from_str::<serde_json::Value>(line).ok());
-        if let Some(v) = json_line {
+        if let Some(v) = parse_latest_json_line(&stdout_log) {
             if let Some(usage) = v.get("usage") {
                 let cache_read = usage
                     .get("cache_read_input_tokens")
@@ -4203,6 +4408,60 @@ fn cmd_inspect(root: &Path, id: &str) -> anyhow::Result<()> {
                     turns,
                 );
             }
+        }
+    }
+
+    if !meta.runs.is_empty() {
+        println!("\nRuns  {} attempts", meta.runs.len());
+        for (idx, run) in meta.runs.iter().enumerate() {
+            let started = if run.started_at.trim().is_empty() {
+                "<unknown>"
+            } else {
+                run.started_at.as_str()
+            };
+            let provider = if run.provider.trim().is_empty() {
+                "unknown"
+            } else {
+                run.provider.as_str()
+            };
+            let model = if run.model.trim().is_empty() {
+                "unknown"
+            } else {
+                run.model.as_str()
+            };
+            let stage = if run.stage.trim().is_empty() {
+                "unknown"
+            } else {
+                run.stage.as_str()
+            };
+            let outcome = if run.outcome.trim().is_empty() {
+                "unknown"
+            } else {
+                run.outcome.as_str()
+            };
+            let mut extras: Vec<String> = Vec::new();
+            if let Some(duration_s) = run.duration_s {
+                extras.push(format!("{}s", duration_s));
+            }
+            if let Some(cost) = run.cost_usd {
+                extras.push(format!("${:.2}", cost));
+            }
+            let extra = if extras.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", extras.join(", "))
+            };
+
+            println!(
+                "  #{}  {}  {}/{}  {}  {}{}",
+                idx + 1,
+                started,
+                provider,
+                model,
+                stage,
+                outcome,
+                extra
+            );
         }
     }
 

@@ -67,7 +67,38 @@ pub struct Subtask {
     pub done: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+/// OpenLineage-style provenance for a single stage execution attempt.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct RunRecord {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub run_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub stage: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub model: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub adapter: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub started_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub outcome: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_s: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct Meta {
     pub id: String,
     pub created: DateTime<Utc>,
@@ -218,6 +249,10 @@ pub struct Meta {
     /// Max token budget per stage. Example: `{"implement": 32000, "qa": 8000}`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub stage_budgets: BTreeMap<String, u64>,
+
+    /// Execution provenance records (OpenLineage-style) for each run attempt.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runs: Vec<RunRecord>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -700,6 +735,40 @@ mod tests {
         // But should still round-trip fine
         let back = read_meta(dir.path()).unwrap();
         assert!(back.stage_chain.is_empty());
+    }
+
+    #[test]
+    fn meta_runs_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = Meta {
+            id: "run1".into(),
+            created: chrono::Utc::now(),
+            stage: "implement".into(),
+            runs: vec![RunRecord {
+                run_id: "abcd1234".into(),
+                stage: "implement".into(),
+                provider: "claude".into(),
+                model: "claude-sonnet-4-6".into(),
+                adapter: "adapters/claude.zsh".into(),
+                started_at: "2026-03-01T20:45:00Z".into(),
+                ended_at: Some("2026-03-01T20:48:00Z".into()),
+                outcome: "success".into(),
+                prompt_tokens: Some(123),
+                completion_tokens: Some(456),
+                cost_usd: Some(0.73),
+                duration_s: Some(180),
+                note: Some("retry 1".into()),
+            }],
+            ..Default::default()
+        };
+        write_meta(dir.path(), &m).unwrap();
+        let raw = fs::read_to_string(meta_path(dir.path())).unwrap();
+        assert!(raw.contains("\"runs\""));
+        let back = read_meta(dir.path()).unwrap();
+        assert_eq!(back.runs.len(), 1);
+        assert_eq!(back.runs[0].run_id, "abcd1234");
+        assert_eq!(back.runs[0].outcome, "success");
+        assert_eq!(back.runs[0].duration_s, Some(180));
     }
 
     #[test]

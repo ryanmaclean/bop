@@ -37,7 +37,7 @@ compress_card_hfs() {
   local tmp="${parent}/${name}.hfs.tmp"
   local backup="${parent}/${name}.bak.tmp"
   rm -rf "${tmp}" "${backup}"
-  ditto --clone --hfsCompression "${card_dir}" "${tmp}" >/dev/null 2>&1 || {
+  ditto --hfsCompression "${card_dir}" "${tmp}" >/dev/null 2>&1 || {
     rm -rf "${tmp}"
     return 0
   }
@@ -52,7 +52,11 @@ compress_card_hfs() {
 
 typeset -a cards
 cards=(
+  "${CARDS_ROOT}"/done/*.jobcard
+  "${CARDS_ROOT}"/failed/*.jobcard
   "${CARDS_ROOT}"/merged/*.jobcard
+  "${CARDS_ROOT}"/team-*/done/*.jobcard
+  "${CARDS_ROOT}"/team-*/failed/*.jobcard
   "${CARDS_ROOT}"/team-*/merged/*.jobcard
 )
 
