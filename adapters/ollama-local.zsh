@@ -1,5 +1,5 @@
 #!/usr/bin/env zsh
-# ollama-local.zsh — run a card prompt against a local Ollama model
+# ollama-local.zsh — run a card prompt against an Ollama model (local or cloud variant)
 #
 # Usage (called by dispatcher):
 #   ollama-local.zsh <workdir> <prompt_file> <stdout_log> <stderr_log>
@@ -10,8 +10,9 @@
 #   1   other failure → failed/
 #
 # Env vars:
-#   OLLAMA_MODEL   model to use (default: qwen2.5-coder:7b)
+#   OLLAMA_MODEL   model to use (default: qwen3-coder:480b-cloud)
 #   OLLAMA_HOST    base URL (default: http://localhost:11434)
+#   OLLAMA_TIMEOUT timeout in seconds (default: 600)
 
 set -euo pipefail
 
@@ -20,8 +21,9 @@ prompt_file="$2"
 stdout_log="$3"
 stderr_log="$4"
 
-MODEL="${OLLAMA_MODEL:-qwen2.5-coder:7b}"
+MODEL="${OLLAMA_MODEL:-qwen3-coder:480b-cloud}"
 HOST="${OLLAMA_HOST:-http://localhost:11434}"
+TIMEOUT_S="${OLLAMA_TIMEOUT:-600}"
 
 # Make paths absolute before cd
 for var in prompt_file stdout_log stderr_log; do
@@ -37,13 +39,86 @@ if ! curl -sf "${HOST}/api/tags" >/dev/null 2>&1; then
 fi
 
 # ── Model check ───────────────────────────────────────────────────────────────
-if ! curl -sf "${HOST}/api/tags" | grep -q "\"${MODEL}\""; then
-    print -r "model ${MODEL} not found — pull it with: ollama pull ${MODEL}" >> "$stderr_log"
+# Cloud variants (name:cloud) may not appear in /api/tags — skip check for them
+if [[ "$MODEL" != *":cloud" ]]; then
+    if ! curl -sf "${HOST}/api/tags" | grep -q "\"${MODEL}\""; then
+        print -r "model ${MODEL} not found — pull it with: ollama pull ${MODEL}" >> "$stderr_log"
+        exit 75
+    fi
+fi
+
+# ── Run via HTTP API (gives token stats, works with cloud variants) ───────────
+PROMPT_BYTES=$(wc -c < "$prompt_file")
+print -r "[ollama] starting ${MODEL} on ${PROMPT_BYTES} byte prompt" >> "$stderr_log"
+
+START_S=$SECONDS
+
+# JSON-encode prompt using python3 (handles quotes, newlines, unicode)
+PROMPT_JSON=$(python3 -c "
+import json, sys
+with open(sys.argv[1]) as f:
+    print(json.dumps(f.read()), end='')
+" "$prompt_file")
+
+# stats_log lives next to stdout_log in the logs/ dir
+STATS_LOG="${stdout_log:h}/ollama-stats.json"
+
+RESPONSE=$(curl -s --max-time "$TIMEOUT_S" \
+    "${HOST}/api/generate" \
+    -H "Content-Type: application/json" \
+    -d "{\"model\": ${MODEL@Q}, \"prompt\": ${PROMPT_JSON}, \"stream\": false}" \
+    2>> "$stderr_log")
+
+rc=$?
+
+if [[ $rc -ne 0 ]]; then
+    print -r "[ollama] curl failed (rc=$rc) — exiting 75" >> "$stderr_log"
     exit 75
 fi
 
-# ── Run ───────────────────────────────────────────────────────────────────────
-print -r "running ${MODEL} on $(wc -c < "$prompt_file") byte prompt" >> "$stderr_log"
+if [[ -z "$RESPONSE" ]]; then
+    print -r "[ollama] empty response — model may be unavailable, exiting 75" >> "$stderr_log"
+    exit 75
+fi
 
-ollama run "$MODEL" "$(cat "$prompt_file")" \
-    > "$stdout_log" 2>> "$stderr_log"
+# Check for error in response JSON
+if echo "$RESPONSE" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+if 'error' in d:
+    print('ERROR:', d['error'], file=sys.stderr)
+    sys.exit(1)
+" 2>> "$stderr_log"; then
+    : # no error
+else
+    print -r "[ollama] model returned error — exiting 75 (transient)" >> "$stderr_log"
+    exit 75
+fi
+
+# Write the model's text response to stdout_log
+python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print(d.get('response', ''), end='')
+" <<< "$RESPONSE" > "$stdout_log"
+
+# Write token stats to ollama-stats.json for dispatcher to read into run record
+ELAPSED=$(( SECONDS - START_S ))
+python3 -c "
+import json, sys, datetime
+d = json.load(sys.stdin)
+stats = {
+    'model':             sys.argv[1],
+    'provider':          'ollama',
+    'prompt_tokens':     d.get('prompt_eval_count', 0),
+    'completion_tokens': d.get('eval_count', 0),
+    'total_duration_ns': d.get('total_duration', 0),
+    'elapsed_s':         int(sys.argv[2]),
+    'done':              d.get('done', False),
+    'done_reason':       d.get('done_reason', ''),
+    'timestamp':         datetime.datetime.utcnow().isoformat() + 'Z',
+}
+print(json.dumps(stats, indent=2))
+" "$MODEL" "$ELAPSED" <<< "$RESPONSE" > "$STATS_LOG"
+
+print -r "[ollama] done. prompt_tokens=$(python3 -c "import json; print(json.load(open('$STATS_LOG'))['prompt_tokens'])" 2>/dev/null || echo '?') completion_tokens=$(python3 -c "import json; print(json.load(open('$STATS_LOG'))['completion_tokens'])" 2>/dev/null || echo '?')" >> "$stderr_log"
