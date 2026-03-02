@@ -2053,14 +2053,7 @@ fn cmd_doctor(cards_root: &Path) -> anyhow::Result<()> {
 }
 
 fn print_status_summary(root: &Path) -> anyhow::Result<()> {
-    for dir in ["pending", "running", "done", "merged", "failed"] {
-        let p = root.join(dir);
-        if p.exists() {
-            let count = fs::read_dir(&p).map(|rd| rd.count()).unwrap_or(0);
-            println!("{}\t{}", dir, count);
-        }
-    }
-    Ok(())
+    list_cards(root, "active")
 }
 
 fn resolve_config_path() -> PathBuf {
