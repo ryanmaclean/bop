@@ -25,16 +25,19 @@ unset CLAUDECODE
 
 # Cap wall-clock time; card timeout_seconds is the authoritative limit but
 # this prevents runaway sessions when the dispatcher timeout doesn't fire.
+# Use perl alarm — macOS zsh lacks GNU timeout.
 TIMEOUT_S="${5:-600}"
 
-timeout "$TIMEOUT_S" claude -p "$(cat "$prompt_file")" \
+perl -e 'alarm(shift); exec @ARGV or die $!' -- \
+  "$TIMEOUT_S" \
+  claude -p "$(cat "$prompt_file")" \
   --dangerously-skip-permissions \
   --output-format json \
   > "$stdout_log" 2> "$stderr_log"
 rc=$?
 
-# timeout exits 124 on expiry — treat as transient so dispatcher retries
-[[ $rc -eq 124 ]] && exit 75
+# perl alarm exits 142 (SIGALRM=14, 128+14) on expiry — treat as transient
+[[ $rc -eq 142 ]] && exit 75
 
 if grep -qiE 'rate limit|429|too many requests' "$stderr_log"; then
   exit 75

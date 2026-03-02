@@ -8,6 +8,11 @@
   "provider_chain": [
     "claude"
   ],
+  "stages": {
+    "implement": {
+      "status": "pending"
+    }
+  },
   "acceptance_criteria": [
     "cargo build",
     "cargo clippy -- -D warnings",
@@ -16,6 +21,10 @@
   ],
   "worktree_branch": "job/short-cli-flags",
   "template_namespace": "implement",
+  "vcs_engine": "jj",
+  "workspace_name": "ws-short-cli-flags-1772426307522",
+  "workspace_path": ".cards/running/🂠-short-cli-flags.jobcard/workspace",
+  "change_ref": "@  oxytouxrmltl\n│\n~",
   "retry_count": 0,
   "stage_chain": [
     "implement"
@@ -28,6 +37,5 @@
   },
   "stage_budgets": {
     "implement": 32000
-  },
-  "failure_reason": null
+  }
 }

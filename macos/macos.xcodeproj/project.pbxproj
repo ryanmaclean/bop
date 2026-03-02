@@ -49,6 +49,13 @@
 			);
 			target = 3D1E94F62F541A630083A1F6 /* bop */;
 		};
+		3D1E95182F541C460083A1F6 /* Exceptions for "JobCardHost" folder in "JobCardHost" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 3D1E950C2F541C450083A1F6 /* JobCardHost */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -63,6 +70,7 @@
 		3D1E950E2F541C450083A1F6 /* JobCardHost */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
+				3D1E95182F541C460083A1F6 /* Exceptions for "JobCardHost" folder in "JobCardHost" target */,
 			);
 			path = JobCardHost;
 			sourceTree = "<group>";
