@@ -2714,6 +2714,16 @@ fn prepare_workspace(
             let repo_root = find_git_root(cards_dir).unwrap_or_else(|| cards_dir.to_path_buf());
             jobcard_core::worktree::ensure_jj_repo(&repo_root)?;
             let ws_name = next_workspace_name(card_id);
+            // Stable path outside the card bundle so it survives card state renames
+            let stable_ws = repo_root.join(".workspaces").join(&ws_name);
+            let legacy_ws = card_dir.join("workspace");
+            let ws_path = if stable_ws.exists() {
+                stable_ws
+            } else if legacy_ws.exists() {
+                legacy_ws
+            } else {
+                stable_ws
+            };
             jobcard_core::worktree::create_workspace_with_name(&repo_root, &ws_path, &ws_name)?;
             let change_ref = jj_head_ref(&ws_path);
             Ok(Some(WorkspaceInfo {
