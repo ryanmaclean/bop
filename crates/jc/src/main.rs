@@ -960,7 +960,7 @@ fn create_card(
         anyhow::bail!("template not found: {}", template);
     }
 
-    let card_dir = cards_dir.join("pending").join(format!("{}.jobcard", id));
+    let card_dir = cards_dir.join("pending").join(format!("🂠-{}.jobcard", id));
     if card_dir.exists() {
         anyhow::bail!("card already exists: {}", id);
     }
@@ -2352,6 +2352,15 @@ fn cmd_poker_consensus(root: &Path, id: &str, glyph: &str) -> anyhow::Result<()>
     meta.poker_round = None;
     meta.estimates.clear();
     write_meta(&card, &meta)?;
+
+    // Rename dir: {old-glyph}-{id}.jobcard → {glyph}-{id}.jobcard
+    let new_name = format!("{}-{}.jobcard", glyph, id);
+    let new_card = card.parent().unwrap_or(root).join(&new_name);
+    if new_card != card {
+        fs::rename(&card, &new_card)?;
+        println!("  renamed → {}", new_name);
+    }
+
     println!("∴ Consensus: {glyph} — {rank_label} of {suit} — {pts}pt");
     println!("  Committed to {id}/meta.json");
     Ok(())
@@ -3844,7 +3853,23 @@ fn print_log_section(label: &str, path: &Path, is_tty: bool) -> anyhow::Result<(
 }
 
 fn find_card_in_state(root: &Path, id: &str, state: &str) -> bool {
-    root.join(state).join(format!("{}.jobcard", id)).exists()
+    let state_dir = root.join(state);
+    if state_dir.join(format!("{}.jobcard", id)).exists() {
+        return true;
+    }
+    let suffix = format!("-{}.jobcard", id);
+    fs::read_dir(&state_dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|e| {
+            e.path()
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.ends_with(&suffix))
+                .unwrap_or(false)
+        })
 }
 
 // ── inspect ──────────────────────────────────────────────────────────────────
@@ -3894,11 +3919,29 @@ fn cmd_inspect(root: &Path, id: &str) -> anyhow::Result<()> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn find_card(root: &Path, id: &str) -> Option<PathBuf> {
-    let name = format!("{}.jobcard", id);
+    let suffix = format!("-{}.jobcard", id);
+    let exact = format!("{}.jobcard", id);
     for dir in ["pending", "running", "done", "merged", "failed"] {
-        let p = root.join(dir).join(&name);
+        let state_dir = root.join(dir);
+        // Exact match (legacy / no-glyph prefix)
+        let p = state_dir.join(&exact);
         if p.exists() {
             return Some(p);
+        }
+        // Glyph-prefixed match: {glyph}-{id}.jobcard
+        if let Ok(entries) = fs::read_dir(&state_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir()
+                    && path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| n.ends_with(&suffix))
+                        .unwrap_or(false)
+                {
+                    return Some(path);
+                }
+            }
         }
     }
     None

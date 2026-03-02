@@ -2,6 +2,25 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Find a card by bare id in a state dir, handling glyph-prefixed names.
+fn find_card_in(cards: &Path, state: &str, id: &str) -> PathBuf {
+    let dir = cards.join(state);
+    let suffix = format!("-{}.jobcard", id);
+    let exact = format!("{}.jobcard", id);
+    if dir.join(&exact).exists() {
+        return dir.join(exact);
+    }
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if name.to_str().map(|n| n.ends_with(&suffix)).unwrap_or(false) {
+                return dir.join(name);
+            }
+        }
+    }
+    dir.join(exact) // return non-existent path so assert gives useful message
+}
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -114,7 +133,7 @@ fn dispatcher_moves_success_to_done() {
         .unwrap();
     assert!(status.success());
 
-    assert!(cards.join("done").join("job1.jobcard").exists());
+    assert!(find_card_in(&cards, "done", "job1").exists());
 }
 
 #[test]
@@ -160,7 +179,7 @@ fn dispatcher_rate_limit_requeues_to_pending() {
         .unwrap();
     assert!(status.success());
 
-    assert!(cards.join("pending").join("job2.jobcard").exists());
+    assert!(find_card_in(&cards, "pending", "job2").exists());
 }
 
 #[test]
@@ -205,7 +224,7 @@ fn dispatcher_rate_limit_sets_cooldown_and_rotates_chain() {
         .unwrap();
     assert!(status.success());
 
-    let meta_path = cards.join("pending").join("job3.jobcard").join("meta.json");
+    let meta_path = find_card_in(&cards, "pending", "job3").join("meta.json");
     let meta = fs::read_to_string(meta_path).unwrap();
     let v: serde_json::Value = serde_json::from_str(&meta).unwrap();
     assert_eq!(v.get("retry_count").and_then(|x| x.as_u64()), Some(1));
@@ -273,7 +292,7 @@ fn dispatcher_relative_adapter_path_works() {
     );
 
     // Card moved to done
-    let card_dir = cards.join("done").join("rel-job1.jobcard");
+    let card_dir = find_card_in(&cards, "done", "rel-job1");
     assert!(card_dir.exists(), "card should be in done/");
 
     // Logs were written
@@ -333,7 +352,7 @@ fn dispatcher_qa_prefers_different_provider_than_implement() {
         .unwrap();
     assert!(status.success());
 
-    let meta_path = cards.join("done").join("job4.jobcard").join("meta.json");
+    let meta_path = find_card_in(&cards, "done", "job4").join("meta.json");
     let meta = fs::read_to_string(meta_path).unwrap();
     assert!(meta.contains("\"qa\""));
     assert!(meta.contains("\"provider\": \"mock2\"") || meta.contains("\"provider\":\"mock2\""));
@@ -471,5 +490,5 @@ fn dispatcher_reclaims_stale_lock_and_runs() {
         .status()
         .unwrap();
     assert!(status.success());
-    assert!(cards.join("done").join("stale-lock-job.jobcard").exists());
+    assert!(find_card_in(&cards, "done", "stale-lock-job").exists());
 }
