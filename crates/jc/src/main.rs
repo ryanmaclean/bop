@@ -126,6 +126,11 @@ enum Command {
         #[command(subcommand)]
         action: PokerAction,
     },
+    /// Manage launchd services for dispatcher and merge-gate.
+    Factory {
+        #[command(subcommand)]
+        action: FactoryAction,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -148,6 +153,20 @@ enum PokerAction {
     Status { id: String },
     /// Commit the agreed glyph to meta.json and close the round.
     Consensus { id: String, glyph: String },
+}
+
+#[derive(Subcommand, Debug)]
+enum FactoryAction {
+    /// Generate and install launchd plists for dispatcher + merge-gate.
+    Install,
+    /// Start (bootstrap) both launchd services.
+    Start,
+    /// Stop both launchd services.
+    Stop,
+    /// Show whether dispatcher + merge-gate services are loaded/running.
+    Status,
+    /// Unload and remove the launchd plist files.
+    Uninstall,
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, ValueEnum, PartialEq, Eq)]
@@ -386,9 +405,17 @@ fn render_card_thumbnail(card_dir: &Path) {
 
     let _ = StdCommand::new("swift")
         .arg(script)
-        .arg(meta)
+        .arg(&meta)
         .arg(out)
         .status();
+
+    // Update Finder folder icon: stage colour + glyph, set on every state transition
+    if let Some(icon_script) = find_repo_script(card_dir, "scripts/set_card_icon.swift") {
+        let _ = StdCommand::new("swift")
+            .arg(icon_script)
+            .arg(card_dir)
+            .status();
+    }
 }
 
 fn maybe_hfs_compress_card(card_dir: &Path) {
@@ -1279,6 +1306,278 @@ fn policy_check_card(cards_root: &Path, card_dir: &Path, card_id: &str) -> anyho
     Ok(())
 }
 
+// ── factory (launchd lifecycle) ──────────────────────────────────────────────
+
+const FACTORY_LABELS: [(&str, &str); 2] = [
+    ("sh.bop.dispatcher", "dispatcher"),
+    ("sh.bop.merge-gate", "merge-gate"),
+];
+
+fn launchd_dir() -> PathBuf {
+    PathBuf::from(std::env::var("HOME").expect("HOME not set")).join("Library/LaunchAgents")
+}
+
+fn plist_path(label: &str) -> PathBuf {
+    launchd_dir().join(format!("{}.plist", label))
+}
+
+fn generate_plist(label: &str, subcommand: &str, repo_root: &Path) -> String {
+    let bop_bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("/usr/local/bin/bop"));
+    let cards_dir = repo_root.join(".cards");
+    let log_base = format!("/tmp/bop-{}", subcommand);
+
+    // Extra args for dispatcher
+    let mut extra_args = String::new();
+    if subcommand == "dispatcher" {
+        extra_args = r#"    <string>--adapter</string>
+    <string>adapters/claude.zsh</string>
+    <string>--max-workers</string>
+    <string>3</string>
+    <string>--poll-ms</string>
+    <string>500</string>
+    <string>--max-retries</string>
+    <string>3</string>
+    <string>--reap-ms</string>
+    <string>1000</string>"#
+            .to_string();
+    }
+
+    let args_block = if extra_args.is_empty() {
+        format!(
+            r#"    <string>{bin}</string>
+    <string>{sub}</string>"#,
+            bin = bop_bin.display(),
+            sub = subcommand,
+        )
+    } else {
+        format!(
+            r#"    <string>{bin}</string>
+    <string>{sub}</string>
+{extra}"#,
+            bin = bop_bin.display(),
+            sub = subcommand,
+            extra = extra_args,
+        )
+    };
+
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{label}</string>
+
+  <key>ProgramArguments</key>
+  <array>
+{args}
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>{wd}</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>CARDS_DIR</key>
+    <string>{cards}</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:{cargo_bin}</string>
+    <key>RUST_LOG</key>
+    <string>info</string>
+  </dict>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>{log_base}.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>{log_base}.err</string>
+
+  <key>HardResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key>
+    <integer>1024</integer>
+  </dict>
+
+  <key>SoftResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key>
+    <integer>512</integer>
+  </dict>
+</dict>
+</plist>
+"#,
+        label = label,
+        args = args_block,
+        wd = repo_root.display(),
+        cards = cards_dir.display(),
+        cargo_bin = PathBuf::from(std::env::var("HOME").unwrap_or_default())
+            .join(".cargo/bin")
+            .display(),
+        log_base = log_base,
+    )
+}
+
+fn cmd_factory_install(cards_root: &Path) -> anyhow::Result<()> {
+    // Resolve repo root (cards_root is .cards, parent is repo)
+    let repo_root = fs::canonicalize(cards_root)
+        .unwrap_or_else(|_| cards_root.to_path_buf())
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    // Use cards_root's parent if cards_root ends with ".cards"
+    let repo_root = if cards_root
+        .file_name()
+        .map(|f| f == ".cards")
+        .unwrap_or(false)
+    {
+        cards_root.parent().unwrap_or(Path::new(".")).to_path_buf()
+    } else {
+        repo_root
+    };
+    let repo_root = fs::canonicalize(&repo_root).unwrap_or(repo_root);
+
+    let la_dir = launchd_dir();
+    fs::create_dir_all(&la_dir)?;
+
+    for (label, subcmd) in &FACTORY_LABELS {
+        let plist = generate_plist(label, subcmd, &repo_root);
+        let dest = plist_path(label);
+        fs::write(&dest, &plist)?;
+        println!("✓ wrote {}", dest.display());
+    }
+
+    // Load both
+    for (label, _) in &FACTORY_LABELS {
+        let dest = plist_path(label);
+        let out = StdCommand::new("launchctl")
+            .args(["load", "-w"])
+            .arg(&dest)
+            .output()?;
+        if out.status.success() {
+            println!("✓ loaded {}", label);
+        } else {
+            let err = String::from_utf8_lossy(&out.stderr);
+            eprintln!("⚠ load {}: {}", label, err.trim());
+        }
+    }
+
+    println!("\nFactory services installed. Run `bop factory status` to verify.");
+    Ok(())
+}
+
+fn cmd_factory_start() -> anyhow::Result<()> {
+    for (label, _) in &FACTORY_LABELS {
+        let out = StdCommand::new("launchctl")
+            .args(["start", label])
+            .output()?;
+        if out.status.success() {
+            println!("✓ started {}", label);
+        } else {
+            let err = String::from_utf8_lossy(&out.stderr);
+            eprintln!("⚠ start {}: {}", label, err.trim());
+        }
+    }
+    Ok(())
+}
+
+fn cmd_factory_stop() -> anyhow::Result<()> {
+    for (label, _) in &FACTORY_LABELS {
+        let out = StdCommand::new("launchctl")
+            .args(["stop", label])
+            .output()?;
+        if out.status.success() {
+            println!("■ stopped {}", label);
+        } else {
+            let err = String::from_utf8_lossy(&out.stderr);
+            eprintln!("⚠ stop {}: {}", label, err.trim());
+        }
+    }
+    Ok(())
+}
+
+fn cmd_factory_status() -> anyhow::Result<()> {
+    println!("── factory services ──");
+    for (label, subcmd) in &FACTORY_LABELS {
+        let dest = plist_path(label);
+        let installed = dest.exists();
+
+        // Check if loaded via launchctl list
+        let out = StdCommand::new("launchctl")
+            .args(["list", label])
+            .output()?;
+        let loaded = out.status.success();
+
+        let pid = if loaded {
+            // Parse PID from launchctl list output (first field of matching line)
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            stdout.lines().find(|l| l.contains("PID")).and_then(|_| {
+                // launchctl list <label> outputs key-value pairs
+                stdout.lines().find_map(|l| {
+                    let l = l.trim();
+                    if l.starts_with("\"PID\"") || l.starts_with("PID") {
+                        l.split('=')
+                            .nth(1)
+                            .or_else(|| l.split_whitespace().nth(1))
+                            .and_then(|v| v.trim().trim_matches(';').parse::<u32>().ok())
+                    } else {
+                        None
+                    }
+                })
+            })
+        } else {
+            None
+        };
+
+        let status_str = match (installed, loaded, pid) {
+            (true, true, Some(p)) => format!("● running (pid {})", p),
+            (true, true, None) => "● loaded (waiting)".to_string(),
+            (true, false, _) => "○ installed (not loaded)".to_string(),
+            (false, _, _) => "□ not installed".to_string(),
+        };
+        println!("  {} {}: {}", subcmd, label, status_str);
+
+        // Show log paths
+        let log_path = format!("/tmp/bop-{}.log", subcmd);
+        let err_path = format!("/tmp/bop-{}.err", subcmd);
+        if Path::new(&log_path).exists() {
+            println!("    stdout: {}", log_path);
+        }
+        if Path::new(&err_path).exists() {
+            println!("    stderr: {}", err_path);
+        }
+    }
+    Ok(())
+}
+
+fn cmd_factory_uninstall() -> anyhow::Result<()> {
+    for (label, _) in &FACTORY_LABELS {
+        let dest = plist_path(label);
+
+        // Unload first (ignore errors if not loaded)
+        let _ = StdCommand::new("launchctl")
+            .args(["unload", "-w"])
+            .arg(&dest)
+            .output();
+
+        if dest.exists() {
+            fs::remove_file(&dest)?;
+            println!("✓ removed {}", dest.display());
+        } else {
+            println!("  (not installed: {})", label);
+        }
+    }
+    println!("\nFactory services uninstalled.");
+    Ok(())
+}
+
 fn command_available(name: &str) -> bool {
     StdCommand::new(name)
         .arg("--version")
@@ -1562,6 +1861,13 @@ async fn main() -> anyhow::Result<()> {
             PokerAction::Reveal { id } => cmd_poker_reveal(&root, &id),
             PokerAction::Status { id } => cmd_poker_status(&root, &id),
             PokerAction::Consensus { id, glyph } => cmd_poker_consensus(&root, &id, &glyph),
+        },
+        Command::Factory { action } => match action {
+            FactoryAction::Install => cmd_factory_install(&root),
+            FactoryAction::Start => cmd_factory_start(),
+            FactoryAction::Stop => cmd_factory_stop(),
+            FactoryAction::Status => cmd_factory_status(),
+            FactoryAction::Uninstall => cmd_factory_uninstall(),
         },
     }
 }
