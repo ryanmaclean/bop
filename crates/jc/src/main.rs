@@ -2391,6 +2391,80 @@ fn cmd_doctor(cards_root: &Path) -> anyhow::Result<()> {
         println!("missing\ttemplates/");
     }
 
+    // ── acceptance criteria lint ────────────────────────────────────────────
+    println!("\n── acceptance criteria ──");
+    let pending_dir = cards_root.join("pending");
+    if pending_dir.is_dir() {
+        let mut any_cards = false;
+        if let Ok(entries) = fs::read_dir(&pending_dir) {
+            for entry in entries.flatten() {
+                let card_dir = entry.path();
+                if card_dir.extension().map(|e| e == "jobcard").unwrap_or(false)
+                    && card_dir.is_dir()
+                {
+                    let meta_path = card_dir.join("meta.json");
+                    let Ok(meta) = jobcard_core::read_meta(&card_dir) else {
+                        continue;
+                    };
+                    if meta.acceptance_criteria.is_empty() {
+                        continue;
+                    }
+                    any_cards = true;
+                    let card_id = card_dir
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("?");
+                    let _ = meta_path; // read above
+                    let is_git_mode = matches!(
+                        meta.vcs_engine,
+                        Some(CoreVcsEngine::GitGt)
+                    );
+                    let mut issues: Vec<String> = Vec::new();
+                    for (idx, cmd) in meta.acceptance_criteria.iter().enumerate() {
+                        // 1. Absolute paths
+                        if cmd.contains("/Users/") || cmd.contains("/home/") {
+                            issues.push(format!(
+                                "criteria[{idx}] — absolute path (non-portable): {cmd}"
+                            ));
+                        }
+                        // 2. Missing binary (first token)
+                        let binary = cmd.split_whitespace().next().unwrap_or("");
+                        if !binary.is_empty() && !command_available(binary) {
+                            issues.push(format!(
+                                "criteria[{idx}] — binary not found: {binary}"
+                            ));
+                        }
+                        // 3. jj commands in git mode
+                        if is_git_mode {
+                            let first = cmd.split_whitespace().next().unwrap_or("");
+                            if first == "jj" {
+                                issues.push(format!(
+                                    "criteria[{idx}] — jj command but vcs_engine is git_gt: {cmd}"
+                                ));
+                            }
+                        }
+                    }
+                    if issues.is_empty() {
+                        println!(
+                            "✓ {}: {} criteria OK",
+                            card_id,
+                            meta.acceptance_criteria.len()
+                        );
+                    } else {
+                        for issue in &issues {
+                            println!("✗ {card_id}: {issue}");
+                        }
+                    }
+                }
+            }
+        }
+        if !any_cards {
+            println!("ok\tno pending cards with acceptance criteria");
+        }
+    } else {
+        println!("ok\tno pending/ directory");
+    }
+
     if failed > 0 {
         anyhow::bail!("doctor found {} issue(s)", failed);
     }
