@@ -33,6 +33,10 @@ enum Command {
     New {
         template: String,
         id: String,
+        /// Team for glyph suit assignment (cli, arch, quality, platform).
+        /// Auto-detected from card directory if omitted.
+        #[arg(long)]
+        team: Option<String>,
     },
     Status {
         #[arg(default_value = "")]
@@ -938,6 +942,7 @@ fn create_card(
     template: &str,
     id: &str,
     spec_override: Option<&str>,
+    team_override: Option<&str>,
 ) -> anyhow::Result<PathBuf> {
     ensure_cards_layout(cards_dir)?;
 
@@ -1019,6 +1024,29 @@ fn create_card(
     meta.retry_count = Some(0);
     meta.failure_reason = None;
 
+    // Auto-assign glyph + token if not already set by template
+    if meta.glyph.is_none() {
+        use jobcard_core::cardchars::{self, Team};
+        let team = match team_override {
+            Some("cli") => Team::Cli,
+            Some("arch") => Team::Arch,
+            Some("quality") => Team::Quality,
+            Some("platform") => Team::Platform,
+            Some(other) => {
+                eprintln!("warning: unknown team '{}', defaulting to cli", other);
+                Team::Cli
+            }
+            None => cardchars::team_from_path(&card_dir),
+        };
+        let used = cardchars::collect_used_glyphs(cards_dir);
+        if let Some((glyph, token)) = cardchars::next_glyph(team, &used) {
+            meta.glyph = Some(glyph);
+            meta.token = Some(token);
+        } else {
+            eprintln!("warning: suit full for {:?}, no glyph assigned", team);
+        }
+    }
+
     write_meta(&card_dir, &meta)?;
 
     if !card_dir.join("spec.md").exists() {
@@ -1030,6 +1058,17 @@ fn create_card(
 
     if let Some(spec) = spec_override {
         fs::write(card_dir.join("spec.md"), spec)?;
+    }
+
+    // Rename card dir from 🂠 placeholder to actual glyph prefix
+    if let Some(ref g) = meta.glyph {
+        let new_name = format!("{}-{}.jobcard", g, id);
+        let new_dir = card_dir.parent().unwrap().join(&new_name);
+        if !new_dir.exists() {
+            fs::rename(&card_dir, &new_dir)?;
+            render_card_thumbnail(&new_dir);
+            return Ok(new_dir);
+        }
     }
 
     render_card_thumbnail(&card_dir);
@@ -2059,8 +2098,8 @@ async fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Command::New { template, id } => {
-            create_card(&root, &template, &id, None)?;
+        Command::New { template, id, team } => {
+            create_card(&root, &template, &id, None, team.as_deref())?;
             Ok(())
         }
         Command::Status { id } => {
@@ -2843,6 +2882,7 @@ fn maybe_advance_stage(cards_dir: &Path, done_card_dir: &Path) {
         created: Utc::now(),
         stage: next_stage.clone(),
         glyph: meta.glyph.clone(),
+        token: meta.token.clone(),
         title: meta.title.clone(),
         description: meta.description.clone(),
         labels: meta.labels.clone(),
