@@ -10,7 +10,8 @@
     },
     "codex": {
       "command": "adapters/codex.zsh",
-      "rate_limit_exit": 75
+      "rate_limit_exit": 75,
+      "cooldown_until_epoch_s": 1772437177
     },
     "goose": {
       "command": "adapters/goose.zsh",
@@ -52,6 +53,7 @@
     "ollama-qwen3-coder-cloud": {
       "command": "adapters/ollama-local.zsh",
       "rate_limit_exit": 75,
+      "cooldown_until_epoch_s": 1772436121,
       "env": {
         "OLLAMA_MODEL": "qwen3-coder:480b-cloud"
       }

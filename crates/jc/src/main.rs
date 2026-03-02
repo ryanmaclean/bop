@@ -488,24 +488,9 @@ fn macos_notify(card_id: &str, card_dir: &Path) {
         .and_then(|s| s.to_str())
         .unwrap_or("");
     let (title, subtitle, sound, action) = match state {
-        "done" => (
-            "✓ Card Done",
-            "Click to open session",
-            "Glass",
-            "session",
-        ),
-        "failed" => (
-            "✗ Card Failed",
-            "Click to view logs",
-            "Basso",
-            "logs",
-        ),
-        "merged" => (
-            "⤴ Card Merged",
-            "Click to open session",
-            "Purr",
-            "session",
-        ),
+        "done" => ("✓ Card Done", "Click to open session", "Glass", "session"),
+        "failed" => ("✗ Card Failed", "Click to view logs", "Basso", "logs"),
+        "merged" => ("⤴ Card Merged", "Click to open session", "Purr", "session"),
         _ => return,
     };
     let open_url = format!("bop://card/{}/{}", card_id, action);
@@ -519,13 +504,20 @@ fn macos_notify(card_id: &str, card_dir: &Path) {
     {
         let _ = StdCommand::new("terminal-notifier")
             .args([
-                "-title", title,
-                "-subtitle", card_id,
-                "-message", subtitle,
-                "-sound", sound,
-                "-open", &open_url,
-                "-group", &format!("bop-{}", card_id),
-                "-sender", "sh.bop.host",
+                "-title",
+                title,
+                "-subtitle",
+                card_id,
+                "-message",
+                subtitle,
+                "-sound",
+                sound,
+                "-open",
+                &open_url,
+                "-group",
+                &format!("bop-{}", card_id),
+                "-sender",
+                "sh.bop.host",
             ])
             .spawn();
         return;
@@ -1225,9 +1217,11 @@ fn create_card(
         anyhow::bail!("template not found: {}", template);
     }
 
-    let card_dir = cards_dir
-        .join("pending")
-        .join(format!("{}-{}.jobcard", jobcard_core::cardchars::CARD_BACK, id));
+    let card_dir = cards_dir.join("pending").join(format!(
+        "{}-{}.jobcard",
+        jobcard_core::cardchars::CARD_BACK,
+        id
+    ));
     if card_dir.exists() {
         anyhow::bail!("card already exists: {}", id);
     }
@@ -3053,7 +3047,17 @@ async fn run_dispatcher(
             last_reap = std::time::Instant::now();
         }
 
-        let running_count = fs::read_dir(&running_dir).map(|rd| rd.count()).unwrap_or(0);
+        let running_count = fs::read_dir(&running_dir)
+            .map(|rd| {
+                rd.filter(|e| {
+                    e.as_ref()
+                        .ok()
+                        .and_then(|e| e.path().extension().map(|x| x == "jobcard"))
+                        .unwrap_or(false)
+                })
+                .count()
+            })
+            .unwrap_or(0);
         let mut available_slots = max_workers.saturating_sub(running_count);
 
         if available_slots > 0 {
@@ -3104,10 +3108,7 @@ async fn run_dispatcher(
                     if let Some(ref pre_meta) = meta {
                         // Gate 1: decision_required — needs human approval first
                         if pre_meta.decision_required {
-                            eprintln!(
-                                "[dispatcher] skipping {} — decision_required",
-                                pre_meta.id
-                            );
+                            eprintln!("[dispatcher] skipping {} — decision_required", pre_meta.id);
                             continue;
                         }
                         // Gate 2: depends_on — all deps must be in done/ or merged/
@@ -3119,8 +3120,7 @@ async fn run_dispatcher(
                             if blocked {
                                 eprintln!(
                                     "[dispatcher] skipping {} — unmet depends_on: {:?}",
-                                    pre_meta.id,
-                                    pre_meta.depends_on
+                                    pre_meta.id, pre_meta.depends_on
                                 );
                                 continue;
                             }
@@ -3406,11 +3406,7 @@ fn priority_from_yaml(value: &serde_yaml::Value) -> i64 {
         return n;
     }
     if let Some(s) = value.as_str() {
-        match s
-            .to_lowercase()
-            .replace(['-', ' '], "_")
-            .as_str()
-        {
+        match s.to_lowercase().replace(['-', ' '], "_").as_str() {
             "must" | "must_have" | "critical" => return 1,
             "should" | "should_have" | "important" => return 2,
             "could" | "could_have" | "nice_to_have" => return 3,
@@ -3825,7 +3821,10 @@ async fn run_card(
         .env("JOBCARD_MEMORY_NAMESPACE", &memory_namespace)
         .envs(provider_env)
         // Card identity — lets any agent orient itself
-        .env("BOP_CARD_ID", meta.as_ref().map(|m| m.id.as_str()).unwrap_or(""))
+        .env(
+            "BOP_CARD_ID",
+            meta.as_ref().map(|m| m.id.as_str()).unwrap_or(""),
+        )
         .env("BOP_CARD_DIR", card_dir)
         .env("BOP_CARDS_DIR", cards_dir)
         .env("BOP_STAGE", &stage)
@@ -4694,8 +4693,7 @@ fn cmd_bstorm(root: &Path, topic_words: Vec<String>, team: Option<String>) -> an
 }
 
 fn cmd_import(root: &Path, source: &str, immediate: bool) -> anyhow::Result<()> {
-    let text = fs::read_to_string(source)
-        .with_context(|| format!("cannot read {}", source))?;
+    let text = fs::read_to_string(source).with_context(|| format!("cannot read {}", source))?;
     let entries: Vec<serde_yaml::Value> = serde_yaml::from_str(&text)
         .context("invalid YAML — expected a sequence of card definitions")?;
 
@@ -4947,15 +4945,36 @@ fn cmd_index(cards_root: &Path, print_flag: bool) -> anyhow::Result<()> {
     // ── 2. Top-level layout ───────────────────────────────────────────────────
     out.push_str("## Top-level layout\n\n");
     let dir_descriptions: &[(&str, &str)] = &[
-        ("crates/", "Rust workspace members (jobcard-core lib + jc/bop binary)"),
-        (".cards/", "Job card state machine — pending/ running/ done/ merged/ failed/"),
-        ("adapters/", "Shell adapter scripts: claude.zsh, mock.zsh, timeout_wrapper.zsh"),
-        ("scripts/", "Helper scripts: policy_check.zsh and other tooling"),
+        (
+            "crates/",
+            "Rust workspace members (jobcard-core lib + jc/bop binary)",
+        ),
+        (
+            ".cards/",
+            "Job card state machine — pending/ running/ done/ merged/ failed/",
+        ),
+        (
+            "adapters/",
+            "Shell adapter scripts: claude.zsh, mock.zsh, timeout_wrapper.zsh",
+        ),
+        (
+            "scripts/",
+            "Helper scripts: policy_check.zsh and other tooling",
+        ),
         ("layouts/", "Zellij terminal layout files (bop.kdl)"),
-        ("macos/", "Xcode project for Quick Look extension (JobCardHost.app)"),
-        ("vibekanban/", "Zellij WASM plugin source for kanban pane display"),
+        (
+            "macos/",
+            "Xcode project for Quick Look extension (JobCardHost.app)",
+        ),
+        (
+            "vibekanban/",
+            "Zellij WASM plugin source for kanban pane display",
+        ),
         ("completions/", "Shell completion scripts"),
-        ("skills/", "Claude skill definitions (markdown prompts for agents)"),
+        (
+            "skills/",
+            "Claude skill definitions (markdown prompts for agents)",
+        ),
         ("docs/", "Project documentation"),
         ("research/", "Research notes and vendor snapshots"),
         ("examples/", "Example jobcard templates and usage"),
@@ -4972,18 +4991,54 @@ fn cmd_index(cards_root: &Path, print_flag: bool) -> anyhow::Result<()> {
     // ── 3. Key files ─────────────────────────────────────────────────────────
     out.push_str("## Key files\n\n");
     let key_files: &[(&str, &str)] = &[
-        ("Cargo.toml", "Workspace manifest; lists crate members and shared dependencies"),
-        ("Makefile", "Shortcuts: `make check` runs test + clippy + fmt"),
-        ("crates/jc/src/main.rs", "CLI binary: all `bop` subcommands, dispatcher loop, merge-gate"),
-        ("crates/jobcard-core/src/lib.rs", "Shared types: Meta, PromptContext, render_prompt, VcsEngine"),
-        (".cards/providers.json", "Provider registry with cooldowns and model config"),
-        (".cards/system_context.md", "Agent orientation text prepended to every dispatched prompt"),
-        (".cards/CODEBASE.md", "This file — concise codebase map for agent orientation"),
-        (".cards/templates/", "COW-cloneable card templates (implement, qa, …)"),
-        (".cards/stages/", "Per-stage instruction fragments injected via {{stage_instructions}}"),
-        ("adapters/claude.zsh", "Production adapter: calls Claude Code CLI with timeout"),
-        ("adapters/mock.zsh", "Testing adapter: writes stub output immediately"),
-        ("scripts/policy_check.zsh", "Policy gate: checks staged files against rules"),
+        (
+            "Cargo.toml",
+            "Workspace manifest; lists crate members and shared dependencies",
+        ),
+        (
+            "Makefile",
+            "Shortcuts: `make check` runs test + clippy + fmt",
+        ),
+        (
+            "crates/jc/src/main.rs",
+            "CLI binary: all `bop` subcommands, dispatcher loop, merge-gate",
+        ),
+        (
+            "crates/jobcard-core/src/lib.rs",
+            "Shared types: Meta, PromptContext, render_prompt, VcsEngine",
+        ),
+        (
+            ".cards/providers.json",
+            "Provider registry with cooldowns and model config",
+        ),
+        (
+            ".cards/system_context.md",
+            "Agent orientation text prepended to every dispatched prompt",
+        ),
+        (
+            ".cards/CODEBASE.md",
+            "This file — concise codebase map for agent orientation",
+        ),
+        (
+            ".cards/templates/",
+            "COW-cloneable card templates (implement, qa, …)",
+        ),
+        (
+            ".cards/stages/",
+            "Per-stage instruction fragments injected via {{stage_instructions}}",
+        ),
+        (
+            "adapters/claude.zsh",
+            "Production adapter: calls Claude Code CLI with timeout",
+        ),
+        (
+            "adapters/mock.zsh",
+            "Testing adapter: writes stub output immediately",
+        ),
+        (
+            "scripts/policy_check.zsh",
+            "Policy gate: checks staged files against rules",
+        ),
     ];
     for (file, desc) in key_files {
         if repo_root.join(file).exists() {
@@ -5100,15 +5155,16 @@ fn cmd_index(cards_root: &Path, print_flag: bool) -> anyhow::Result<()> {
     out.push_str("- **Provider failover**: on exit 75 the provider chain rotates and a 300s cooldown is set in `providers.json`\n");
     out.push_str("- **VCS**: jj (Jujutsu) for multi-agent sessions; each agent gets an isolated `jj workspace`\n");
     out.push_str("- **`{{spec}}`, `{{plan}}`, `{{stage_instructions}}`** — template substitution keys in prompt templates\n");
-    out.push_str("- **`make check`** = `cargo test && cargo clippy -- -D warnings && cargo fmt --check`\n");
+    out.push_str(
+        "- **`make check`** = `cargo test && cargo clippy -- -D warnings && cargo fmt --check`\n",
+    );
 
     // ── Output ────────────────────────────────────────────────────────────────
     if print_flag {
         print!("{out}");
     } else {
         let dest = cards_root.join("CODEBASE.md");
-        fs::write(&dest, &out)
-            .with_context(|| format!("failed to write {}", dest.display()))?;
+        fs::write(&dest, &out).with_context(|| format!("failed to write {}", dest.display()))?;
         println!("wrote {}", dest.display());
     }
     Ok(())

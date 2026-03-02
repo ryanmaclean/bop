@@ -45,14 +45,14 @@ impl Team {
 pub const CARD_BACK: char = '\u{1F0A0}'; // 🂠
 
 /// Jokers — emergency / wildcard / needs-breakdown.
-pub const RED_JOKER: char = '\u{1F0BF}';   // 🂿
-pub const BLACK_JOKER: char = '\u{1F0CF}';  // 🃏
-pub const WHITE_JOKER: char = '\u{1F0DF}';  // 🃟
+pub const RED_JOKER: char = '\u{1F0BF}'; // 🂿
+pub const BLACK_JOKER: char = '\u{1F0CF}'; // 🃏
+pub const WHITE_JOKER: char = '\u{1F0DF}'; // 🃟
 
 /// Trump cards (U+1F0E0..U+1F0F5) — cross-team escalation.
 /// Fool(0), then I(1)..XXI(21). 22 cards total.
-pub const TRUMP_FOOL: char = '\u{1F0E0}';   // 🃠
-pub const TRUMP_MAX: char = '\u{1F0F5}';    // 🃵
+pub const TRUMP_FOOL: char = '\u{1F0E0}'; // 🃠
+pub const TRUMP_MAX: char = '\u{1F0F5}'; // 🃵
 /// Number of trump cards in the Unicode block.
 pub const TRUMP_COUNT: u32 = 22;
 
@@ -85,9 +85,9 @@ pub fn trump_glyph_and_token(rank: u32) -> Option<(char, char)> {
     }
     let glyph = char::from_u32(0x1F0E0 + rank)?;
     let token = match rank {
-        0 => '\u{24FF}',                              // ⓪
-        1..=20 => char::from_u32(0x245F + rank)?,     // ①–⑳
-        21 => '\u{3251}',                              // ㉑
+        0 => '\u{24FF}',                          // ⓪
+        1..=20 => char::from_u32(0x245F + rank)?, // ①–⑳
+        21 => '\u{3251}',                         // ㉑
         _ => unreachable!(),
     };
     Some((glyph, token))

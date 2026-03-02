@@ -575,7 +575,10 @@ impl PromptContext {
                     stage_instructions = si;
                 }
             }
-            if !system_context.is_empty() && !stage_instructions.is_empty() && !codebase_index.is_empty() {
+            if !system_context.is_empty()
+                && !stage_instructions.is_empty()
+                && !codebase_index.is_empty()
+            {
                 break;
             }
         }
@@ -607,9 +610,7 @@ impl PromptContext {
             if let Some(cards_root) = card_dir.parent().and_then(|p| p.parent()) {
                 for dep_id in &meta.depends_on {
                     for state in ["done", "merged"] {
-                        let dep_exact = cards_root
-                            .join(state)
-                            .join(format!("{}.jobcard", dep_id));
+                        let dep_exact = cards_root.join(state).join(format!("{}.jobcard", dep_id));
                         let result_path = dep_exact.join("output").join("result.md");
                         if result_path.exists() {
                             if let Ok(content) = fs::read_to_string(&result_path) {
