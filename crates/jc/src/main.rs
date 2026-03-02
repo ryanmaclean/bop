@@ -972,7 +972,9 @@ fn create_card(
         anyhow::bail!("template not found: {}", template);
     }
 
-    let card_dir = cards_dir.join("pending").join(format!("🂠-{}.jobcard", id));
+    let card_dir = cards_dir
+        .join("pending")
+        .join(format!("{}-{}.jobcard", jobcard_core::cardchars::CARD_BACK, id));
     if card_dir.exists() {
         anyhow::bail!("card already exists: {}", id);
     }
@@ -2253,8 +2255,10 @@ fn glyph_suit(g: &str) -> &'static str {
 }
 
 fn is_joker(g: &str) -> bool {
-    let cp = g.chars().next().map(|c| c as u32).unwrap_or(0);
-    matches!(cp, 0x1F0BF | 0x1F0CF | 0x1F0DF | 0x1F093)
+    g.chars()
+        .next()
+        .map(jobcard_core::cardchars::is_joker)
+        .unwrap_or(false)
 }
 
 fn cmd_poker_open(root: &Path, id: &str) -> anyhow::Result<()> {

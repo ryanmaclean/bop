@@ -39,6 +39,39 @@ impl Team {
     }
 }
 
+// ── Special cards (not auto-assigned) ────────────────────────────────────────
+
+/// Back of card — placeholder glyph before assignment.
+pub const CARD_BACK: char = '\u{1F0A0}'; // 🂠
+
+/// Jokers — emergency / wildcard / needs-breakdown.
+pub const RED_JOKER: char = '\u{1F0BF}';   // 🂿
+pub const BLACK_JOKER: char = '\u{1F0CF}';  // 🃏
+pub const WHITE_JOKER: char = '\u{1F0DF}';  // 🃟
+
+/// Trump cards (U+1F0E0..U+1F0F5) — cross-team escalation.
+/// Fool(0), then I(1)..XXI(21). 22 cards total.
+pub const TRUMP_FOOL: char = '\u{1F0E0}';   // 🃠
+pub const TRUMP_MAX: char = '\u{1F0F5}';    // 🃵
+/// Number of trump cards in the Unicode block.
+pub const TRUMP_COUNT: u32 = 22;
+
+/// All joker codepoints for quick membership checks.
+pub const JOKERS: [char; 3] = [RED_JOKER, BLACK_JOKER, WHITE_JOKER];
+
+/// Check whether a glyph char is a joker.
+pub fn is_joker(ch: char) -> bool {
+    JOKERS.contains(&ch)
+}
+
+/// Check whether a glyph char is a trump card (Fool through XXI).
+pub fn is_trump(ch: char) -> bool {
+    let cp = ch as u32;
+    cp >= TRUMP_FOOL as u32 && cp <= TRUMP_MAX as u32
+}
+
+// ── Auto-assignment ──────────────────────────────────────────────────────────
+
 /// Return the first unused (glyph, token) pair for `team`.
 ///
 /// Walks ranks Ace(1) through King(14). Returns `None` when all 14 slots
@@ -261,6 +294,28 @@ mod tests {
         assert!(used.contains(&'\u{1F0A1}'));
         assert!(used.contains(&'\u{1F0B3}'));
         assert_eq!(used.len(), 2);
+    }
+
+    #[test]
+    fn card_back_is_correct_codepoint() {
+        assert_eq!(CARD_BACK as u32, 0x1F0A0);
+    }
+
+    #[test]
+    fn joker_detection() {
+        assert!(is_joker(RED_JOKER));
+        assert!(is_joker(BLACK_JOKER));
+        assert!(is_joker(WHITE_JOKER));
+        assert!(!is_joker('\u{1F0A1}')); // Ace of Spades is not a joker
+    }
+
+    #[test]
+    fn trump_detection() {
+        assert!(is_trump(TRUMP_FOOL));
+        assert!(is_trump(TRUMP_MAX));
+        assert!(is_trump('\u{1F0E5}')); // Trump V
+        assert!(!is_trump('\u{1F0A1}')); // Ace of Spades is not a trump
+        assert!(!is_trump('\u{1F0F6}')); // Past the end of trumps
     }
 
     #[test]
