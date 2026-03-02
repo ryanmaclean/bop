@@ -63,10 +63,21 @@ with open(sys.argv[1]) as f:
 # stats_log lives next to stdout_log in the logs/ dir
 STATS_LOG="${stdout_log:h}/ollama-stats.json"
 
+# Build JSON body with python (handles all quoting correctly)
+REQUEST_JSON=$(python3 -c "
+import json, sys
+payload = {
+    'model':  sys.argv[1],
+    'prompt': open(sys.argv[2]).read(),
+    'stream': False,
+}
+print(json.dumps(payload))
+" "$MODEL" "$prompt_file")
+
 RESPONSE=$(curl -s --max-time "$TIMEOUT_S" \
     "${HOST}/api/generate" \
     -H "Content-Type: application/json" \
-    -d "{\"model\": ${MODEL@Q}, \"prompt\": ${PROMPT_JSON}, \"stream\": false}" \
+    -d "$REQUEST_JSON" \
     2>> "$stderr_log")
 
 rc=$?
@@ -116,9 +127,13 @@ stats = {
     'elapsed_s':         int(sys.argv[2]),
     'done':              d.get('done', False),
     'done_reason':       d.get('done_reason', ''),
-    'timestamp':         datetime.datetime.utcnow().isoformat() + 'Z',
+    'timestamp':         datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z'),
 }
 print(json.dumps(stats, indent=2))
 " "$MODEL" "$ELAPSED" <<< "$RESPONSE" > "$STATS_LOG"
 
-print -r "[ollama] done. prompt_tokens=$(python3 -c "import json; print(json.load(open('$STATS_LOG'))['prompt_tokens'])" 2>/dev/null || echo '?') completion_tokens=$(python3 -c "import json; print(json.load(open('$STATS_LOG'))['completion_tokens'])" 2>/dev/null || echo '?')" >> "$stderr_log"
+python3 -c "
+import json
+s = json.load(open('$STATS_LOG'))
+print(f\"[ollama] done. prompt_tokens={s['prompt_tokens']} completion_tokens={s['completion_tokens']}\")
+" >> "$stderr_log" 2>/dev/null || print -r "[ollama] done." >> "$stderr_log"
