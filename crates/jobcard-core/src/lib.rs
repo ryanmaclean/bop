@@ -265,11 +265,7 @@ fn value_as_non_empty_string(v: Option<&Value>) -> Option<String> {
 }
 
 fn normalize_roadmap_status(raw: &str) -> Option<String> {
-    let key = raw
-        .trim()
-        .to_lowercase()
-        .replace('-', "_")
-        .replace(' ', "_");
+    let key = raw.trim().to_lowercase().replace(['-', ' '], "_");
     match key.as_str() {
         "under_review" | "review" | "underreview" => Some("under_review".to_string()),
         "planned" | "plan" => Some("planned".to_string()),
@@ -280,11 +276,7 @@ fn normalize_roadmap_status(raw: &str) -> Option<String> {
 }
 
 fn roadmap_priority_to_rank(raw: &str) -> Option<i64> {
-    let key = raw
-        .trim()
-        .to_lowercase()
-        .replace('-', "_")
-        .replace(' ', "_");
+    let key = raw.trim().to_lowercase().replace(['-', ' '], "_");
     match key.as_str() {
         "must" | "must_have" | "critical" => Some(1),
         "should" | "should_have" | "important" => Some(2),

@@ -676,6 +676,9 @@ struct Provider {
     cooldown_until_epoch_s: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     model: Option<String>,
+    /// Extra environment variables injected when spawning this provider's adapter.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    env: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -844,6 +847,7 @@ fn seed_providers(cards_dir: &Path) -> anyhow::Result<()> {
             rate_limit_exit: 75,
             cooldown_until_epoch_s: None,
             model: None,
+            env: Default::default(),
         },
     );
     pf.providers.insert(
@@ -853,6 +857,7 @@ fn seed_providers(cards_dir: &Path) -> anyhow::Result<()> {
             rate_limit_exit: 75,
             cooldown_until_epoch_s: None,
             model: None,
+            env: Default::default(),
         },
     );
     write_providers(cards_dir, &pf)?;
@@ -1029,7 +1034,6 @@ fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
             stage_models: Default::default(),
             stage_providers: Default::default(),
             stage_budgets: Default::default(),
-            ..Default::default()
         };
         write_meta(&implement, &meta)?;
 
@@ -1127,7 +1131,6 @@ fn create_card(
         stage_models: Default::default(),
         stage_providers: Default::default(),
         stage_budgets: Default::default(),
-        ..Default::default()
     });
 
     meta.id = id.to_string();
@@ -2939,7 +2942,7 @@ async fn run_dispatcher(
                         .map(|m| m.stage.clone())
                         .unwrap_or_else(|| "implement".to_string());
 
-                    let (provider_name, provider_cmd, rate_limit_exit) =
+                    let (provider_name, provider_cmd, rate_limit_exit, provider_env) =
                         match select_provider(cards_dir, meta.as_mut(), &stage)? {
                             Some(v) => v,
                             None => {
@@ -2955,7 +2958,7 @@ async fn run_dispatcher(
                     }
 
                     let (exit_code, mut meta) =
-                        run_card(cards_dir, &running_path, &provider_cmd, &provider_name)
+                        run_card(cards_dir, &running_path, &provider_cmd, &provider_name, &provider_env)
                             .await
                             .unwrap_or((1, None));
 
@@ -3204,6 +3207,7 @@ async fn run_card(
     card_dir: &Path,
     adapter: &str,
     provider_name: &str,
+    provider_env: &std::collections::BTreeMap<String, String>,
 ) -> anyhow::Result<(i32, Option<Meta>)> {
     fs::create_dir_all(card_dir.join("logs"))?;
     fs::create_dir_all(card_dir.join("output"))?;
@@ -3322,6 +3326,7 @@ async fn run_card(
         .arg(&memory_out_file)
         .env("JOBCARD_MEMORY_OUT", &memory_out_file)
         .env("JOBCARD_MEMORY_NAMESPACE", &memory_namespace)
+        .envs(provider_env)
         .spawn()
         .with_context(|| format!("failed to spawn adapter: {}", adapter))?;
 
@@ -3420,7 +3425,7 @@ fn select_provider(
     cards_dir: &Path,
     meta: Option<&mut Meta>,
     stage: &str,
-) -> anyhow::Result<Option<(String, String, i32)>> {
+) -> anyhow::Result<Option<(String, String, i32, std::collections::BTreeMap<String, String>)>> {
     let pf = read_providers(cards_dir)?;
     let now = Utc::now().timestamp();
 
@@ -3442,7 +3447,7 @@ fn select_provider(
         None => vec!["mock".to_string(), "mock2".to_string()],
     };
 
-    let mut fallback: Option<(String, String)> = None;
+    let mut fallback: Option<(String, String, std::collections::BTreeMap<String, String>)> = None;
     for name in chain {
         let Some(p) = pf.providers.get(&name) else {
             continue;
@@ -3456,18 +3461,18 @@ fn select_provider(
         if let Some(ref avoid) = avoid_provider {
             if &name == avoid {
                 if fallback.is_none() {
-                    fallback = Some((name, p.command.clone()));
+                    fallback = Some((name, p.command.clone(), p.env.clone()));
                 }
                 continue;
             }
         }
 
-        return Ok(Some((name, p.command.clone(), p.rate_limit_exit)));
+        return Ok(Some((name, p.command.clone(), p.rate_limit_exit, p.env.clone())));
     }
 
-    if let Some((name, cmd)) = fallback {
+    if let Some((name, cmd, env)) = fallback {
         if let Some(p) = pf.providers.get(&name) {
-            return Ok(Some((name, cmd, p.rate_limit_exit)));
+            return Ok(Some((name, cmd, p.rate_limit_exit, env)));
         }
     }
     Ok(None)
