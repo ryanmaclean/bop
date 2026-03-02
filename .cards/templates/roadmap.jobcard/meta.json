@@ -3,6 +3,8 @@
   "created": "2026-03-01T00:00:00Z",
   "agent_type": null,
   "stage": "analyze",
+  "type": "roadmap",
+  "metadata_source": "output/roadmap.json",
   "workflow_mode": "roadmap",
   "step_index": 1,
   "priority": null,
