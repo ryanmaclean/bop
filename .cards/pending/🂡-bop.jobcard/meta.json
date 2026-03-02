@@ -1,0 +1,34 @@
+{
+  "id": "bop",
+  "created": "2026-03-02T06:46:23.615936Z",
+  "glyph": "🂡",
+  "token": "♠",
+  "stage": "ideation",
+  "workflow_mode": "ideation",
+  "step_index": 1,
+  "timeout_seconds": 1800,
+  "provider_chain": [
+    "claude",
+    "codex",
+    "ollama-local"
+  ],
+  "worktree_branch": "job/bop",
+  "template_namespace": "ideation",
+  "retry_count": 0,
+  "stage_chain": [
+    "ideation",
+    "qa"
+  ],
+  "stage_models": {
+    "ideation": "sonnet",
+    "qa": "sonnet"
+  },
+  "stage_providers": {
+    "ideation": "claude",
+    "qa": "codex"
+  },
+  "stage_budgets": {
+    "ideation": 12000,
+    "qa": 4000
+  }
+}
