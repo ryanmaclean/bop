@@ -714,8 +714,8 @@ async fn reap_orphans(
     max_retries: u32,
     stale_lease_after: Duration,
 ) -> anyhow::Result<()> {
-    let stale_after_chrono = ChronoDuration::from_std(stale_lease_after)
-        .unwrap_or_else(|_| ChronoDuration::seconds(30));
+    let stale_after_chrono =
+        ChronoDuration::from_std(stale_lease_after).unwrap_or_else(|_| ChronoDuration::seconds(30));
     let entries = match fs::read_dir(running_dir) {
         Ok(e) => e,
         Err(_) => return Ok(()),
@@ -810,6 +810,10 @@ async fn read_pid(card_dir: &Path) -> anyhow::Result<Option<i32>> {
         if let Ok(pid) = s.trim().parse::<i32>() {
             return Ok(Some(pid));
         }
+    }
+
+    if let Some(lease) = read_run_lease(card_dir) {
+        return Ok(Some(lease.pid));
     }
 
     Ok(None)
@@ -2121,6 +2125,8 @@ fn spawn_child_cards(cards_dir: &Path, done_card_dir: &Path) {
             );
         }
 
+        render_card_thumbnail(&child_dir);
+
         eprintln!("[child-cards] created {}", id);
     }
 }
@@ -2866,6 +2872,7 @@ fn approve_card(root: &Path, id: &str) -> anyhow::Result<()> {
     }
 
     write_meta(&card, &meta)?;
+    render_card_thumbnail(&card);
     println!("Approved {}", id);
     Ok(())
 }

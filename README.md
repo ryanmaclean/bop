@@ -4,6 +4,10 @@ A pluggable job system for parallel AI coding agents. The filesystem IS the stat
 
 **New agents:** read `plan.md` first, then `CLAUDE.md`.
 
+Reliability guards:
+- single-dispatcher lock: `.cards/.locks/dispatcher.lock`
+- per-run lease heartbeat: `<card>.jobcard/logs/lease.json`
+
 ## Quick Start
 
 ```bash
@@ -33,6 +37,13 @@ adapters/ (~20 LOC shell each)        ← claude, codex, goose, aider, ollama, m
 
 **State machine:** `pending/ → running/ → done/ → merged/` (or `failed/`)
 
+## Filesystem Safety Rules
+
+- State transitions are atomic `rename` operations.
+- Dispatcher acquires a lock directory; stale lock owners are reclaimed by PID liveness check.
+- Running cards carry a lease heartbeat (`logs/lease.json`); reaper treats dead PID **or** stale heartbeat as orphan.
+- `bop kill` is idempotent for stale PIDs and still exits the card from `running/`.
+
 ## CLI Commands
 
 ```bash
@@ -53,6 +64,12 @@ bop policy check --staged     # Anti-slop gates on staged changes
 bop doctor                    # Verify local tooling
 ```
 
+macOS maintenance:
+```bash
+scripts/macos_cards_maintenance.zsh            # refresh merged card thumbnails
+scripts/macos_cards_maintenance.zsh --compress # + HFS/APFS compression
+```
+
 ## Card Structure
 
 ```
@@ -60,8 +77,9 @@ my-feature.jobcard/
 ├── meta.json          ← machine-readable state (glyph, stage, provider_chain)
 ├── spec.md            ← what to build
 ├── prompt.md          ← agent prompt with {{variables}}
-├── logs/              ← stdout.log, stderr.log, pid
+├── logs/              ← stdout.log, stderr.log, pid, lease.json
 ├── output/            ← qa_report.md
+├── QuickLook/         ← Thumbnail.png
 └── changes.json       ← git diff summary
 ```
 
@@ -87,6 +105,9 @@ adapter.sh <workdir> <prompt_file> <stdout_log> <stderr_log>
 ```
 
 Exit 75 = rate-limited (triggers provider rotation). Available: `claude`, `codex`, `goose`, `aider`, `opencode`, `ollama-local`, `mock`.
+
+Template cloning on macOS prefers `ditto --clone` (APFS COW), with `cp -c` fallback.
+Optional merged-card compression is gated by `BOP_HFS_COMPRESS_MERGED=1`.
 
 ## Build & Test
 

@@ -49,6 +49,28 @@ fn write_template(cards: &Path, template: &str) {
     fs::write(tdir.join("prompt.md"), "{{spec}}\n").unwrap();
 }
 
+fn write_running_card_with_stale_lease(cards: &Path, id: &str) {
+    let card = cards.join("running").join(format!("{id}.jobcard"));
+    fs::create_dir_all(card.join("logs")).unwrap();
+    fs::create_dir_all(card.join("output")).unwrap();
+    fs::write(
+        card.join("meta.json"),
+        format!(
+            r#"{{"id":"{id}","created":"2026-03-01T00:00:00Z","stage":"implement","provider_chain":["mock"],"stages":{{"implement":{{"status":"running","agent":"adapters/mock.zsh","provider":"mock"}}}},"acceptance_criteria":[],"retry_count":0}}"#
+        ),
+    )
+    .unwrap();
+    fs::write(card.join("spec.md"), "stale lease").unwrap();
+    fs::write(
+        card.join("logs").join("lease.json"),
+        format!(
+            r#"{{"run_id":"stale-run","pid":{},"pid_start_time":"2026-03-01T00:00:00Z","started_at":"2026-03-01T00:00:00Z","heartbeat_at":"2026-03-01T00:00:00Z","host":"test-host"}}"#,
+            std::process::id()
+        ),
+    )
+    .unwrap();
+}
+
 #[test]
 fn dispatcher_moves_success_to_done() {
     build_jc();
@@ -315,4 +337,139 @@ fn dispatcher_qa_prefers_different_provider_than_implement() {
     let meta = fs::read_to_string(meta_path).unwrap();
     assert!(meta.contains("\"qa\""));
     assert!(meta.contains("\"provider\": \"mock2\"") || meta.contains("\"provider\":\"mock2\""));
+}
+
+#[test]
+fn dispatcher_reaps_stale_lease_without_dead_pid() {
+    build_jc();
+
+    let td = tempfile::tempdir().unwrap();
+    let cards = td.path().join(".cards");
+
+    let status = Command::new(jc_bin())
+        .args(["--cards-dir", cards.to_str().unwrap(), "init"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    write_running_card_with_stale_lease(&cards, "lease-stale");
+
+    let status = Command::new(jc_bin())
+        .args([
+            "--cards-dir",
+            cards.to_str().unwrap(),
+            "dispatcher",
+            "--max-workers",
+            "0",
+            "--adapter",
+            mock_adapter().to_str().unwrap(),
+            "--once",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let card = cards.join("pending").join("lease-stale.jobcard");
+    assert!(
+        card.exists(),
+        "stale lease card should be moved back to pending"
+    );
+    let meta = fs::read_to_string(card.join("meta.json")).unwrap();
+    assert!(meta.contains("\"retry_count\": 1") || meta.contains("\"retry_count\":1"));
+    assert!(
+        meta.contains("\"status\": \"pending\"") || meta.contains("\"status\":\"pending\""),
+        "running stage should normalize to pending after reaping"
+    );
+}
+
+#[test]
+fn dispatcher_fails_when_live_lock_exists() {
+    build_jc();
+
+    let td = tempfile::tempdir().unwrap();
+    let cards = td.path().join(".cards");
+
+    let status = Command::new(jc_bin())
+        .args(["--cards-dir", cards.to_str().unwrap(), "init"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let lock_dir = cards.join(".locks").join("dispatcher.lock");
+    fs::create_dir_all(&lock_dir).unwrap();
+    fs::write(
+        lock_dir.join("owner.json"),
+        format!(
+            r#"{{"pid":{},"host":"test-host","started_at":"2026-03-01T00:00:00Z"}}"#,
+            std::process::id()
+        ),
+    )
+    .unwrap();
+
+    let status = Command::new(jc_bin())
+        .args([
+            "--cards-dir",
+            cards.to_str().unwrap(),
+            "dispatcher",
+            "--adapter",
+            mock_adapter().to_str().unwrap(),
+            "--once",
+        ])
+        .status()
+        .unwrap();
+    assert!(
+        !status.success(),
+        "dispatcher should fail when a live lock is already held"
+    );
+}
+
+#[test]
+fn dispatcher_reclaims_stale_lock_and_runs() {
+    build_jc();
+
+    let td = tempfile::tempdir().unwrap();
+    let cards = td.path().join(".cards");
+
+    let status = Command::new(jc_bin())
+        .args(["--cards-dir", cards.to_str().unwrap(), "init"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    write_providers(&cards);
+    write_template(&cards, "implement");
+    let status = Command::new(jc_bin())
+        .args([
+            "--cards-dir",
+            cards.to_str().unwrap(),
+            "new",
+            "implement",
+            "stale-lock-job",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let lock_dir = cards.join(".locks").join("dispatcher.lock");
+    fs::create_dir_all(&lock_dir).unwrap();
+    fs::write(
+        lock_dir.join("owner.json"),
+        r#"{"pid":999999,"host":"old-host","started_at":"2026-03-01T00:00:00Z"}"#,
+    )
+    .unwrap();
+
+    let status = Command::new(jc_bin())
+        .env("MOCK_EXIT", "0")
+        .args([
+            "--cards-dir",
+            cards.to_str().unwrap(),
+            "dispatcher",
+            "--adapter",
+            mock_adapter().to_str().unwrap(),
+            "--once",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert!(cards.join("done").join("stale-lock-job.jobcard").exists());
 }
