@@ -89,7 +89,7 @@ if isCard {
        let g = meta.glyph, !g.isEmpty {
         glyph = g
     } else {
-        glyph = "🃟"
+        glyph = "🂠"
     }
 
     let fontSize = size * 1.46

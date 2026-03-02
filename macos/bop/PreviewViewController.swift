@@ -231,17 +231,10 @@ fileprivate struct JobCardPreview: View {
             
             // Header: Checkbox + Title
             HStack(alignment: .top, spacing: 16) {
-                if let g = m.glyph {
-                    Text(g)
-                        .font(.system(size: 72))
-                        .fixedSize()
-                        .padding(.top, 2)
-                } else {
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.cardBorder, lineWidth: 2)
-                        .frame(width: 48, height: 48)
-                        .padding(.top, 2)
-                }
+                Text(m.glyph ?? "🂠")
+                    .font(.system(size: 72))
+                    .fixedSize()
+                    .padding(.top, 2)
                 
                 VStack(alignment: .leading, spacing: 10) {
                     Text(displayTitle)
