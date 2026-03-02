@@ -112,14 +112,14 @@ No agent invents a new workflow when this loop already works.
 
 ---
 
-## 7) What's Missing (The Bridge)
+## 7) The Bridge (LANDED 2026-03-01)
 
-These are the gaps between the two agents' work. **Highest-value next tasks.**
+These gaps between the two agents' work have been implemented.
 
-### 7a) Meta struct needs factory fields ★
+### 7a) Meta struct factory fields ✅
 
-Templates declare `stage_chain`, `stage_models`, `stage_providers`, `stage_budgets`.
-The Rust `Meta` struct does NOT have them — serde silently drops them on deser.
+`stage_chain`, `stage_models`, `stage_providers`, `stage_budgets` added to Meta.
+Serde defaults + skip_serializing_if. Two round-trip tests.
 
 Add to `crates/jobcard-core/src/lib.rs` → `Meta`:
 
@@ -141,13 +141,11 @@ pub stage_providers: BTreeMap<String, String>,
 pub stage_budgets: BTreeMap<String, u64>,
 ```
 
-Add a round-trip test (follow the `meta_zellij_session_round_trips` pattern).
+**Effort:** Small. **Files:** `lib.rs` only. **Status:** DONE.
 
-**Effort:** Small. **Files:** `lib.rs` only.
+### 7b) render_prompt template variables ✅
 
-### 7b) render_prompt needs new template variables ★
-
-`{{system_context}}` works (prepended). These do NOT yet substitute:
+All four now substitute:
 
 | Variable | Source |
 |----------|--------|
@@ -156,55 +154,32 @@ Add a round-trip test (follow the `meta_zellij_session_round_trips` pattern).
 | `{{stage_count}}` | Length of `stage_chain` (e.g. "4") |
 | `{{prior_stage_output}}` | Previous card's `output/result.md` |
 
-Add fields to `PromptContext`, load stage file in `from_files`, add `.replace()` calls.
+**Effort:** Small. **Files:** `lib.rs` only. **Status:** DONE.
 
-**Effort:** Small. **Files:** `lib.rs` only.
+### 7c) Dispatcher stage auto-progression ✅
 
-### 7c) Dispatcher stage auto-progression
+`maybe_advance_stage()` in `main.rs`: when a card succeeds and `stage_chain`
+has a next stage, creates child card in `pending/` inheriting spec, glyph,
+pipeline config, and prior stage output. **Status:** DONE.
 
-When a card finishes (exit 0), dispatcher reads `stage_chain`:
-1. Find current stage index
-2. If next stage exists → create child card in `pending/` inheriting spec + glyph + prior output
-3. If final stage → normal done/ flow for merge-gate
+### 7d) Format examples updated ✅
 
-See `docs/plans/2026-03-01-autonomous-factory-design.md` for full spec.
+`examples/{pending,running,done}-feat.jobcard` now include `stage_chain`,
+`stage_models`, `stage_providers`, `stage_budgets`, `token`, `timeout_seconds`.
+**Status:** DONE.
 
-**Effort:** Medium. **Files:** `main.rs`.
+### 7e) bop doctor adapter checks ✅
 
-### 7d) Update format examples with factory fields
+`cmd_doctor` now checks: adapter CLI binaries (claude, codex, ollama, goose,
+aider, opencode), stages/ directory, templates/ count, system_context.md, zellij.
+**Status:** DONE.
 
-Windsurf's `examples/` cards predate the factory fields. Update them to include
-`stage_chain`, `stage_models`, etc. so new users see the full picture.
-
-**Effort:** Small. **Files:** `examples/` JSON files.
-
-### 7e) bop doctor adapter checks
-
-`cmd_doctor` checks git/jj/gh/zsh but NOT adapter binaries.
-For each adapter in `adapters/`, check if the underlying CLI exists
-(`claude`, `codex`, `ollama`) and report functional vs missing.
-
-**Effort:** Small. **Files:** `main.rs`.
-
-### 7f) bop factory launchd lifecycle
+### 7f) bop factory launchd lifecycle (REMAINING)
 
 Old plists in `launchd/` have wrong paths. Build `bop factory install/start/stop/status/uninstall`
 that generates plists from repo root with labels `sh.bop.dispatcher`, `sh.bop.merge-gate`.
 
-**Effort:** Medium. **Files:** `main.rs`, `launchd/`.
-
-### Implementation order
-
-Items 1–2 are prerequisites for 3. Items 4–6 are independent.
-
-```
-[7a] Meta fields ──┐
-                    ├──→ [7c] Stage auto-progression
-[7b] Prompt vars ──┘
-                        [7d] Update examples (independent)
-                        [7e] Doctor checks (independent)
-                        [7f] Factory launchd (independent)
-```
+**Effort:** Medium. **Files:** `main.rs`, `launchd/`. **Status:** NOT STARTED.
 
 ---
 
