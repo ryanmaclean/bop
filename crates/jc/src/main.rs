@@ -2955,6 +2955,28 @@ fn prepare_workspace(
             let ws_name = branch.replace('/', "-");
             let stable_ws = git_root.join(".worktrees").join(&ws_name);
             let legacy_ws = card_dir.join("workspace");
+            // Clean up stale worktree from a previous failed dispatch
+            if stable_ws.exists() {
+                eprintln!("[dispatcher] cleaning stale worktree for {}", card_id);
+                let _ = StdCommand::new("git")
+                    .args([
+                        "worktree",
+                        "remove",
+                        stable_ws.to_string_lossy().as_ref(),
+                        "--force",
+                    ])
+                    .current_dir(&git_root)
+                    .status();
+                if git_branch_exists(&git_root, &branch) {
+                    let _ = StdCommand::new("git")
+                        .args(["branch", "-D", branch.as_str()])
+                        .current_dir(&git_root)
+                        .status();
+                }
+                if stable_ws.exists() {
+                    let _ = std::fs::remove_dir_all(&stable_ws);
+                }
+            }
             let ws_path = if stable_ws.exists() {
                 stable_ws
             } else if legacy_ws.exists() {
