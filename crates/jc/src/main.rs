@@ -45,10 +45,10 @@ enum Command {
         realtime: bool,
     },
     Dispatcher {
-        #[arg(long, default_value = "adapters/mock.zsh")]
+        #[arg(short = 'a', long, default_value = "adapters/mock.zsh")]
         adapter: String,
 
-        #[arg(long)]
+        #[arg(short = 'w', long)]
         max_workers: Option<usize>,
 
         #[arg(long, default_value_t = 500)]
@@ -63,7 +63,7 @@ enum Command {
         #[arg(long)]
         no_reap: bool,
 
-        #[arg(long)]
+        #[arg(short = '1', long)]
         once: bool,
 
         /// Error-rate threshold (0.0–1.0) above which a job with critical alerts
@@ -72,18 +72,18 @@ enum Command {
         validation_fail_threshold: f64,
 
         /// VCS engine used for workspace preparation and publish.
-        #[arg(long, value_enum, default_value_t = VcsEngine::GitGt)]
+        #[arg(short = 'v', long, value_enum, default_value_t = VcsEngine::GitGt)]
         vcs_engine: VcsEngine,
     },
     MergeGate {
         #[arg(long, default_value_t = 500)]
         poll_ms: u64,
 
-        #[arg(long)]
+        #[arg(short = '1', long)]
         once: bool,
 
         /// VCS engine used for finalize/publish flow.
-        #[arg(long, value_enum, default_value_t = VcsEngine::GitGt)]
+        #[arg(short = 'v', long, value_enum, default_value_t = VcsEngine::GitGt)]
         vcs_engine: VcsEngine,
     },
     /// Move a card back to pending/ so the dispatcher picks it up again.
