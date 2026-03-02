@@ -1,7 +1,8 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
-ROOT=${0:A:h:h}SOURCE_DIR="${ROOT}/.cards"
+ROOT=${0:A:h:h}
+SOURCE_DIR="${ROOT}/.cards"
 BLUE_DIR="${ROOT}/.cards-blue"
 GREEN_DIR="${ROOT}/.cards-green"
 GREEN_PCT=${GREEN_PCT:-20}
@@ -95,8 +96,19 @@ copy_card() {
   local src="$1"
   local dst_dir="$2"
 
-  if cp -cR "$src" "$dst_dir/" 2>/dev/null; then
-    return
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    if ditto --clone "$src" "$dst_dir/${src:t}" >/dev/null 2>&1; then
+      return 0
+    fi
+    if cp -cR "$src" "$dst_dir/" >/dev/null 2>&1; then
+      return 0
+    fi
+    echo "copy_card: APFS clone copy failed for $src -> $dst_dir" >&2
+    return 1
+  fi
+
+  if cp --reflink=auto -r "$src" "$dst_dir/" >/dev/null 2>&1; then
+    return 0
   fi
   cp -R "$src" "$dst_dir/"
 }

@@ -247,6 +247,38 @@ if changed_file_count > max_files:
 if changed_loc > max_loc:
     reasons.append(f"changed LOC {changed_loc} exceed max {max_loc}")
 
+# Rule 4b: card-copy/card-compression paths must keep APFS/reflink semantics.
+copy_guard_files = {
+    "scripts/route_canary.zsh",
+    "scripts/ingest_roadmap_hotfolder.zsh",
+    "scripts/macos_cards_maintenance.zsh",
+}
+for p in sorted(set(changed_paths)):
+    if normalize_rel(p) not in copy_guard_files:
+        continue
+    patch = run(diff_base_cmd + ["--", p], cwd=git_ctx).stdout
+    for line in patch.splitlines():
+        if not line.startswith("+") or line.startswith("+++"):
+            continue
+        added = line[1:].strip()
+        compact = " ".join(added.split())
+        if re.search(r"\bcp\s+-R\b|\bcp\s+-r\b", compact):
+            if "-c" not in compact and "--reflink=auto" not in compact:
+                reasons.append(
+                    f"{p}: plain recursive cp added; require cp -c (macOS) or --reflink=auto"
+                )
+        if "ditto" in compact:
+            allowed = (
+                "--clone" in compact
+                or "--hfsCompression" in compact
+                or "--preserveHFSCompression" in compact
+                or ("-c" in compact and "-k" in compact)
+            )
+            if not allowed:
+                reasons.append(
+                    f"{p}: ditto added without clone/compression flags"
+                )
+
 # Rule 2: CLI command churn requires decision record.
 cli_change_requires_decision = bool(policy.get("decision_required_if_cli_change", True))
 cli_subcommand_change = False

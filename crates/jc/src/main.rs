@@ -172,6 +172,15 @@ enum Command {
         #[arg(long)]
         print: bool,
     },
+    /// Quick-create an ideation card from a topic string.
+    #[command(alias = "brainstorm", alias = "ideation")]
+    Bstorm {
+        /// Topic words (joined into the spec & slugified into the card ID).
+        topic: Vec<String>,
+        /// Team for glyph suit assignment (cli, arch, quality, platform).
+        #[arg(long)]
+        team: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -732,11 +741,11 @@ fn clone_template(src: &Path, dst: &Path) -> anyhow::Result<()> {
             return Ok(());
         }
 
-        // Fallback to regular copy if COW fails
-        let status = StdCommand::new("cp").arg("-R").arg(src).arg(dst).status();
-        if matches!(status, Ok(s) if s.success()) {
-            return Ok(());
-        }
+        anyhow::bail!(
+            "APFS clone copy failed (required on macOS): {} -> {}",
+            src.display(),
+            dst.display()
+        );
     } else {
         // Try Btrfs reflink on Linux
         let status = StdCommand::new("cp")
@@ -761,21 +770,26 @@ fn clone_template(src: &Path, dst: &Path) -> anyhow::Result<()> {
 }
 
 /// Copy a single file using APFS COW clone when possible.
-/// Falls back to `fs::copy` if cloning isn't available (non-APFS, Linux, etc).
-fn cow_copy_file(src: &Path, dst: &Path) {
+/// On macOS this requires `cp -c`; on other OSes it falls back to regular copy.
+fn cow_copy_file(src: &Path, dst: &Path) -> anyhow::Result<()> {
     if cfg!(target_os = "macos") {
-        let ok = StdCommand::new("cp")
+        let status = StdCommand::new("cp")
             .arg("-c") // APFS clone
             .arg(src)
             .arg(dst)
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if ok {
-            return;
+            .status();
+        if matches!(status, Ok(s) if s.success()) {
+            return Ok(());
         }
+        anyhow::bail!(
+            "APFS COW copy failed (required on macOS): {} -> {}",
+            src.display(),
+            dst.display()
+        );
     }
-    let _ = fs::copy(src, dst);
+    fs::copy(src, dst)
+        .with_context(|| format!("failed to copy {} -> {}", src.display(), dst.display()))?;
+    Ok(())
 }
 
 fn ensure_mock_provider_command(cards_dir: &Path, adapter: &str) -> anyhow::Result<()> {
@@ -2038,7 +2052,13 @@ fn set_card_icon(path: &Path) {
 }
 
 /// Stamp icons for all state dirs + cards within a single team root.
-fn sync_icons_in_root(team_root: &Path, n_cards: &mut usize, n_dirs: &mut usize) {
+/// Terminal-state cards also get compression refreshed.
+fn sync_icons_in_root(
+    team_root: &Path,
+    n_cards: &mut usize,
+    n_dirs: &mut usize,
+    n_terminal_cards: &mut usize,
+) {
     const STATES: &[&str] = &[
         "drafts",
         "pending",
@@ -2062,6 +2082,13 @@ fn sync_icons_in_root(team_root: &Path, n_cards: &mut usize, n_dirs: &mut usize)
                 let path = entry.path();
                 if path.extension().and_then(|e| e.to_str()) == Some("jobcard") && path.is_dir() {
                     set_card_icon(&path);
+                    if matches!(
+                        card_state_from_path(&path).as_deref(),
+                        Some("done" | "failed" | "merged")
+                    ) {
+                        compress_card(&path);
+                        *n_terminal_cards += 1;
+                    }
                     *n_cards += 1;
                 }
             }
@@ -2077,9 +2104,10 @@ fn cmd_icons_sync(root: &Path) -> anyhow::Result<()> {
     }
     let mut n_cards = 0usize;
     let mut n_dirs = 0usize;
+    let mut n_terminal_cards = 0usize;
 
     // Top-level state dirs
-    sync_icons_in_root(root, &mut n_cards, &mut n_dirs);
+    sync_icons_in_root(root, &mut n_cards, &mut n_dirs, &mut n_terminal_cards);
 
     // team-* subdirs
     for entry in fs::read_dir(root)? {
@@ -2091,10 +2119,13 @@ fn cmd_icons_sync(root: &Path) -> anyhow::Result<()> {
                 .map(|n| n.starts_with("team-"))
                 .unwrap_or(false)
         {
-            sync_icons_in_root(&team, &mut n_cards, &mut n_dirs);
+            sync_icons_in_root(&team, &mut n_cards, &mut n_dirs, &mut n_terminal_cards);
         }
     }
-    println!("✓ icons synced: {} state dirs, {} cards", n_dirs, n_cards);
+    println!(
+        "✓ icons synced: {} state dirs, {} cards ({} terminal cards compression-refreshed)",
+        n_dirs, n_cards, n_terminal_cards
+    );
     Ok(())
 }
 
@@ -2139,8 +2170,9 @@ fn cmd_icons_watch(root: &Path) -> anyhow::Result<()> {
         for path in &event.paths {
             if path.extension().and_then(|e| e.to_str()) == Some("jobcard") && path.is_dir() {
                 set_card_icon(path);
+                compress_card(path);
                 println!(
-                    "  icon updated: {}",
+                    "  icon/compression updated: {}",
                     path.file_name().unwrap_or_default().to_string_lossy()
                 );
             }
@@ -2553,6 +2585,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Promote { id } => cmd_promote(&root, &id),
         Command::Import { source, immediate } => cmd_import(&root, &source, immediate),
         Command::Index { print } => cmd_index(&root, print),
+        Command::Bstorm { topic, team } => cmd_bstorm(&root, topic, team),
     }
 }
 
@@ -3333,22 +3366,28 @@ fn maybe_advance_stage(cards_dir: &Path, done_card_dir: &Path) {
     // COW-copy spec.md from parent (APFS clone — zero disk cost until modified)
     let spec_src = done_card_dir.join("spec.md");
     if spec_src.exists() {
-        cow_copy_file(&spec_src, &next_card_dir.join("spec.md"));
+        if let Err(err) = cow_copy_file(&spec_src, &next_card_dir.join("spec.md")) {
+            eprintln!("[stage-advance] failed COW-copying spec.md: {err}");
+        }
     }
 
     // COW-copy prompt.md template from parent
     let prompt_src = done_card_dir.join("prompt.md");
     if prompt_src.exists() {
-        cow_copy_file(&prompt_src, &next_card_dir.join("prompt.md"));
+        if let Err(err) = cow_copy_file(&prompt_src, &next_card_dir.join("prompt.md")) {
+            eprintln!("[stage-advance] failed COW-copying prompt.md: {err}");
+        }
     }
 
     // Carry prior stage output: COW-copy done card's output/result.md → next card's output/prior_result.md
     let result_src = done_card_dir.join("output").join("result.md");
     if result_src.exists() {
-        cow_copy_file(
+        if let Err(err) = cow_copy_file(
             &result_src,
             &next_card_dir.join("output").join("prior_result.md"),
-        );
+        ) {
+            eprintln!("[stage-advance] failed COW-copying output/prior_result.md: {err}");
+        }
     }
 
     render_card_thumbnail(&next_card_dir);
@@ -4619,6 +4658,38 @@ fn cmd_promote(root: &Path, id: &str) -> anyhow::Result<()> {
         fs::rename(&card, pending_dir.join(&name))?;
         eprintln!("promoted: {}", id);
     }
+    Ok(())
+}
+
+fn cmd_bstorm(root: &Path, topic_words: Vec<String>, team: Option<String>) -> anyhow::Result<()> {
+    let topic = topic_words.join(" ");
+    if topic.trim().is_empty() {
+        anyhow::bail!("topic cannot be empty — usage: bop bstorm <topic words>");
+    }
+
+    // Slugify: lowercase, non-alnum→hyphen, collapse runs, trim hyphens, cap at 40.
+    let slug: String = topic
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let slug: String = slug
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    let slug = &slug[..slug.len().min(40)];
+
+    let spec_body = format!(
+        "# Brainstorm: {topic}\n\n\
+         Explore ideas, trade-offs, and approaches for the topic above.\n\
+         Produce a structured summary of the best options.\n"
+    );
+
+    let card_dir = create_card(root, "ideation", slug, Some(&spec_body), team.as_deref())?;
+    let display = card_dir.strip_prefix(root).unwrap_or(&card_dir);
+    println!("✓ {}", display.display());
+    println!("  edit spec: {}/spec.md", card_dir.display());
     Ok(())
 }
 

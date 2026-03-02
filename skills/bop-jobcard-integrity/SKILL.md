@@ -19,6 +19,8 @@ Guarantee `.jobcard` writes are deterministic, atomic, and schema-safe.
 6. Set routing fields with `bop meta set <id> --workflow-mode <mode> --step-index <n>`, not ad-hoc edits.
 7. Treat `pending/` as quarantine-enforced: invalid `meta.json` is moved to `failed/` by dispatcher.
 8. Treat `links.md`, `Logs.webloc`, and `Session.webloc` as system-managed card UI artifacts.
+9. On macOS, card/template copies must use APFS clone semantics (`ditto --clone` or `cp -c`); do not add plain `cp -R/-r` fallback for card paths.
+10. Terminal-state card refresh/compression must use `ditto --hfsCompression` (transparent, idempotent, no adapters/converters).
 
 ## Stage-Scoped Write Surface
 

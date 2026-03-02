@@ -140,8 +140,13 @@ clone_template() {
     if cp -cR "${src}" "${dst}" >/dev/null 2>&1; then
       return 0
     fi
+    echo "clone_template: APFS clone copy failed for ${src} -> ${dst}" >&2
+    return 1
   fi
 
+  if cp --reflink=auto -r "${src}" "${dst}" >/dev/null 2>&1; then
+    return 0
+  fi
   cp -R "${src}" "${dst}"
 }
 
