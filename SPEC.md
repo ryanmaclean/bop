@@ -96,46 +96,81 @@ Everything after the first blank line. Markdown. Contains description, acceptanc
 
 ---
 
-## 3. Bundle Mode (`.boptask` directory)
+## 3. Bundle Mode (`.bop` directory)
 
 The bundle IS the work. Self-contained: task definition, work products, terminal session, evidence, lineage, version history.
 
+### 3.0 macOS UTI registration (required for bundle behavior)
+
+A `.bop` directory is treated as an opaque bundle by Finder only when the `com.apple.bop` UTI is registered on the system. Registration is done by installing the `bop` app or CLI tool, which includes a UTI declaration conforming to `com.apple.package`.
+
+Every `.bop` bundle MUST contain `Info.plist` at its root:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>com.apple.bop.{{task-id}}</string>
+  <key>CFBundleName</key>
+  <string>{{title}}</string>
+  <key>CFBundlePackageType</key>
+  <string>BNDL</string>
+</dict>
+</plist>
 ```
-migrate-auth-mtls.boptask/
-  task.bop                    # Task definition (headers + body)
-  .bop/                       # Control plane
-    state                     # Single line: current state (O(1) reads)
-    lock                      # Advisory lock (agent-id + expiry)
-    transitions.log           # Append-only state transition log
-    config                    # Bundle config (RFC 822 headers)
-    lineage.jsonl             # OpenLineage events (append-only)
-    baggage                   # OTel-style propagated context
-  work/                       # WORK PRODUCTS (the point of the task)
+
+Without `Info.plist`, macOS will not recognize the directory as a bundle and Finder will show it as a navigable folder.
+
+```
+migrate-auth-mtls.bop/
+  Info.plist                     # UTI declaration (REQUIRED)
+  QuickLook/
+    Preview.html                 # Rendered card (generated on state change)
+    Thumbnail.png                # 512×512, color-coded by state
+  task.bop                       # Task definition (headers + body)
+  .bop/                          # Control plane
+    state                        # Single line: current state (O(1) reads)
+    lock                         # Advisory lock (agent-id + expiry)
+    transitions.log              # Append-only state transition log
+    config                       # Bundle config (RFC 822 headers)
+    lineage.jsonl                # OpenLineage events (append-only)
+    baggage                      # OTel-style propagated context
+  work/                          # WORK PRODUCTS (the point of the task)
     src/
     scripts/
     docs/
-  session/                   # Working environment (Zellij writes here)
-    zellij/                  # ZELLIJ_DATA_DIR points here
-      config.kdl             # Per-task Zellij config
-      layout.kdl             # Pane arrangement, startup commands
-      session.name           # Session name for attach
-      sessions/              # Zellij native session data
+  session/                       # Working environment (Zellij writes here)
+    zellij/                      # ZELLIJ_DATA_DIR points here
+      config.kdl                 # Per-task Zellij config
+      layout.kdl                 # Pane arrangement, startup commands
+      session.name               # Session name for attach
+      sessions/                  # Zellij native session data
     shell/
-      history.nu             # Curated command history (runbook, nushell)
-      env.nu                 # Environment variables (references, not secrets, nushell)
+      history.nu                 # Curated command history (runbook, nushell)
+      env.nu                     # Environment variables (references, not secrets, nushell)
     editor/
       workspace.code-workspace
-  evidence/                  # Proof the work is correct
+  output/                        # Final deliverables (patch, QA report, artifact)
+    diff.patch
+    qa_report.md
+  evidence/                      # Proof the work is correct
     screenshots/
     test-results/
-    approvals/                # Can contain nested .bop files
-  traces/                     # OTel-compatible agent telemetry (JSONL)
-  .jj/                        # Version control worktspaces/workstrees (jj preferred, .git/ accepted)
+    approvals/                   # Can contain nested .bop files
+  traces/                        # OTel-compatible agent telemetry (JSONL)
+  .jj/                           # Version control (jj preferred, .git/ accepted)
 ```
 
-### 3.1 `work/` — not `attachments/`
+### 3.1 `work/` — jj workspace OR git worktree
 
-Arbitrary directory tree. Whatever the task produces: source code, configs, docs, scripts, Terraform. Agents modify files here. VCS tracks everything.
+`work/` is the VCS checkout for this task. It is **either**:
+- a **jj workspace** (`jj workspace add work/`), pointing to a named change in the parent repo — preferred, since jj workspaces are lighter than worktrees and support concurrent editing without branch ceremony; or
+- a **git worktree** (`git worktree add work/ job/<task-id>`) — used when the parent repo is git-only.
+
+Declared in `.bop/config` via `Work-VCS-Mode: jj-workspace | git-worktree | copy`. Only one mode active per bundle. `bop init` detects the parent repo type and sets this automatically.
 
 ### 3.2 `session/` — Zellij lives in the bundle
 
@@ -143,7 +178,7 @@ bop bundles Zellij. The only Zellij patch: respect `ZELLIJ_DATA_DIR` env var. bo
 
 1. Resolve bundle absolute path
 2. Rewrite `cwd` fields in `layout.kdl` to absolute paths
-3. Source `session/shell/env.sh`
+3. Source `session/shell/env.nu`
 4. Set `ZELLIJ_DATA_DIR=<bundle>/session/zellij`
 5. Exec Zellij
 
@@ -153,15 +188,15 @@ Zellij writes scrollback, pane state, resurrection data directly into the bundle
 
 **`layout.kdl`**: Pane arrangement with startup commands. Declarative blueprint.
 
-**`session.name`**: Session name for `zellij attach`. Created on `doing` transition, detached (not killed) on state change.
+**`session.name`**: A reference — the Zellij session runs outside the bundle; the bundle holds the name to reattach. Zellij data (scrollback, pane state) lives in `<bundle>/session/zellij/` via `ZELLIJ_DATA_DIR`. Created on `doing` transition, detached (not killed) on state change.
 
-**`session/shell/history.sh`**: Curated command history. Filtered by working directory. Complements scrollback (which includes output).
+**`session/shell/history.nu`**: Curated command history (Nushell, MIT-licensed). Filtered by working directory. Complements scrollback (which includes output).
 
-**`session/shell/env.sh`**: Sourceable env vars. References only — no secrets (see 3.6).
+**`session/shell/env.nu`**: Sourceable env vars (Nushell). References only — no secrets (see 3.6).
 
 **Non-Zellij**: `Session-Type` in `.bop/config` declares the type (`zellij`, `tmux`, `screen`, `none`).
 
-**Resume**: `bop resume` runs the five-step launch. Falls back to `cd work && $SHELL` if Zellij unavailable.
+**Resume**: `bop resume` runs the five-step launch. On first `doing` transition it writes a per-bundle launchd agent to `~/Library/LaunchAgents/com.apple.bop.<task-id>.plist` (see §10 for the plist template). Falls back to `cd work && $SHELL` if Zellij unavailable.
 
 ### 3.3 `evidence/`
 
@@ -209,11 +244,51 @@ Bundle MUST NOT contain plaintext secrets. `Secrets-Policy` in `.bop/config`:
 
 Agent SHOULD stop and report if it cannot resolve secret references.
 
-### 3.7 macOS bundle integration (optional)
+### 3.7 macOS bundle integration
 
-`Info.plist` or UTI declaration makes Finder treat `.boptask` as opaque file. Finder label colors map to states (convention, not spec):
+Finder label colors map to states (convention, not spec):
 
 None=inbox, Blue=todo, Yellow=doing, Orange=review, Green=done, Red=blocked, Gray=cancelled.
+
+---
+
+### 3.8 APFS copy semantics (macOS)
+
+On macOS, bundle creation from a template MUST use APFS copy-on-write cloning. Plain recursive copy (`cp -R`, `rsync`) is forbidden for template instantiation — it defeats the zero-disk-cost property.
+
+**Template instantiation:**
+```sh
+# REQUIRED: APFS COW clone
+cp -c templates/implement.bop pending/feat-auth.bop
+# FORBIDDEN: plain recursive copy
+# cp -r templates/implement.bop pending/feat-auth.bop  ← DO NOT USE
+```
+
+**Bundle archival** — preserve HFS+ compression and resource forks:
+```sh
+ditto --hfsC source.bop dest.bop
+```
+
+**Log compression** — compress completed terminal logs to reclaim space:
+```sh
+ditto --hfsCompression \
+  bundle.bop/session/zellij/ \
+  bundle.bop/session/zellij/
+```
+
+**Platform abstraction:**
+
+| Operation | macOS | Linux (Btrfs) | Fallback |
+|---|---|---|---|
+| Template clone | `cp -c` | `cp --reflink=auto` | `cp -r` (with warning) |
+| Bundle archive | `ditto --hfsC` | `tar -czf` | `tar -czf` |
+| Log compress | `ditto --hfsCompression` | `btrfs filesystem defragment -czstd` | n/a |
+
+The `bop` Rust implementation enforces this: `clone_bundle()` returns `Err` if `clonefile(2)` is unavailable on macOS, forcing explicit error handling rather than silent degradation.
+
+### 3.9 `output/`
+
+Distinct from `work/` (in-progress) and `evidence/` (proof). `output/` holds the artifact that crosses the boundary — the diff, QA report, or other deliverable handed to the next stage, merge gate, or human reviewer. Written by the agent on task completion; read by the merge gate.
 
 ---
 
@@ -316,19 +391,57 @@ mv "$TASK_DIR/.bop/state.tmp" "$TASK_DIR/.bop/state"
 printf '%s %s %s "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   "$NEW_STATE" "$ACTOR" "$REASON" >> "$TASK_DIR/.bop/transitions.log"
 sed -i "s/^State: .*/State: $NEW_STATE/" "$TASK_DIR/task.bop"
-done
 ```
 
 ---
 
-## 10. Open Questions
+## 10. Reference: launchd Agent Plist Template
+
+`bop resume` writes this plist to `~/Library/LaunchAgents/com.apple.bop.<task-id>.plist` on first `doing` transition.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.apple.bop.{{task-id}}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/bop</string>
+    <string>resume</string>
+    <string>{{bundle-path}}</string>
+  </array>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>{{bundle-path}}/session/zellij/launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{bundle-path}}/session/zellij/launchd.err</string>
+</dict>
+</plist>
+```
+
+(`KeepAlive.SuccessfulExit: false` — crash-recovery only, not eternal restart.)
+
+---
+
+## 11. Open Questions
 
 1. **`.bop/state` as symlink?** `readlink` vs `read`. Some filesystems handle symlinks poorly.
 2. **Bundle-level checksum?** Merkle tree over full bundle is slow for large `work/` assets.
 3. **Board index at scale?** 10K+ tasks: board-level `board.bopindex` vs scan. Cache invalidation tradeoff.
-4. **`work/` symlinks vs copies?** Portable (copies) vs lightweight (symlinks/APFS clones). Cross-platform story unclear.
-5. **Upstreaming `ZELLIJ_DATA_DIR`?** Submit to Zellij upstream before shipping, or fork and contribute later?
-6. **Digital signatures?** `Signature:` header with detached PGP/signify for tamper-evident audit trails.
-7. **Bundle-to-bundle references?** `Depends-On` uses Task-Id. Should it also support filesystem paths or content-addresses?
-8. **Large binaries in `work/`?** jj/git struggle without LFS. `.bopignore`? Content-addressable `work/blobs/`?
-9. **Multi-agent concurrency?** Sub-task locking at `work/` subdirectory level, or out of scope?
+4. **Upstreaming `ZELLIJ_DATA_DIR`?** Submit to Zellij upstream before shipping, or fork and contribute later?
+5. **Digital signatures?** `Signature:` header with detached PGP/signify for tamper-evident audit trails.
+6. **Bundle-to-bundle references?** `Depends-On` uses Task-Id. Should it also support filesystem paths or content-addresses?
+7. **Large binaries in `work/`?** jj/git struggle without LFS. `.bopignore`? Content-addressable `work/blobs/`?
+8. **Multi-agent concurrency?** Sub-task locking at `work/` subdirectory level, or out of scope?
+9. **`work/` as jj workspace vs git worktree?** jj workspaces are preferred (lighter, no branch required), but git worktrees work. Should `bop` auto-detect or require explicit `Work-VCS-Mode` in `.bop/config`?
+10. **launchd plist lifecycle?** Should `bop` install/uninstall the per-bundle plist automatically on `doing`/`done` transitions, or leave plist management to the user?
+11. **`ditto --hfsCompression` on active bundles?** Compressing a bundle while an agent is writing logs to it is unsafe. Should compression be gated on `done`/`cancelled` states only?
