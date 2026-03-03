@@ -8,7 +8,7 @@ A `.bop` file is a macOS directory [bundle](https://developer.apple.com/document
 
 - **`task.md`** — [RFC 822](https://datatracker.ietf.org/doc/html/rfc822) headers + Markdown body. The task definition.
 - **`.bop/`** — Control plane: state, lock, transition log, [OpenLineage](https://openlineage.io/) data, [OTel baggage](https://opentelemetry.io/docs/concepts/signals/baggage/).
-- **`work/`** — The actual work(space/tree) products from `git`/`jj` respectively (source code, configs, scripts, docs).
+- **`work/`** — The actual work(space/tree) products from `jj`/`git` respectively (source code, configs, scripts, docs).
 - **`session/`** — [Zellij](https://github.com/zellij-org/zellij) terminal session bundled with the task. Resume anywhere.
 - **`evidence/`** — Proof the work is correct ([termframe](https://github.com/pamburus/termframe) screenshots, compressed test results, approvals).
 - **`output/`** — [ICS VEVENTs](https://icalendar.org/iCalendar-RFC-5545/3-6-1-event-component.html), final deliverables handed to the next stage or merge gate.
@@ -16,7 +16,7 @@ A `.bop` file is a macOS directory [bundle](https://developer.apple.com/document
 
 ## Quick start
 
-```sh
+```nush
 # Create a task (single-file mode)
 cat > my-task.bop <<EOF
 Task-Id: $(uuidgen)
@@ -55,14 +55,14 @@ bop resume pending/my-task.bop                      # launch Zellij session
 - **Bundled terminal sessions** — Zellij session lives inside the bundle; scrollback is the implicit runbook
 - **OpenLineage + OTel** — built-in observability: lineage, baggage propagation, agent traces
 - **Secrets-safe** — bundles reference secrets, never store them
-- **VCS-native** — jj or git tracks the entire bundle, including work products
-- **APFS-native** — zero-disk-cost template cloning on macOS
+- **VCS-native** — jj or git workspaces/woorktrees inside bundle, including work products
+- **APFS-native** — zero-disk-cost template cloning on macOS, compression is transparent
 
 ---
 
 ## States
 
-`inbox` → `todo` → `doing` → `review` → `done`
+`inbox` → `todo` → `doing` → `AI review` → `Human review` → `done`
 
 Also: `blocked`, `cancelled`
 
