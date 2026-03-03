@@ -2,9 +2,9 @@
 
 A self-contained unit of work: task definition, work products, terminal session, lineage, evidence, and version history — all in one directory bundle.
 
-## What is a `.bop` bundle?
+## What is a `.bop` file?
 
-A `.bop` bundle is a macOS directory bundle (opaque in Finder, navigable via "Show Package Contents") that holds everything needed to define, execute, resume, and audit a task:
+A `.bop` file is a macOS directory bundle (opaque in Finder, navigable via "Show Package Contents") that holds everything needed to define, execute, resume, and audit a task:
 
 - **`task.bop`** — RFC 822 headers + Markdown body. The task definition.
 - **`.bop/`** — Control plane: state, lock, transition log, lineage, OTel baggage.
