@@ -3,8 +3,8 @@ use std::process::Command as StdCommand;
 
 use anyhow::Context;
 
-use crate::find_git_root;
 use crate::paths;
+use crate::workspace::find_git_root;
 
 pub fn run_policy_script(cwd: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
     // Prefer a script relative to the actual git root so the binary works
@@ -107,4 +107,26 @@ pub fn policy_check_card(cards_root: &Path, card_dir: &Path, card_id: &str) -> a
         anyhow::bail!("policy violation");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn run_policy_script_fails_without_script() {
+        let td = tempdir().unwrap();
+        // No scripts/policy_check.zsh exists — should error
+        let result = run_policy_script(td.path(), &["--staged"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn cmd_policy_check_with_nonexistent_card_id() {
+        let td = tempdir().unwrap();
+        // Looking up a card that doesn't exist should fail
+        let result = cmd_policy_check(td.path(), Some("nonexistent-card-xyz"), false);
+        assert!(result.is_err());
+    }
 }

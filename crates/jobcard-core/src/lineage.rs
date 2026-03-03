@@ -83,6 +83,21 @@ pub fn build_run_event(
     from_state: &str,
     to_state: &str,
 ) -> RunEvent {
+    build_run_event_with_dir(event_type, meta, from_state, to_state, None)
+}
+
+/// Build an OpenLineage RunEvent with optional visual facet for observers.
+///
+/// When `card_dir` is provided, a `bop_visual` facet is added containing
+/// glyph, token, thumbnail path, cost, and health — everything an external
+/// observer (e.g. a Dynamic Island notification app) needs for rich rendering.
+pub fn build_run_event_with_dir(
+    event_type: EventType,
+    meta: &Meta,
+    from_state: &str,
+    to_state: &str,
+    card_dir: Option<&std::path::Path>,
+) -> RunEvent {
     let run_id = meta
         .runs
         .last()
@@ -127,6 +142,29 @@ pub fn build_run_event(
     });
     run_facets.insert("bop_transition".into(), bop_facet);
 
+    // bop_visual facet — everything an observer needs for rich notifications
+    if let Some(dir) = card_dir {
+        let last_run = meta.runs.last();
+        let tokens_used: Option<u64> =
+            last_run.and_then(|r| match (r.prompt_tokens, r.completion_tokens) {
+                (Some(p), Some(c)) => Some(p + c),
+                (Some(p), None) => Some(p),
+                (None, Some(c)) => Some(c),
+                (None, None) => None,
+            });
+        let visual = serde_json::json!({
+            "_producer": PRODUCER,
+            "glyph": meta.glyph,
+            "token": meta.token,
+            "thumbnailPath": dir.join("QuickLook/Thumbnail.png").to_string_lossy(),
+            "cardDir": dir.to_string_lossy(),
+            "tokensUsed": tokens_used,
+            "costUsd": last_run.and_then(|r| r.cost_usd),
+            "health": meta.validation_summary.as_ref().map(|s| s.badge()),
+        });
+        run_facets.insert("bop_visual".into(), visual);
+    }
+
     // job facets
     let mut job_facets: BTreeMap<String, Value> = BTreeMap::new();
 
@@ -158,6 +196,175 @@ pub fn build_run_event(
         producer: PRODUCER.into(),
         schema_url: SCHEMA_URL.into(),
     }
+}
+
+// ── iCalendar VEVENT projection ─────────────────────────────────────────────
+
+/// Clean an ISO-8601 timestamp into iCalendar `yyyymmddThhmmssZ` format.
+fn ical_timestamp(iso: &str) -> String {
+    let s = iso.replace(['-', ':'], "");
+    let s = s.trim_end_matches('Z');
+    // Strip timezone offset if present (e.g. +0000)
+    let s = if let Some(pos) = s.find('+') {
+        &s[..pos]
+    } else {
+        s
+    };
+    // Only strip trailing minus if it looks like a tz offset (after the T)
+    let s = if let Some(pos) = s.rfind('-') {
+        if pos > 8 {
+            &s[..pos]
+        } else {
+            s
+        }
+    } else {
+        s
+    };
+    // Truncate fractional seconds (everything after a dot)
+    let s = if let Some(pos) = s.find('.') {
+        &s[..pos]
+    } else {
+        s
+    };
+    format!("{}Z", s)
+}
+
+/// Write a `card.ics` VEVENT into the jobcard bundle directory.
+///
+/// Uses VEVENT (not VTODO) so Apple Calendar renders timeline bars.
+/// Each card run becomes a time-span event: DTSTART → DTEND.
+/// State is encoded in the SUMMARY prefix and X-BOP-STATE.
+///
+/// STATUS mapping in SUMMARY:
+///   running  → "▶ card-id"
+///   done     → "✓ card-id"
+///   failed   → "✗ card-id"
+///   merged   → "⤴ card-id"
+///   pending  → "◇ card-id"
+pub fn write_ics(card_dir: &Path, meta: &Meta, to_state: &str) {
+    let state_prefix = match to_state {
+        "running" => "▶",
+        "done" => "✓",
+        "failed" => "✗",
+        "merged" => "⤴",
+        _ => "◇",
+    };
+
+    // VEVENT STATUS: CONFIRMED for active/done, CANCELLED for failed
+    let status = match to_state {
+        "failed" => "CANCELLED",
+        _ => "CONFIRMED",
+    };
+
+    // DTSTART: first run start, or card creation
+    let dtstart = meta
+        .runs
+        .first()
+        .filter(|r| !r.started_at.is_empty())
+        .map(|r| ical_timestamp(&r.started_at))
+        .unwrap_or_else(|| meta.created.format("%Y%m%dT%H%M%SZ").to_string());
+
+    // DTEND: last run end, or now (for running/pending)
+    let dtend = meta
+        .runs
+        .last()
+        .and_then(|r| r.ended_at.as_ref())
+        .map(|t| ical_timestamp(t))
+        .unwrap_or_else(|| Utc::now().format("%Y%m%dT%H%M%SZ").to_string());
+
+    // Summary: state prefix + glyph + card id
+    let summary = match &meta.glyph {
+        Some(g) => format!("{} {} {}", state_prefix, g, meta.id),
+        None => format!("{} {}", state_prefix, meta.id),
+    };
+
+    // Description
+    let provider = meta
+        .runs
+        .last()
+        .map(|r| r.provider.as_str())
+        .unwrap_or("unknown");
+    let mut desc_parts = vec![
+        format!("Stage: {}", meta.stage),
+        format!("Provider: {}", provider),
+        format!("State: {}", to_state),
+    ];
+    if let Some(ref reason) = meta.failure_reason {
+        desc_parts.push(format!("Failure: {}", reason));
+    }
+    if let Some(last) = meta.runs.last() {
+        if let (Some(p), Some(c)) = (last.prompt_tokens, last.completion_tokens) {
+            desc_parts.push(format!("Tokens: {}", p + c));
+        }
+        if let Some(cost) = last.cost_usd {
+            desc_parts.push(format!("Cost: ${:.2}", cost));
+        }
+    }
+    let description = desc_parts.join("\\n");
+
+    let categories = if meta.stage_chain.is_empty() {
+        meta.stage.clone()
+    } else {
+        meta.stage_chain.join(",")
+    };
+
+    let sequence = meta.retry_count.unwrap_or(0);
+    let priority = meta.priority.map(|p| p.clamp(0, 9) as u8).unwrap_or(0);
+
+    let mut ics = String::with_capacity(512);
+    ics.push_str("BEGIN:VCALENDAR\r\n");
+    ics.push_str("VERSION:2.0\r\n");
+    ics.push_str("PRODID:-//bop//jobcard//EN\r\n");
+    ics.push_str("X-WR-CALNAME:bop agents\r\n");
+    ics.push_str("BEGIN:VEVENT\r\n");
+    ics.push_str(&format!("UID:{}@bop\r\n", meta.id));
+    ics.push_str(&format!(
+        "DTSTAMP:{}Z\r\n",
+        Utc::now().format("%Y%m%dT%H%M%S")
+    ));
+    ics.push_str(&format!("DTSTART:{}\r\n", dtstart));
+    ics.push_str(&format!("DTEND:{}\r\n", dtend));
+    ics.push_str(&format!("SUMMARY:{}\r\n", summary));
+    ics.push_str(&format!("DESCRIPTION:{}\r\n", description));
+    ics.push_str(&format!("STATUS:{}\r\n", status));
+    ics.push_str(&format!("PRIORITY:{}\r\n", priority));
+    ics.push_str(&format!("SEQUENCE:{}\r\n", sequence));
+    ics.push_str(&format!("CATEGORIES:{}\r\n", categories));
+    ics.push_str("TRANSP:TRANSPARENT\r\n"); // don't block free/busy
+
+    // Extended properties
+    ics.push_str(&format!("X-BOP-STATE:{}\r\n", to_state));
+    ics.push_str(&format!("X-BOP-STAGE:{}\r\n", meta.stage));
+    if let Some(ref token) = meta.token {
+        ics.push_str(&format!("X-BOP-TOKEN:{}\r\n", token));
+    }
+    if let Some(ref branch) = meta.worktree_branch {
+        ics.push_str(&format!("X-BOP-BRANCH:{}\r\n", branch));
+    }
+    if let Some(ref reason) = meta.failure_reason {
+        ics.push_str(&format!("X-BOP-FAILURE:{}\r\n", reason));
+    }
+    if let Some(last) = meta.runs.last() {
+        if let Some(tokens) = last
+            .prompt_tokens
+            .zip(last.completion_tokens)
+            .map(|(p, c)| p + c)
+        {
+            ics.push_str(&format!("X-BOP-TOKENS:{}\r\n", tokens));
+        }
+        if let Some(cost) = last.cost_usd {
+            ics.push_str(&format!("X-BOP-COST:{:.4}\r\n", cost));
+        }
+    }
+    for dep in &meta.depends_on {
+        ics.push_str(&format!("RELATED-TO;RELTYPE=PARENT:{}@bop\r\n", dep));
+    }
+
+    ics.push_str("END:VEVENT\r\n");
+    ics.push_str("END:VCALENDAR\r\n");
+
+    let ics_path = card_dir.join("card.ics");
+    let _ = fs::write(&ics_path, ics);
 }
 
 // ── Opt-in gate ──────────────────────────────────────────────────────────────
@@ -215,6 +422,21 @@ pub fn flush_events(cards_dir: &Path, events: &[RunEvent]) {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn();
+    }
+
+    // Fire-and-forget Unix socket (for local observers like BopDeck)
+    #[cfg(unix)]
+    {
+        use std::io::Write as _;
+        use std::os::unix::net::UnixStream;
+        use std::time::Duration;
+
+        let user = std::env::var("USER").unwrap_or_else(|_| "default".into());
+        let socket_path = format!("/tmp/bop-deck-{}.sock", user);
+        if let Ok(mut stream) = UnixStream::connect(&socket_path) {
+            let _ = stream.set_write_timeout(Some(Duration::from_millis(50)));
+            let _ = stream.write_all(buf.as_bytes());
+        }
     }
 }
 
@@ -391,5 +613,142 @@ mod tests {
         assert_eq!(parsed.event_type, EventType::Start);
         assert_eq!(parsed.run.run_id, "abc12345");
         assert_eq!(parsed.job.name, "test-card");
+    }
+
+    // ── iCalendar VEVENT tests ───────────────────────────────────────────────
+
+    #[test]
+    fn write_ics_creates_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let meta = test_meta();
+        write_ics(dir.path(), &meta, "running");
+        let ics = fs::read_to_string(dir.path().join("card.ics")).unwrap();
+        assert!(ics.contains("BEGIN:VCALENDAR"));
+        assert!(ics.contains("BEGIN:VEVENT"));
+        assert!(ics.contains("END:VEVENT"));
+        assert!(ics.contains("END:VCALENDAR"));
+        assert!(ics.contains("TRANSP:TRANSPARENT"));
+    }
+
+    #[test]
+    fn ics_status_maps_correctly() {
+        let dir = tempfile::tempdir().unwrap();
+        let meta = test_meta();
+
+        // VEVENT uses CONFIRMED for active states, CANCELLED for failed
+        write_ics(dir.path(), &meta, "pending");
+        let ics = fs::read_to_string(dir.path().join("card.ics")).unwrap();
+        assert!(ics.contains("STATUS:CONFIRMED"));
+        assert!(ics.contains("SUMMARY:◇"));
+
+        write_ics(dir.path(), &meta, "running");
+        let ics = fs::read_to_string(dir.path().join("card.ics")).unwrap();
+        assert!(ics.contains("STATUS:CONFIRMED"));
+        assert!(ics.contains("SUMMARY:▶"));
+
+        write_ics(dir.path(), &meta, "done");
+        let ics = fs::read_to_string(dir.path().join("card.ics")).unwrap();
+        assert!(ics.contains("STATUS:CONFIRMED"));
+        assert!(ics.contains("SUMMARY:✓"));
+
+        write_ics(dir.path(), &meta, "failed");
+        let ics = fs::read_to_string(dir.path().join("card.ics")).unwrap();
+        assert!(ics.contains("STATUS:CANCELLED"));
+        assert!(ics.contains("SUMMARY:✗"));
+
+        write_ics(dir.path(), &meta, "merged");
+        let ics = fs::read_to_string(dir.path().join("card.ics")).unwrap();
+        assert!(ics.contains("STATUS:CONFIRMED"));
+        assert!(ics.contains("SUMMARY:⤴"));
+    }
+
+    #[test]
+    fn ics_includes_uid_and_summary() {
+        let dir = tempfile::tempdir().unwrap();
+        let meta = test_meta();
+        write_ics(dir.path(), &meta, "running");
+        let ics = fs::read_to_string(dir.path().join("card.ics")).unwrap();
+        assert!(ics.contains("UID:test-card@bop"));
+        assert!(ics.contains("SUMMARY:▶"));
+        assert!(ics.contains("test-card"));
+    }
+
+    #[test]
+    fn ics_includes_dtstart_and_dtend() {
+        let dir = tempfile::tempdir().unwrap();
+        let meta = test_meta();
+        write_ics(dir.path(), &meta, "done");
+        let ics = fs::read_to_string(dir.path().join("card.ics")).unwrap();
+        assert!(ics.contains("DTSTART:20260302T000000Z"));
+        assert!(ics.contains("DTEND:"));
+    }
+
+    #[test]
+    fn ics_includes_related_to_for_depends() {
+        let dir = tempfile::tempdir().unwrap();
+        let meta = test_meta();
+        write_ics(dir.path(), &meta, "running");
+        let ics = fs::read_to_string(dir.path().join("card.ics")).unwrap();
+        assert!(ics.contains("RELATED-TO;RELTYPE=PARENT:parent-card@bop"));
+    }
+
+    #[test]
+    fn ics_includes_bop_extensions() {
+        let dir = tempfile::tempdir().unwrap();
+        let meta = test_meta();
+        write_ics(dir.path(), &meta, "running");
+        let ics = fs::read_to_string(dir.path().join("card.ics")).unwrap();
+        assert!(ics.contains("X-BOP-STATE:running"));
+        assert!(ics.contains("X-BOP-STAGE:implement"));
+        assert!(ics.contains("X-BOP-BRANCH:job/test-card"));
+    }
+
+    #[test]
+    fn ics_failure_includes_reason() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut meta = test_meta();
+        meta.failure_reason = Some("timeout".into());
+        write_ics(dir.path(), &meta, "failed");
+        let ics = fs::read_to_string(dir.path().join("card.ics")).unwrap();
+        assert!(ics.contains("STATUS:CANCELLED"));
+        assert!(ics.contains("X-BOP-FAILURE:timeout"));
+        assert!(ics.contains("Failure: timeout"));
+    }
+
+    #[test]
+    fn ics_retry_sets_sequence() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut meta = test_meta();
+        meta.retry_count = Some(3);
+        write_ics(dir.path(), &meta, "running");
+        let ics = fs::read_to_string(dir.path().join("card.ics")).unwrap();
+        assert!(ics.contains("SEQUENCE:3"));
+    }
+
+    #[test]
+    fn ics_with_tokens_and_cost() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut meta = test_meta();
+        meta.runs[0].prompt_tokens = Some(1000);
+        meta.runs[0].completion_tokens = Some(500);
+        meta.runs[0].cost_usd = Some(0.42);
+        write_ics(dir.path(), &meta, "done");
+        let ics = fs::read_to_string(dir.path().join("card.ics")).unwrap();
+        assert!(ics.contains("X-BOP-TOKENS:1500"));
+        assert!(ics.contains("X-BOP-COST:0.42"));
+        assert!(ics.contains("Tokens: 1500"));
+    }
+
+    #[test]
+    fn ical_timestamp_cleans_iso() {
+        assert_eq!(ical_timestamp("2026-03-02T00:00:00Z"), "20260302T000000Z");
+        assert_eq!(
+            ical_timestamp("2026-03-02T15:30:45+0000"),
+            "20260302T153045Z"
+        );
+        assert_eq!(
+            ical_timestamp("2026-03-02T15:30:45.123Z"),
+            "20260302T153045Z"
+        );
     }
 }

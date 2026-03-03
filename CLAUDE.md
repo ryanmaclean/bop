@@ -28,6 +28,10 @@ make check                   # Run test + lint + fmt check together
 
 # Canonical CLI: bop
 RUST_LOG=debug ./target/debug/bop dispatcher --once  # Debug dispatcher
+bop gantt                    # ANSI Gantt timeline in terminal (auto-fits pane)
+bop gantt --html             # HTML Gantt to .cards/bop-gantt.html
+bop gantt -o                 # HTML + open in browser
+bop gantt -w 80              # Force 80-column width
 
 # JJ-first collaboration (recommended with multiple live agents)
 jj status

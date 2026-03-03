@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::paths;
 
-fn glyph_rank(g: &str) -> (&'static str, u32) {
+pub(crate) fn glyph_rank(g: &str) -> (&'static str, u32) {
     let cp = g.chars().next().map(|c| c as u32).unwrap_or(0);
     match cp & 0xF {
         1 => ("Ace", 1),
@@ -26,7 +26,7 @@ fn glyph_rank(g: &str) -> (&'static str, u32) {
     }
 }
 
-fn glyph_suit(g: &str) -> &'static str {
+pub(crate) fn glyph_suit(g: &str) -> &'static str {
     let cp = g.chars().next().map(|c| c as u32).unwrap_or(0);
     match (cp >> 4) & 0xF {
         0xA => "♠ complexity",
@@ -37,7 +37,7 @@ fn glyph_suit(g: &str) -> &'static str {
     }
 }
 
-fn is_joker(g: &str) -> bool {
+pub(crate) fn is_joker(g: &str) -> bool {
     g.chars()
         .next()
         .map(jobcard_core::cardchars::is_joker)
@@ -192,4 +192,194 @@ pub fn cmd_poker_consensus(root: &Path, id: &str, glyph: &str) -> anyhow::Result
     println!("∴ Consensus: {glyph} — {rank_label} of {suit} — {pts}pt");
     println!("  Committed to {id}/meta.json");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    // ── glyph_rank ──────────────────────────────────────────────────────
+    #[test]
+    fn glyph_rank_ace() {
+        // U+1F0A1 = Ace of Spades — low nibble 1
+        let (label, pts) = glyph_rank("\u{1F0A1}");
+        assert_eq!(label, "Ace");
+        assert_eq!(pts, 1);
+    }
+
+    #[test]
+    fn glyph_rank_king() {
+        // U+1F0AE = King of Spades — low nibble 0xE = 14
+        let (label, pts) = glyph_rank("\u{1F0AE}");
+        assert_eq!(label, "King");
+        assert_eq!(pts, 40);
+    }
+
+    #[test]
+    fn glyph_rank_jack() {
+        // U+1F0AB = Jack of Spades — low nibble 0xB = 11
+        let (label, pts) = glyph_rank("\u{1F0AB}");
+        assert_eq!(label, "Jack");
+        assert_eq!(pts, 13);
+    }
+
+    #[test]
+    fn glyph_rank_five() {
+        // U+1F0A5 = 5 of Spades — low nibble 5
+        let (label, pts) = glyph_rank("\u{1F0A5}");
+        assert_eq!(label, "5");
+        assert_eq!(pts, 5);
+    }
+
+    #[test]
+    fn glyph_rank_joker() {
+        // U+1F0CF = Black Joker — low nibble 0xF
+        let (label, pts) = glyph_rank("\u{1F0CF}");
+        assert_eq!(label, "Joker");
+        assert_eq!(pts, 0);
+    }
+
+    // ── glyph_suit ──────────────────────────────────────────────────────
+    #[test]
+    fn glyph_suit_spades() {
+        // U+1F0A1 — high nibble of low byte: 0xA → spades
+        assert_eq!(glyph_suit("\u{1F0A1}"), "♠ complexity");
+    }
+
+    #[test]
+    fn glyph_suit_hearts() {
+        // U+1F0B1 — high nibble: 0xB → hearts
+        assert_eq!(glyph_suit("\u{1F0B1}"), "♥ effort");
+    }
+
+    #[test]
+    fn glyph_suit_diamonds() {
+        // U+1F0C1 — high nibble: 0xC → diamonds
+        assert_eq!(glyph_suit("\u{1F0C1}"), "♦ risk");
+    }
+
+    #[test]
+    fn glyph_suit_clubs() {
+        // U+1F0D1 — high nibble: 0xD → clubs
+        assert_eq!(glyph_suit("\u{1F0D1}"), "♣ value");
+    }
+
+    // ── is_joker ────────────────────────────────────────────────────────
+    #[test]
+    fn is_joker_true_for_joker() {
+        assert!(is_joker("\u{1F0DF}")); // 🃟
+    }
+
+    #[test]
+    fn is_joker_false_for_normal_card() {
+        assert!(!is_joker("\u{1F0A1}")); // Ace of Spades
+    }
+
+    // ── cmd_poker_open ──────────────────────────────────────────────────
+    fn setup_card(td: &std::path::Path, id: &str) -> std::path::PathBuf {
+        let card_dir = td.join("pending").join(format!("{}.jobcard", id));
+        fs::create_dir_all(&card_dir).unwrap();
+        let meta = jobcard_core::Meta {
+            id: id.into(),
+            stage: "implement".into(),
+            ..Default::default()
+        };
+        jobcard_core::write_meta(&card_dir, &meta).unwrap();
+        card_dir
+    }
+
+    #[test]
+    fn poker_open_sets_round() {
+        let td = tempdir().unwrap();
+        let card_dir = setup_card(td.path(), "test-card");
+        cmd_poker_open(td.path(), "test-card").unwrap();
+        let meta = jobcard_core::read_meta(&card_dir).unwrap();
+        assert_eq!(meta.poker_round.as_deref(), Some("open"));
+        assert!(meta.estimates.is_empty());
+    }
+
+    #[test]
+    fn poker_open_idempotent() {
+        let td = tempdir().unwrap();
+        setup_card(td.path(), "test-card");
+        cmd_poker_open(td.path(), "test-card").unwrap();
+        // Opening again should succeed (already open)
+        cmd_poker_open(td.path(), "test-card").unwrap();
+    }
+
+    // ── cmd_poker_submit ────────────────────────────────────────────────
+    #[test]
+    fn poker_submit_records_estimate() {
+        let td = tempdir().unwrap();
+        let card_dir = setup_card(td.path(), "test-card");
+        cmd_poker_open(td.path(), "test-card").unwrap();
+        cmd_poker_submit(td.path(), "test-card", Some("\u{1F0A5}"), Some("alice")).unwrap();
+        let meta = jobcard_core::read_meta(&card_dir).unwrap();
+        assert_eq!(
+            meta.estimates.get("alice").map(|s| s.as_str()),
+            Some("\u{1F0A5}")
+        );
+    }
+
+    #[test]
+    fn poker_submit_fails_without_open_round() {
+        let td = tempdir().unwrap();
+        setup_card(td.path(), "test-card");
+        let result = cmd_poker_submit(td.path(), "test-card", Some("\u{1F0A5}"), Some("alice"));
+        assert!(result.is_err());
+    }
+
+    // ── cmd_poker_reveal ────────────────────────────────────────────────
+    #[test]
+    fn poker_reveal_sets_revealed() {
+        let td = tempdir().unwrap();
+        let card_dir = setup_card(td.path(), "test-card");
+        cmd_poker_open(td.path(), "test-card").unwrap();
+        cmd_poker_submit(td.path(), "test-card", Some("\u{1F0A5}"), Some("alice")).unwrap();
+        cmd_poker_reveal(td.path(), "test-card").unwrap();
+        let meta = jobcard_core::read_meta(&card_dir).unwrap();
+        assert_eq!(meta.poker_round.as_deref(), Some("revealed"));
+    }
+
+    #[test]
+    fn poker_reveal_fails_without_open_round() {
+        let td = tempdir().unwrap();
+        setup_card(td.path(), "test-card");
+        let result = cmd_poker_reveal(td.path(), "test-card");
+        assert!(result.is_err());
+    }
+
+    // ── cmd_poker_consensus ─────────────────────────────────────────────
+    #[test]
+    fn poker_consensus_commits_glyph_and_clears_round() {
+        let td = tempdir().unwrap();
+        setup_card(td.path(), "test-card");
+        cmd_poker_open(td.path(), "test-card").unwrap();
+        cmd_poker_submit(td.path(), "test-card", Some("\u{1F0A5}"), Some("alice")).unwrap();
+        cmd_poker_consensus(td.path(), "test-card", "\u{1F0A5}").unwrap();
+        // Card got renamed to {glyph}-test-card.jobcard
+        let new_card = td
+            .path()
+            .join("pending")
+            .join("\u{1F0A5}-test-card.jobcard");
+        assert!(new_card.exists());
+        let meta = jobcard_core::read_meta(&new_card).unwrap();
+        assert_eq!(meta.glyph.as_deref(), Some("\u{1F0A5}"));
+        assert!(meta.poker_round.is_none());
+        assert!(meta.estimates.is_empty());
+    }
+
+    #[test]
+    fn poker_consensus_rejects_joker() {
+        let td = tempdir().unwrap();
+        setup_card(td.path(), "test-card");
+        cmd_poker_open(td.path(), "test-card").unwrap();
+        // Submitting a joker as consensus should succeed but not commit
+        cmd_poker_consensus(td.path(), "test-card", "\u{1F0DF}").unwrap();
+        // Card should still be in original location with round still open
+        let card_dir = td.path().join("pending").join("test-card.jobcard");
+        let meta = jobcard_core::read_meta(&card_dir).unwrap();
+        assert_eq!(meta.poker_round.as_deref(), Some("open"));
+    }
 }

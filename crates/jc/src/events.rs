@@ -53,14 +53,9 @@ pub fn cmd_events(
     Ok(())
 }
 
-pub fn cmd_events_check(root: &Path) -> anyhow::Result<()> {
-    let events_path = root.join("events.jsonl");
-    if !events_path.exists() {
-        println!("WARN: no events.jsonl — lineage not enabled or never triggered");
-        std::process::exit(1);
-    }
-
-    let content = fs::read_to_string(&events_path)?;
+/// Validate events.jsonl integrity. Returns (valid, parse_errors, has_start, has_terminal, card_count).
+/// Extracted for testability — the public cmd_events_check wraps this with process::exit calls.
+pub(crate) fn check_events_file(content: &str) -> (usize, usize, bool, bool, usize) {
     let mut valid = 0usize;
     let mut parse_errors = 0usize;
     let mut cards: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -86,12 +81,22 @@ pub fn cmd_events_check(root: &Path) -> anyhow::Result<()> {
             Err(_) => parse_errors += 1,
         }
     }
+    (valid, parse_errors, has_start, has_terminal, cards.len())
+}
+
+pub fn cmd_events_check(root: &Path) -> anyhow::Result<()> {
+    let events_path = root.join("events.jsonl");
+    if !events_path.exists() {
+        println!("WARN: no events.jsonl — lineage not enabled or never triggered");
+        std::process::exit(1);
+    }
+
+    let content = fs::read_to_string(&events_path)?;
+    let (valid, parse_errors, has_start, has_terminal, card_count) = check_events_file(&content);
 
     println!(
         "{} events, {} cards, {} parse errors",
-        valid,
-        cards.len(),
-        parse_errors
+        valid, card_count, parse_errors
     );
 
     if valid == 0 {
@@ -115,4 +120,121 @@ pub fn cmd_events_check(root: &Path) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn make_run_event(event_type: &str, card_name: &str, run_id: &str) -> String {
+        serde_json::json!({
+            "eventType": event_type,
+            "eventTime": "2026-03-02T00:00:00Z",
+            "run": { "runId": run_id },
+            "job": { "namespace": "bop", "name": card_name },
+            "inputs": [],
+            "outputs": [],
+            "producer": "https://github.com/yourorg/bop",
+            "schemaUrl": "https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/RunEvent"
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn cmd_events_no_file_prints_message() {
+        let td = tempdir().unwrap();
+        cmd_events(td.path(), None, false, 50).unwrap();
+    }
+
+    #[test]
+    fn cmd_events_filters_by_card_id() {
+        let td = tempdir().unwrap();
+        let mut content = String::new();
+        content.push_str(&make_run_event("START", "card-alpha", "r1"));
+        content.push('\n');
+        content.push_str(&make_run_event("COMPLETE", "card-beta", "r2"));
+        content.push('\n');
+        fs::write(td.path().join("events.jsonl"), &content).unwrap();
+        cmd_events(td.path(), Some("alpha"), false, 50).unwrap();
+    }
+
+    #[test]
+    fn cmd_events_respects_limit() {
+        let td = tempdir().unwrap();
+        let mut content = String::new();
+        for i in 0..10 {
+            content.push_str(&make_run_event(
+                "START",
+                &format!("card-{}", i),
+                &format!("r{}", i),
+            ));
+            content.push('\n');
+        }
+        fs::write(td.path().join("events.jsonl"), &content).unwrap();
+        cmd_events(td.path(), None, false, 3).unwrap();
+    }
+
+    #[test]
+    fn cmd_events_json_mode() {
+        let td = tempdir().unwrap();
+        let content = format!("{}\n", make_run_event("START", "test-card", "r1"));
+        fs::write(td.path().join("events.jsonl"), &content).unwrap();
+        cmd_events(td.path(), None, true, 50).unwrap();
+    }
+
+    #[test]
+    fn check_reports_parse_errors() {
+        let content = format!(
+            "{}\nnot-valid-json\n",
+            make_run_event("START", "card-a", "r1")
+        );
+        let (valid, parse_errors, _, _, _) = check_events_file(&content);
+        assert_eq!(valid, 1);
+        assert_eq!(parse_errors, 1);
+    }
+
+    #[test]
+    fn check_detects_missing_start() {
+        let content = format!("{}\n", make_run_event("COMPLETE", "card-a", "r1"));
+        let (valid, parse_errors, has_start, has_terminal, _) = check_events_file(&content);
+        assert_eq!(valid, 1);
+        assert_eq!(parse_errors, 0);
+        assert!(!has_start);
+        assert!(has_terminal);
+    }
+
+    #[test]
+    fn check_detects_missing_terminal() {
+        let content = format!("{}\n", make_run_event("START", "card-a", "r1"));
+        let (valid, _, has_start, has_terminal, _) = check_events_file(&content);
+        assert_eq!(valid, 1);
+        assert!(has_start);
+        assert!(!has_terminal);
+    }
+
+    #[test]
+    fn check_ok_for_valid_start_and_complete() {
+        let content = format!(
+            "{}\n{}\n",
+            make_run_event("START", "card-a", "r1"),
+            make_run_event("COMPLETE", "card-a", "r1"),
+        );
+        let (valid, parse_errors, has_start, has_terminal, card_count) =
+            check_events_file(&content);
+        assert_eq!(valid, 2);
+        assert_eq!(parse_errors, 0);
+        assert!(has_start);
+        assert!(has_terminal);
+        assert_eq!(card_count, 1);
+    }
+
+    #[test]
+    fn check_empty_content() {
+        let (valid, parse_errors, has_start, has_terminal, _) = check_events_file("");
+        assert_eq!(valid, 0);
+        assert_eq!(parse_errors, 0);
+        assert!(!has_start);
+        assert!(!has_terminal);
+    }
 }

@@ -89,3 +89,71 @@ pub fn print_state_group(dir: &Path, state: &str, team_prefix: Option<&str>) -> 
     println!();
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn setup_card_in_state(root: &Path, state: &str, id: &str) {
+        let card_dir = root.join(state).join(format!("{}.jobcard", id));
+        fs::create_dir_all(&card_dir).unwrap();
+        let meta = jobcard_core::Meta {
+            id: id.into(),
+            stage: "implement".into(),
+            ..Default::default()
+        };
+        jobcard_core::write_meta(&card_dir, &meta).unwrap();
+    }
+
+    #[test]
+    fn list_cards_empty_state_dirs() {
+        let td = tempdir().unwrap();
+        // Create empty state dirs
+        for state in ["pending", "running", "done"] {
+            fs::create_dir_all(td.path().join(state)).unwrap();
+        }
+        list_cards(td.path(), "active").unwrap();
+    }
+
+    #[test]
+    fn list_cards_active_filter() {
+        let td = tempdir().unwrap();
+        setup_card_in_state(td.path(), "pending", "card-a");
+        setup_card_in_state(td.path(), "running", "card-b");
+        setup_card_in_state(td.path(), "done", "card-c");
+        setup_card_in_state(td.path(), "failed", "card-d");
+        // "active" = pending + running + done — should not error
+        list_cards(td.path(), "active").unwrap();
+    }
+
+    #[test]
+    fn list_cards_all_filter() {
+        let td = tempdir().unwrap();
+        setup_card_in_state(td.path(), "pending", "card-a");
+        setup_card_in_state(td.path(), "failed", "card-b");
+        setup_card_in_state(td.path(), "merged", "card-c");
+        list_cards(td.path(), "all").unwrap();
+    }
+
+    #[test]
+    fn list_cards_single_state_filter() {
+        let td = tempdir().unwrap();
+        setup_card_in_state(td.path(), "failed", "card-a");
+        list_cards(td.path(), "failed").unwrap();
+    }
+
+    #[test]
+    fn print_state_group_nonexistent_dir() {
+        let td = tempdir().unwrap();
+        // Should succeed silently for non-existent state dir
+        print_state_group(td.path(), "pending", None).unwrap();
+    }
+
+    #[test]
+    fn print_state_group_with_team_prefix() {
+        let td = tempdir().unwrap();
+        setup_card_in_state(td.path(), "pending", "card-a");
+        print_state_group(td.path(), "pending", Some("team-alpha")).unwrap();
+    }
+}

@@ -217,3 +217,207 @@ pub fn quarantine_invalid_pending_card(
     quicklook::render_card_thumbnail(&failed_path);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn ensure_cards_layout_creates_all_dirs() {
+        let td = tempdir().unwrap();
+        let root = td.path();
+        ensure_cards_layout(root).unwrap();
+        for dir in [
+            "templates",
+            "drafts",
+            "pending",
+            "running",
+            "done",
+            "merged",
+            "failed",
+            "memory",
+        ] {
+            assert!(root.join(dir).is_dir(), "missing dir: {dir}");
+        }
+    }
+
+    #[test]
+    fn ensure_cards_layout_is_idempotent() {
+        let td = tempdir().unwrap();
+        let root = td.path();
+        ensure_cards_layout(root).unwrap();
+        // Place a marker file to verify it isn't destroyed
+        fs::write(root.join("pending").join("marker.txt"), "ok").unwrap();
+        ensure_cards_layout(root).unwrap();
+        assert!(root.join("pending").join("marker.txt").exists());
+    }
+
+    #[test]
+    fn clone_template_copies_dir_recursively() {
+        let td = tempdir().unwrap();
+        let src = td.path().join("tmpl");
+        fs::create_dir_all(src.join("sub")).unwrap();
+        fs::write(src.join("a.txt"), "hello").unwrap();
+        fs::write(src.join("sub").join("b.txt"), "world").unwrap();
+
+        let dst = td.path().join("out");
+        clone_template(&src, &dst).unwrap();
+
+        assert_eq!(fs::read_to_string(dst.join("a.txt")).unwrap(), "hello");
+        assert_eq!(
+            fs::read_to_string(dst.join("sub").join("b.txt")).unwrap(),
+            "world"
+        );
+    }
+
+    #[test]
+    fn clone_template_errors_on_missing_source() {
+        let td = tempdir().unwrap();
+        let src = td.path().join("nonexistent");
+        let dst = td.path().join("out");
+        assert!(clone_template(&src, &dst).is_err());
+    }
+
+    #[test]
+    fn cow_copy_file_copies_contents() {
+        let td = tempdir().unwrap();
+        let src = td.path().join("src.txt");
+        let dst = td.path().join("dst.txt");
+        fs::write(&src, "cow data").unwrap();
+        cow_copy_file(&src, &dst).unwrap();
+        assert_eq!(fs::read_to_string(&dst).unwrap(), "cow data");
+    }
+
+    #[test]
+    fn find_card_locates_exact_match() {
+        let td = tempdir().unwrap();
+        let root = td.path();
+        ensure_cards_layout(root).unwrap();
+        let card = root.join("pending").join("my-card.jobcard");
+        fs::create_dir_all(&card).unwrap();
+
+        let found = find_card(root, "my-card");
+        assert_eq!(found.unwrap(), card);
+    }
+
+    #[test]
+    fn find_card_locates_glyph_prefixed_card() {
+        let td = tempdir().unwrap();
+        let root = td.path();
+        ensure_cards_layout(root).unwrap();
+        let card = root.join("done").join("A-test-thing.jobcard");
+        fs::create_dir_all(&card).unwrap();
+
+        let found = find_card(root, "test-thing");
+        assert_eq!(found.unwrap(), card);
+    }
+
+    #[test]
+    fn find_card_returns_none_for_missing() {
+        let td = tempdir().unwrap();
+        let root = td.path();
+        ensure_cards_layout(root).unwrap();
+        assert!(find_card(root, "no-such-card").is_none());
+    }
+
+    #[test]
+    fn find_card_in_dir_exact_match() {
+        let td = tempdir().unwrap();
+        let dir = td.path();
+        let card = dir.join("hello.jobcard");
+        fs::create_dir_all(&card).unwrap();
+
+        assert_eq!(find_card_in_dir(dir, "hello").unwrap(), card);
+    }
+
+    #[test]
+    fn find_card_in_dir_suffix_match() {
+        let td = tempdir().unwrap();
+        let dir = td.path();
+        let card = dir.join("X-hello.jobcard");
+        fs::create_dir_all(&card).unwrap();
+
+        assert_eq!(find_card_in_dir(dir, "hello").unwrap(), card);
+    }
+
+    #[test]
+    fn find_card_in_dir_returns_none_for_missing() {
+        let td = tempdir().unwrap();
+        assert!(find_card_in_dir(td.path(), "nope").is_none());
+    }
+
+    #[test]
+    fn card_exists_in_true_when_present() {
+        let td = tempdir().unwrap();
+        let root = td.path();
+        fs::create_dir_all(root.join("running").join("foo.jobcard")).unwrap();
+        assert!(card_exists_in(root, "running", "foo"));
+    }
+
+    #[test]
+    fn card_exists_in_false_when_absent() {
+        let td = tempdir().unwrap();
+        let root = td.path();
+        fs::create_dir_all(root.join("running")).unwrap();
+        assert!(!card_exists_in(root, "running", "foo"));
+    }
+
+    #[test]
+    fn card_exists_in_glyph_prefix() {
+        let td = tempdir().unwrap();
+        let root = td.path();
+        fs::create_dir_all(root.join("pending").join("G-bar.jobcard")).unwrap();
+        assert!(card_exists_in(root, "pending", "bar"));
+    }
+
+    #[test]
+    fn find_card_in_state_true() {
+        let td = tempdir().unwrap();
+        let root = td.path();
+        fs::create_dir_all(root.join("done").join("abc.jobcard")).unwrap();
+        assert!(find_card_in_state(root, "abc", "done"));
+    }
+
+    #[test]
+    fn find_card_in_state_false() {
+        let td = tempdir().unwrap();
+        let root = td.path();
+        fs::create_dir_all(root.join("done")).unwrap();
+        assert!(!find_card_in_state(root, "abc", "done"));
+    }
+
+    #[test]
+    fn quarantine_invalid_pending_card_moves_and_logs() {
+        let td = tempdir().unwrap();
+        let root = td.path();
+        ensure_cards_layout(root).unwrap();
+
+        // Create a pending card
+        let pending = root.join("pending").join("bad.jobcard");
+        fs::create_dir_all(&pending).unwrap();
+        fs::write(pending.join("spec.md"), "x").unwrap();
+
+        quarantine_invalid_pending_card(&pending, &root.join("failed"), "test reason").unwrap();
+
+        // Pending card should be gone
+        assert!(!pending.exists());
+
+        // Should exist in failed/ (possibly with collision suffix)
+        let mut found = false;
+        for entry in fs::read_dir(root.join("failed")).unwrap().flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("bad.jobcard") {
+                found = true;
+                let log = entry.path().join("logs").join("rejected.log");
+                assert!(log.exists(), "rejected.log should exist");
+                let contents = fs::read_to_string(log).unwrap();
+                assert!(
+                    contents.contains("test reason"),
+                    "rejected.log should contain reason"
+                );
+            }
+        }
+        assert!(found, "card should exist in failed/");
+    }
+}

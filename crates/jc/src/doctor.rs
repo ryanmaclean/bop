@@ -234,3 +234,44 @@ pub fn cmd_doctor(cards_root: &Path) -> anyhow::Result<()> {
 pub fn print_status_summary(root: &Path) -> anyhow::Result<()> {
     crate::list::list_cards(root, "active")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn command_available_echo() {
+        // "echo" should always be available
+        assert!(command_available("echo"));
+    }
+
+    #[test]
+    fn command_available_nonexistent() {
+        assert!(!command_available("nonexistent-command-xyz-12345"));
+    }
+
+    #[test]
+    fn print_status_summary_empty_root() {
+        let td = tempdir().unwrap();
+        // Create state dirs so list_cards has something to scan
+        for state in ["pending", "running", "done"] {
+            fs::create_dir_all(td.path().join(state)).unwrap();
+        }
+        print_status_summary(td.path()).unwrap();
+    }
+
+    #[test]
+    fn print_status_summary_with_cards() {
+        let td = tempdir().unwrap();
+        let card_dir = td.path().join("pending").join("test-card.jobcard");
+        fs::create_dir_all(&card_dir).unwrap();
+        let meta = jobcard_core::Meta {
+            id: "test-card".into(),
+            stage: "implement".into(),
+            ..Default::default()
+        };
+        jobcard_core::write_meta(&card_dir, &meta).unwrap();
+        print_status_summary(td.path()).unwrap();
+    }
+}

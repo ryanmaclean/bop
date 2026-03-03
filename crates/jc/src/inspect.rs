@@ -12,7 +12,7 @@ pub fn parse_latest_json_line(path: &Path) -> Option<serde_json::Value> {
         .find_map(|line| serde_json::from_str(line).ok())
 }
 
-fn fmt_tokens(n: u64) -> String {
+pub(crate) fn fmt_tokens(n: u64) -> String {
     if n >= 10_000 {
         format!("{}k", n / 1000)
     } else if n >= 1_000 {
@@ -141,4 +141,76 @@ pub fn cmd_inspect(root: &Path, id: &str) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    // ── parse_latest_json_line ───────────────────────────────────────────
+
+    #[test]
+    fn parse_latest_json_line_finds_last_valid() {
+        let td = tempdir().unwrap();
+        let path = td.path().join("test.log");
+        fs::write(&path, "some text\n{\"a\":1}\n{\"b\":2}\n").unwrap();
+        let val = parse_latest_json_line(&path).unwrap();
+        assert_eq!(val["b"], 2);
+    }
+
+    #[test]
+    fn parse_latest_json_line_skips_non_json() {
+        let td = tempdir().unwrap();
+        let path = td.path().join("test.log");
+        fs::write(&path, "not json\nalso not json\n{\"ok\":true}\nmore text\n").unwrap();
+        let val = parse_latest_json_line(&path).unwrap();
+        assert_eq!(val["ok"], true);
+    }
+
+    #[test]
+    fn parse_latest_json_line_empty_file() {
+        let td = tempdir().unwrap();
+        let path = td.path().join("test.log");
+        fs::write(&path, "").unwrap();
+        assert!(parse_latest_json_line(&path).is_none());
+    }
+
+    #[test]
+    fn parse_latest_json_line_no_valid_json() {
+        let td = tempdir().unwrap();
+        let path = td.path().join("test.log");
+        fs::write(&path, "line one\nline two\nline three\n").unwrap();
+        assert!(parse_latest_json_line(&path).is_none());
+    }
+
+    #[test]
+    fn parse_latest_json_line_missing_file() {
+        let td = tempdir().unwrap();
+        let path = td.path().join("nonexistent.log");
+        assert!(parse_latest_json_line(&path).is_none());
+    }
+
+    // ── fmt_tokens ──────────────────────────────────────────────────────
+
+    #[test]
+    fn fmt_tokens_below_1000() {
+        assert_eq!(fmt_tokens(500), "500");
+        assert_eq!(fmt_tokens(0), "0");
+        assert_eq!(fmt_tokens(999), "999");
+    }
+
+    #[test]
+    fn fmt_tokens_1000_to_9999() {
+        assert_eq!(fmt_tokens(1000), "1.0k");
+        assert_eq!(fmt_tokens(1500), "1.5k");
+        assert_eq!(fmt_tokens(9999), "10.0k");
+    }
+
+    #[test]
+    fn fmt_tokens_10000_plus() {
+        assert_eq!(fmt_tokens(10000), "10k");
+        assert_eq!(fmt_tokens(15000), "15k");
+        assert_eq!(fmt_tokens(100000), "100k");
+    }
 }

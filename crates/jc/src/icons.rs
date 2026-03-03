@@ -231,3 +231,71 @@ pub fn cmd_icons_uninstall() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn icons_label_constant() {
+        assert_eq!(ICONS_LABEL, "sh.bop.iconwatcher");
+    }
+
+    #[test]
+    fn set_card_icon_no_panic_on_tempdir() {
+        let td = tempdir().unwrap();
+        let card_dir = td.path().join("pending").join("test.jobcard");
+        fs::create_dir_all(&card_dir).unwrap();
+        // Should not panic even though no swift script exists
+        set_card_icon(&card_dir);
+    }
+
+    #[test]
+    fn sync_icons_in_root_counts_dirs_and_cards() {
+        let td = tempdir().unwrap();
+        // Create some state dirs with jobcard bundles
+        let pending = td.path().join("pending");
+        fs::create_dir_all(&pending).unwrap();
+        let card = pending.join("test.jobcard");
+        fs::create_dir_all(&card).unwrap();
+        // Write meta so it looks like a real card
+        let meta = jobcard_core::Meta {
+            id: "test".into(),
+            stage: "implement".into(),
+            ..Default::default()
+        };
+        jobcard_core::write_meta(&card, &meta).unwrap();
+
+        let done = td.path().join("done");
+        fs::create_dir_all(&done).unwrap();
+        let done_card = done.join("done-test.jobcard");
+        fs::create_dir_all(&done_card).unwrap();
+        jobcard_core::write_meta(&done_card, &meta).unwrap();
+
+        let mut n_cards = 0;
+        let mut n_dirs = 0;
+        let mut n_terminal = 0;
+
+        sync_icons_in_root(td.path(), &mut n_cards, &mut n_dirs, &mut n_terminal);
+
+        // pending + done = 2 state dirs
+        assert_eq!(n_dirs, 2);
+        // 2 cards total
+        assert_eq!(n_cards, 2);
+        // done card is terminal
+        assert_eq!(n_terminal, 1);
+    }
+
+    #[test]
+    fn sync_icons_in_root_empty() {
+        let td = tempdir().unwrap();
+        let mut n_cards = 0;
+        let mut n_dirs = 0;
+        let mut n_terminal = 0;
+        sync_icons_in_root(td.path(), &mut n_cards, &mut n_dirs, &mut n_terminal);
+        assert_eq!(n_cards, 0);
+        assert_eq!(n_dirs, 0);
+        assert_eq!(n_terminal, 0);
+    }
+}

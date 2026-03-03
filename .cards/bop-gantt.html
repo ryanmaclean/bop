@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>bop · agent timeline</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box }
+body {
+  background:#0D0D0D; color:#B0B0B0;
+  font-family:'SF Mono','JetBrains Mono','Menlo',monospace;
+  font-size:12px; padding:24px 32px;
+}
+h1 { font-size:13px; font-weight:500; letter-spacing:.08em; text-transform:uppercase; color:#666; margin-bottom:6px }
+h1 span { color:#999; font-weight:400 }
+.cluster { margin-bottom:28px }
+.cluster-hdr { font-size:10px; color:#444; text-transform:uppercase; letter-spacing:.1em; margin-bottom:8px; padding-left:2px }
+.chart { display:flex }
+.labels { flex-shrink:0; width:190px; padding-top:26px }
+.label { height:24px; display:flex; align-items:center; font-size:11px; color:#666; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:1px }
+.label .g { margin-right:4px }
+.bars-area { flex:1; overflow:visible; position:relative }
+.axis { height:22px; border-bottom:1px solid #1F1F1F; position:relative; margin-bottom:2px }
+.axis-label { position:absolute; top:2px; font-size:10px; color:#444; transform:translateX(-50%); white-space:nowrap }
+.grid { position:absolute; top:24px; bottom:0; width:1px; background:#151515; pointer-events:none }
+.row { height:24px; position:relative; margin-bottom:1px }
+.bar { position:absolute; height:16px; top:4px; border-radius:3px; min-width:4px; cursor:default; opacity:.85 }
+.bar:hover { opacity:1; filter:brightness(1.3) }
+.dur { position:absolute; left:calc(100% + 5px); top:50%; transform:translateY(-50%); font-size:10px; color:#555; white-space:nowrap }
+.legend { display:flex; gap:16px; margin-top:16px; padding-top:10px; border-top:1px solid #1A1A1A }
+.legend-item { display:flex; align-items:center; gap:5px; font-size:10px; color:#555; text-transform:uppercase; letter-spacing:.05em }
+.sw { width:10px; height:10px; border-radius:2px }
+.stats { margin-top:10px; font-size:10px; color:#444 }
+</style>
+</head>
+<body>
+<h1>bop · agent timeline <span>— 18 runs</span></h1>
+<div class="cluster">
+<div class="cluster-hdr">Mar 02, 05:56 — 06:05 · 2 runs</div>
+<div class="chart">
+<div class="labels">
+  <div class="label"><span class="g">🃝</span>macos-file-agent-workf</div>
+  <div class="label">bop-index-cmd</div>
+</div>
+<div class="bars-area">
+<div class="axis">
+  <span class="axis-label" style="left:12.2%">05:58</span>
+  <span class="axis-label" style="left:34.4%">06:00</span>
+  <span class="axis-label" style="left:56.7%">06:02</span>
+  <span class="axis-label" style="left:78.9%">06:04</span>
+</div>
+<div class="grid" style="left:12.2%"></div>
+<div class="grid" style="left:34.4%"></div>
+<div class="grid" style="left:56.7%"></div>
+<div class="grid" style="left:78.9%"></div>
+<div class="row"><div class="bar" style="left:0.0%;width:21.9%;background:#6B3DB8" title="macos-file-agent-workflow&#10;merged · plan&#10;claude · 2.0m"><span class="dur">2.0m</span></div></div>
+<div class="row"><div class="bar" style="left:47.1%;width:53.1%;background:#1E8A45" title="bop-index-cmd&#10;done · implement&#10;claude · 4.8m"><span class="dur">4.8m</span></div></div>
+</div>
+</div>
+</div>
+<div class="cluster">
+<div class="cluster-hdr">Mar 02, 07:11 — 07:47 · 7 runs</div>
+<div class="chart">
+<div class="labels">
+  <div class="label">fix-jj-workspace-stabl</div>
+  <div class="label">allowed-tools-flag</div>
+  <div class="label">saist-pre-push-hook</div>
+  <div class="label"><span class="g">🂡</span>bop</div>
+  <div class="label">openlineage-run-tracki</div>
+  <div class="label"><span class="g">🂢</span>about-bop</div>
+  <div class="label"><span class="g">🂤</span>what-should-bop-build-</div>
+</div>
+<div class="bars-area">
+<div class="axis">
+  <span class="axis-label" style="left:8.6%">07:15</span>
+  <span class="axis-label" style="left:22.6%">07:20</span>
+  <span class="axis-label" style="left:36.6%">07:25</span>
+  <span class="axis-label" style="left:50.7%">07:30</span>
+  <span class="axis-label" style="left:64.7%">07:35</span>
+  <span class="axis-label" style="left:78.7%">07:40</span>
+  <span class="axis-label" style="left:92.8%">07:45</span>
+</div>
+<div class="grid" style="left:8.6%"></div>
+<div class="grid" style="left:22.6%"></div>
+<div class="grid" style="left:36.6%"></div>
+<div class="grid" style="left:50.7%"></div>
+<div class="grid" style="left:64.7%"></div>
+<div class="grid" style="left:78.7%"></div>
+<div class="grid" style="left:92.8%"></div>
+<div class="row"><div class="bar" style="left:0.0%;width:28.1%;background:#C43030" title="fix-jj-workspace-stable-path&#10;failed · implement&#10;claude · 10.0m"><span class="dur">10.0m</span></div></div>
+<div class="row"><div class="bar" style="left:6.7%;width:4.6%;background:#1E8A45" title="allowed-tools-flag&#10;done · implement&#10;claude · 1.7m"><span class="dur">1.7m</span></div></div>
+<div class="row"><div class="bar" style="left:14.4%;width:7.4%;background:#1E8A45" title="saist-pre-push-hook&#10;done · implement&#10;claude · 2.7m"><span class="dur">2.7m</span></div></div>
+<div class="row"><div class="bar" style="left:22.0%;width:5.1%;background:#1E8A45" title="bop&#10;done · ideation&#10;claude · 1.8m"><span class="dur">1.8m</span></div></div>
+<div class="row"><div class="bar" style="left:27.4%;width:12.3%;background:#1E8A45" title="openlineage-run-tracking&#10;done · implement&#10;claude · 4.4m"><span class="dur">4.4m</span></div></div>
+<div class="row"><div class="bar" style="left:41.0%;width:4.5%;background:#1E8A45" title="about-bop&#10;done · ideation&#10;claude · 1.6m"><span class="dur">1.6m</span></div></div>
+<div class="row"><div class="bar" style="left:92.8%;width:7.2%;background:#1E8A45" title="what-should-bop-build-next&#10;done · ideation&#10;claude · 2.6m"><span class="dur">2.6m</span></div></div>
+</div>
+</div>
+</div>
+<div class="cluster">
+<div class="cluster-hdr">Mar 02, 19:30 — 19:56 · 9 runs</div>
+<div class="chart">
+<div class="labels">
+  <div class="label"><span class="g">🂦</span>doctor-lint-acceptance</div>
+  <div class="label"><span class="g">🂡</span>bop-qa</div>
+  <div class="label"><span class="g">🂤</span>what-should-bop-build-</div>
+  <div class="label"><span class="g">🂦</span>doctor-lint-acceptance</div>
+  <div class="label"><span class="g">🂧</span>dispatcher-worktree-cl</div>
+  <div class="label"><span class="g">🂧</span>dispatcher-worktree-cl</div>
+  <div class="label">ollama-smoke-test</div>
+  <div class="label"><span class="g">🂢</span>about-bop-qa</div>
+  <div class="label"><span class="g">🂥</span>token-cost-in-inspect-</div>
+</div>
+<div class="bars-area">
+<div class="axis">
+  <span class="axis-label" style="left:5.8%">19:32</span>
+  <span class="axis-label" style="left:13.6%">19:34</span>
+  <span class="axis-label" style="left:21.4%">19:36</span>
+  <span class="axis-label" style="left:29.3%">19:38</span>
+  <span class="axis-label" style="left:37.1%">19:40</span>
+  <span class="axis-label" style="left:45.0%">19:42</span>
+  <span class="axis-label" style="left:52.8%">19:44</span>
+  <span class="axis-label" style="left:60.7%">19:46</span>
+  <span class="axis-label" style="left:68.5%">19:48</span>
+  <span class="axis-label" style="left:76.3%">19:50</span>
+  <span class="axis-label" style="left:84.2%">19:52</span>
+  <span class="axis-label" style="left:92.0%">19:54</span>
+  <span class="axis-label" style="left:99.9%">19:56</span>
+</div>
+<div class="grid" style="left:5.8%"></div>
+<div class="grid" style="left:13.6%"></div>
+<div class="grid" style="left:21.4%"></div>
+<div class="grid" style="left:29.3%"></div>
+<div class="grid" style="left:37.1%"></div>
+<div class="grid" style="left:45.0%"></div>
+<div class="grid" style="left:52.8%"></div>
+<div class="grid" style="left:60.7%"></div>
+<div class="grid" style="left:68.5%"></div>
+<div class="grid" style="left:76.3%"></div>
+<div class="grid" style="left:84.2%"></div>
+<div class="grid" style="left:92.0%"></div>
+<div class="grid" style="left:99.9%"></div>
+<div class="row"><div class="bar" style="left:0.0%;width:17.2%;background:#1E8A45" title="doctor-lint-acceptance-criteria&#10;done · implement&#10;claude · 4.4m"><span class="dur">4.4m</span></div></div>
+<div class="row"><div class="bar" style="left:17.6%;width:7.1%;background:#1E8A45" title="bop-qa&#10;done · qa&#10;claude · 1.8m"><span class="dur">1.8m</span></div></div>
+<div class="row"><div class="bar" style="left:26.2%;width:10.1%;background:#1E8A45" title="what-should-bop-build-next-qa&#10;done · qa&#10;claude · 2.6m"><span class="dur">2.6m</span></div></div>
+<div class="row"><div class="bar" style="left:36.7%;width:13.8%;background:#1E8A45" title="doctor-lint-acceptance-criteria-qa&#10;done · qa&#10;claude · 3.5m"><span class="dur">3.5m</span></div></div>
+<div class="row"><div class="bar" style="left:59.0%;width:10.0%;background:#1E8A45" title="dispatcher-worktree-cleanup&#10;done · implement&#10;claude · 2.6m"><span class="dur">2.6m</span></div></div>
+<div class="row"><div class="bar" style="left:70.0%;width:7.4%;background:#1E8A45" title="dispatcher-worktree-cleanup-qa&#10;done · qa&#10;claude · 1.9m"><span class="dur">1.9m</span></div></div>
+<div class="row"><div class="bar" style="left:77.7%;width:0.5%;background:#3A5A8A" title="ollama-smoke-test&#10;pending · implement&#10;ollama-qwen3-coder-cloud · 4s"><span class="dur">4s</span></div></div>
+<div class="row"><div class="bar" style="left:78.3%;width:8.7%;background:#1E8A45" title="about-bop-qa&#10;done · qa&#10;claude · 2.2m"><span class="dur">2.2m</span></div></div>
+<div class="row"><div class="bar" style="left:88.2%;width:11.9%;background:#1E8A45" title="token-cost-in-inspect-v2&#10;done · implement&#10;claude · 3.0m"><span class="dur">3.0m</span></div></div>
+</div>
+</div>
+</div>
+<div class="legend">
+  <div class="legend-item"><div class="sw" style="background:#3A5A8A"></div>pending</div>
+  <div class="legend-item"><div class="sw" style="background:#B8690F"></div>running</div>
+  <div class="legend-item"><div class="sw" style="background:#1E8A45"></div>done</div>
+  <div class="legend-item"><div class="sw" style="background:#C43030"></div>failed</div>
+  <div class="legend-item"><div class="sw" style="background:#6B3DB8"></div>merged</div>
+</div>
+<div class="stats">18 runs · 54 min compute · 111.8k tokens · $18.03</div>
+</body></html>

@@ -200,3 +200,290 @@ pub fn set_provider_cooldown(
     write_providers(cards_dir, &pf)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jobcard_core::{Meta, StageRecord, StageStatus};
+    use tempfile::tempdir;
+
+    fn mock_provider(command: &str) -> Provider {
+        Provider {
+            command: command.to_string(),
+            rate_limit_exit: 75,
+            cooldown_until_epoch_s: None,
+            model: None,
+            env: Default::default(),
+        }
+    }
+
+    #[test]
+    fn validate_provider_accepts_valid() {
+        let p = mock_provider("adapters/mock.zsh");
+        assert!(validate_provider("mock", &p).is_ok());
+    }
+
+    #[test]
+    fn validate_provider_rejects_empty_command() {
+        let p = mock_provider("");
+        assert!(validate_provider("mock", &p).is_err());
+    }
+
+    #[test]
+    fn validate_provider_rejects_whitespace_command() {
+        let p = mock_provider("   ");
+        assert!(validate_provider("mock", &p).is_err());
+    }
+
+    #[test]
+    fn validate_provider_rejects_empty_name() {
+        let p = mock_provider("adapters/mock.zsh");
+        assert!(validate_provider("", &p).is_err());
+    }
+
+    #[test]
+    fn providers_path_returns_correct_path() {
+        let dir = Path::new("/tmp/cards");
+        assert_eq!(
+            providers_path(dir),
+            PathBuf::from("/tmp/cards/providers.json")
+        );
+    }
+
+    #[test]
+    fn read_write_providers_roundtrip() {
+        let td = tempdir().unwrap();
+        let mut pf = ProvidersFile::default();
+        pf.default_provider = Some("mock".to_string());
+        pf.providers
+            .insert("mock".to_string(), mock_provider("adapters/mock.zsh"));
+        write_providers(td.path(), &pf).unwrap();
+
+        let read_back = read_providers(td.path()).unwrap();
+        assert_eq!(read_back.default_provider, Some("mock".to_string()));
+        assert!(read_back.providers.contains_key("mock"));
+        assert_eq!(read_back.providers["mock"].command, "adapters/mock.zsh");
+    }
+
+    #[test]
+    fn read_providers_returns_default_for_missing_file() {
+        let td = tempdir().unwrap();
+        let pf = read_providers(td.path()).unwrap();
+        assert!(pf.providers.is_empty());
+        assert!(pf.default_provider.is_none());
+    }
+
+    #[test]
+    fn read_providers_rejects_invalid_entry() {
+        let td = tempdir().unwrap();
+        let json = serde_json::json!({
+            "providers": {
+                "bad": { "command": "" }
+            }
+        });
+        fs::write(
+            td.path().join("providers.json"),
+            serde_json::to_vec(&json).unwrap(),
+        )
+        .unwrap();
+        assert!(read_providers(td.path()).is_err());
+    }
+
+    #[test]
+    fn seed_providers_creates_file() {
+        let td = tempdir().unwrap();
+        seed_providers(td.path()).unwrap();
+        assert!(td.path().join("providers.json").exists());
+        let pf = read_providers(td.path()).unwrap();
+        assert!(pf.providers.contains_key("mock"));
+        assert!(pf.providers.contains_key("mock2"));
+        assert_eq!(pf.default_provider, Some("mock".to_string()));
+    }
+
+    #[test]
+    fn seed_providers_is_idempotent() {
+        let td = tempdir().unwrap();
+        seed_providers(td.path()).unwrap();
+        // Modify the file to detect if seed_providers overwrites
+        let mut pf = read_providers(td.path()).unwrap();
+        pf.default_provider = Some("changed".to_string());
+        write_providers(td.path(), &pf).unwrap();
+        seed_providers(td.path()).unwrap();
+        // Should not have been overwritten
+        let pf2 = read_providers(td.path()).unwrap();
+        assert_eq!(pf2.default_provider, Some("changed".to_string()));
+    }
+
+    #[test]
+    fn ensure_mock_provider_command_updates_mock() {
+        let td = tempdir().unwrap();
+        seed_providers(td.path()).unwrap();
+        ensure_mock_provider_command(td.path(), "adapters/new.zsh").unwrap();
+        let pf = read_providers(td.path()).unwrap();
+        assert_eq!(pf.providers["mock"].command, "adapters/new.zsh");
+    }
+
+    #[test]
+    fn rotate_provider_chain_moves_first_to_last() {
+        let mut meta = Meta {
+            provider_chain: vec!["a".into(), "b".into(), "c".into()],
+            ..Default::default()
+        };
+        rotate_provider_chain(&mut meta);
+        assert_eq!(meta.provider_chain, vec!["b", "c", "a"]);
+    }
+
+    #[test]
+    fn rotate_provider_chain_noop_on_single() {
+        let mut meta = Meta {
+            provider_chain: vec!["only".into()],
+            ..Default::default()
+        };
+        rotate_provider_chain(&mut meta);
+        assert_eq!(meta.provider_chain, vec!["only"]);
+    }
+
+    #[test]
+    fn rotate_provider_chain_noop_on_empty() {
+        let mut meta = Meta {
+            provider_chain: vec![],
+            ..Default::default()
+        };
+        rotate_provider_chain(&mut meta);
+        assert!(meta.provider_chain.is_empty());
+    }
+
+    #[test]
+    fn select_provider_returns_first_available() {
+        let td = tempdir().unwrap();
+        let mut pf = ProvidersFile::default();
+        pf.providers.insert("a".to_string(), mock_provider("cmd_a"));
+        pf.providers.insert("b".to_string(), mock_provider("cmd_b"));
+        write_providers(td.path(), &pf).unwrap();
+
+        let mut meta = Meta {
+            provider_chain: vec!["a".into(), "b".into()],
+            ..Default::default()
+        };
+        let result = select_provider(td.path(), Some(&mut meta), "implement").unwrap();
+        assert!(result.is_some());
+        let (name, cmd, _, _, _) = result.unwrap();
+        assert_eq!(name, "a");
+        assert_eq!(cmd, "cmd_a");
+    }
+
+    #[test]
+    fn select_provider_skips_cooled_down() {
+        let td = tempdir().unwrap();
+        let future = Utc::now().timestamp() + 9999;
+        let mut pf = ProvidersFile::default();
+        let mut cooled = mock_provider("cmd_a");
+        cooled.cooldown_until_epoch_s = Some(future);
+        pf.providers.insert("a".to_string(), cooled);
+        pf.providers.insert("b".to_string(), mock_provider("cmd_b"));
+        write_providers(td.path(), &pf).unwrap();
+
+        let mut meta = Meta {
+            provider_chain: vec!["a".into(), "b".into()],
+            ..Default::default()
+        };
+        let result = select_provider(td.path(), Some(&mut meta), "implement").unwrap();
+        let (name, _, _, _, _) = result.unwrap();
+        assert_eq!(name, "b");
+    }
+
+    #[test]
+    fn select_provider_returns_none_when_all_cooled_down() {
+        let td = tempdir().unwrap();
+        let future = Utc::now().timestamp() + 9999;
+        let mut pf = ProvidersFile::default();
+        let mut a = mock_provider("cmd_a");
+        a.cooldown_until_epoch_s = Some(future);
+        let mut b = mock_provider("cmd_b");
+        b.cooldown_until_epoch_s = Some(future);
+        pf.providers.insert("a".to_string(), a);
+        pf.providers.insert("b".to_string(), b);
+        write_providers(td.path(), &pf).unwrap();
+
+        let mut meta = Meta {
+            provider_chain: vec!["a".into(), "b".into()],
+            ..Default::default()
+        };
+        let result = select_provider(td.path(), Some(&mut meta), "implement").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn select_provider_avoids_qa_provider() {
+        let td = tempdir().unwrap();
+        let mut pf = ProvidersFile::default();
+        pf.providers
+            .insert("impl_prov".to_string(), mock_provider("cmd_impl"));
+        pf.providers
+            .insert("qa_prov".to_string(), mock_provider("cmd_qa"));
+        write_providers(td.path(), &pf).unwrap();
+
+        let mut stages = BTreeMap::new();
+        stages.insert(
+            "implement".to_string(),
+            StageRecord {
+                status: StageStatus::Done,
+                agent: None,
+                provider: Some("impl_prov".to_string()),
+                duration_s: None,
+                started: None,
+                blocked_by: None,
+            },
+        );
+        let mut meta = Meta {
+            provider_chain: vec!["impl_prov".into(), "qa_prov".into()],
+            stages,
+            ..Default::default()
+        };
+        let result = select_provider(td.path(), Some(&mut meta), "qa").unwrap();
+        let (name, _, _, _, _) = result.unwrap();
+        assert_eq!(name, "qa_prov");
+    }
+
+    #[test]
+    fn select_provider_falls_back_to_avoided_if_only_option() {
+        let td = tempdir().unwrap();
+        let mut pf = ProvidersFile::default();
+        pf.providers
+            .insert("only_prov".to_string(), mock_provider("cmd"));
+        write_providers(td.path(), &pf).unwrap();
+
+        let mut stages = BTreeMap::new();
+        stages.insert(
+            "implement".to_string(),
+            StageRecord {
+                status: StageStatus::Done,
+                agent: None,
+                provider: Some("only_prov".to_string()),
+                duration_s: None,
+                started: None,
+                blocked_by: None,
+            },
+        );
+        let mut meta = Meta {
+            provider_chain: vec!["only_prov".into()],
+            stages,
+            ..Default::default()
+        };
+        let result = select_provider(td.path(), Some(&mut meta), "qa").unwrap();
+        let (name, _, _, _, _) = result.unwrap();
+        assert_eq!(name, "only_prov");
+    }
+
+    #[test]
+    fn set_provider_cooldown_sets_epoch() {
+        let td = tempdir().unwrap();
+        seed_providers(td.path()).unwrap();
+        set_provider_cooldown(td.path(), "mock", 300).unwrap();
+        let pf = read_providers(td.path()).unwrap();
+        let cd = pf.providers["mock"].cooldown_until_epoch_s.unwrap();
+        let now = Utc::now().timestamp();
+        assert!(cd > now);
+        assert!(cd <= now + 301);
+    }
+}
