@@ -33,6 +33,35 @@ pub fn write_webloc(path: &Path, target_url: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn push_pct_encoded_byte(out: &mut String, byte: u8) {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    out.push('%');
+    out.push(char::from(HEX[(byte >> 4) as usize]));
+    out.push(char::from(HEX[(byte & 0x0F) as usize]));
+}
+
+fn encode_bop_path_segment(segment: &str) -> String {
+    let mut out = String::with_capacity(segment.len());
+    for &byte in segment.as_bytes() {
+        let is_unreserved =
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~');
+        if is_unreserved {
+            out.push(byte as char);
+        } else {
+            push_pct_encoded_byte(&mut out, byte);
+        }
+    }
+    out
+}
+
+fn bop_card_url(card_id: &str, action: &str) -> String {
+    format!(
+        "bop://card/{}/{}",
+        encode_bop_path_segment(card_id),
+        encode_bop_path_segment(action),
+    )
+}
+
 pub fn sync_card_action_links(card_dir: &Path) {
     let meta = jobcard_core::read_meta(card_dir).ok();
     let id = meta
@@ -45,9 +74,9 @@ pub fn sync_card_action_links(card_dir: &Path) {
     }
 
     let state = card_state_from_path(card_dir).unwrap_or_else(|| "unknown".to_string());
-    let done_like = matches!(state.as_str(), "done" | "merged");
+    let done_like = matches!(state.as_str(), "done" | "merged" | "failed");
     let logs_action = if done_like { "logs" } else { "tail" };
-    let logs_url = format!("bop://card/{id}/{logs_action}");
+    let logs_url = bop_card_url(&id, logs_action);
     let logs_label = if done_like { "Open logs" } else { "Tail logs" };
     let logs_cmd = if done_like {
         format!("bop logs {id}")
@@ -67,15 +96,13 @@ pub fn sync_card_action_links(card_dir: &Path) {
     links_md.push_str(&format!("- Logs command: `{logs_cmd}`\n"));
 
     let session_webloc = card_dir.join("Session.webloc");
-    if state == "running" {
-        if let Some(session) = session {
-            let session_url = format!("bop://card/{id}/session");
-            links_md.push_str(&format!("- Session: [Attach zellij]({session_url})\n"));
-            links_md.push_str(&format!("- Session command: `zellij attach {session}`\n"));
-            let _ = write_webloc(&session_webloc, &session_url);
-        } else {
-            let _ = fs::remove_file(&session_webloc);
-        }
+    if let Some(session) = session {
+        let session_url = bop_card_url(&id, "session");
+        links_md.push_str(&format!("- Session: [Attach zellij]({session_url})\n"));
+        links_md.push_str(&format!(
+            "- Session command: `zellij attach {session} 2>/dev/null || zellij -s {session}`\n"
+        ));
+        let _ = write_webloc(&session_webloc, &session_url);
     } else {
         let _ = fs::remove_file(&session_webloc);
     }
@@ -253,8 +280,7 @@ mod tests {
         let logs_webloc = card.join("Logs.webloc");
         assert!(logs_webloc.exists(), "Logs.webloc should be created");
         let content = fs::read_to_string(&logs_webloc).unwrap();
-        // "failed" is not done_like, so it uses "tail" action
-        assert!(content.contains("bop://card/test-card/tail"));
+        assert!(content.contains("bop://card/test-card/logs"));
     }
 
     #[test]
@@ -299,6 +325,35 @@ mod tests {
         let content = fs::read_to_string(card.join("links.md")).unwrap();
         assert!(content.contains("bop://card/xyz/logs"));
         assert!(content.contains("Open logs"));
+    }
+
+    #[test]
+    fn bop_card_url_percent_encodes_emoji_and_spaces() {
+        let url = bop_card_url("🂠-feat auth", "session");
+        assert_eq!(url, "bop://card/%F0%9F%82%A0-feat%20auth/session");
+    }
+
+    #[test]
+    fn sync_links_keep_session_for_merged_when_meta_has_session() {
+        let td = tempdir().unwrap();
+        let merged_dir = td.path().join("merged");
+        let card = merged_dir.join("🂠-feature.jobcard");
+        fs::create_dir_all(&card).unwrap();
+
+        let meta = jobcard_core::Meta {
+            id: "🂠-feature".to_string(),
+            stage: "implement".to_string(),
+            zellij_session: Some("bop-feature".to_string()),
+            ..Default::default()
+        };
+        jobcard_core::write_meta(&card, &meta).unwrap();
+
+        sync_card_action_links(&card);
+
+        let links = fs::read_to_string(card.join("links.md")).unwrap();
+        assert!(links.contains("bop://card/%F0%9F%82%A0-feature/logs"));
+        assert!(links.contains("bop://card/%F0%9F%82%A0-feature/session"));
+        assert!(card.join("Session.webloc").exists());
     }
 
     #[test]
