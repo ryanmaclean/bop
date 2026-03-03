@@ -1,0 +1,5 @@
+operation	macos_primary	macos_fallback	non_macos_fallback	invariant
+create_job_or_template_copy	ditto --clone <src> <dst>	cp -c -R <src> <dst>	cp --reflink=auto -r <src> <dst> (or cp -r)	preserve COW semantics where available
+copy_single_file	cp -c <src> <dst>	fs::copy <src> <dst>	fs::copy <src> <dst>	use COW on APFS for stage-advance artifacts
+compress_terminal_card	ditto --hfsCompression <card_dir> <tmp_dir>; atomic rename swap	none	required no-op on non-macos	terminal card remains readable without adapters/converters
+forbidden_on_card_paths	cp -R / cp -r (plain recursive copy)	n/a	n/a	do not bypass APFS clone/compression strategy

@@ -1,0 +1,6 @@
+area	recommended_crate	fallback_crate	use_for	avoid_custom_when
+locking	fs4	fs2	lock files, shared/exclusive lock guards, lock metadata	you need lock acquisition/release and stale lock detection
+retry	backoff	(none)	retry policy, jitter, exponential backoff	you are writing sleep/retry loops manually
+logging	tracing	tracing-subscriber	structured logs, spans, per-module filtering	you are adding ad-hoc println/eprintln diagnostics
+cli_table	tabled	comfy-table	human-readable status/list/inspect tables	you are hand-padding columns in terminal output
+process	sysinfo	(none)	process liveness, pid metadata, host/system info	you are shelling out repeatedly for basic process checks
