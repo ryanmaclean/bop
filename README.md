@@ -6,7 +6,7 @@ A self-contained unit of work: task definition, work products, terminal session,
 
 A `.bop` file is a macOS directory bundle (opaque in Finder, navigable via "Show Package Contents") that holds everything needed to define, execute, resume, and audit a task:
 
-- **`task.bop`** — RFC 822 headers + Markdown body. The task definition.
+- **`task.md`** — RFC 822 headers + Markdown body. The task definition.
 - **`.bop/`** — Control plane: state, lock, transition log, lineage, OTel baggage.
 - **`work/`** — The actual work products (source code, configs, scripts, docs).
 - **`session/`** — Zellij terminal session bundled with the task. Resume anywhere.
