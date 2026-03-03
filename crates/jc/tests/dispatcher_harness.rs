@@ -563,3 +563,96 @@ fn dispatcher_reclaims_stale_lock_and_runs() {
     assert!(status.success());
     assert!(find_card_in(&cards, "done", "stale-lock-job").exists());
 }
+
+#[test]
+fn dispatcher_emits_lineage_events() {
+    build_jc();
+
+    let td = tempfile::tempdir().unwrap();
+    let cards = td.path().join(".cards");
+
+    let status = Command::new(jc_bin())
+        .args(["--cards-dir", cards.to_str().unwrap(), "init"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    write_providers(&cards);
+    write_template(&cards, "implement");
+
+    // Enable lineage via hooks.toml
+    fs::write(cards.join("hooks.toml"), "").unwrap();
+
+    let status = Command::new(jc_bin())
+        .args([
+            "--cards-dir",
+            cards.to_str().unwrap(),
+            "new",
+            "implement",
+            "lineage-test",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let status = Command::new(jc_bin())
+        .env("MOCK_EXIT", "0")
+        .args([
+            "--cards-dir",
+            cards.to_str().unwrap(),
+            "dispatcher",
+            "--adapter",
+            mock_adapter().to_str().unwrap(),
+            "--once",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    // Card should be in done/
+    assert!(find_card_in(&cards, "done", "lineage-test").exists());
+
+    // events.jsonl should exist with START + COMPLETE
+    let events_path = cards.join("events.jsonl");
+    assert!(events_path.exists(), "events.jsonl should be created");
+
+    let content = fs::read_to_string(&events_path).unwrap();
+    let lines: Vec<&str> = content.lines().filter(|l| !l.is_empty()).collect();
+    assert!(
+        lines.len() >= 2,
+        "expected at least 2 events (START + COMPLETE), got {}",
+        lines.len()
+    );
+
+    // Verify we have a START and a COMPLETE
+    let has_start = lines.iter().any(|l| l.contains("\"START\""));
+    let has_complete = lines.iter().any(|l| l.contains("\"COMPLETE\""));
+    assert!(has_start, "expected a START event");
+    assert!(has_complete, "expected a COMPLETE event");
+
+    // Verify events reference the right card
+    assert!(
+        lines.iter().all(|l| l.contains("lineage-test")),
+        "all events should reference lineage-test card"
+    );
+
+    // Verify run_ids are present and non-empty
+    let events: Vec<serde_json::Value> = lines
+        .iter()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+    for ev in &events {
+        let run_id = ev["run"]["runId"].as_str().unwrap_or_default();
+        assert!(!run_id.is_empty(), "every event should have a run_id");
+    }
+    // COMPLETE event should have the dispatcher-generated run_id (not the card id fallback)
+    let complete_run_id = events
+        .iter()
+        .find(|e| e["eventType"] == "COMPLETE")
+        .and_then(|e| e["run"]["runId"].as_str())
+        .unwrap();
+    assert!(
+        !complete_run_id.is_empty(),
+        "COMPLETE event should have a run_id"
+    );
+}

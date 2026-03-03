@@ -1,5 +1,6 @@
 pub mod cardchars;
 pub mod config;
+pub mod lineage;
 pub mod realtime;
 pub mod worktree;
 
