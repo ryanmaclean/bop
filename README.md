@@ -1,19 +1,39 @@
-# `.bop` File Format
+# bop
 
-> A self-contained, human-readable, agent-parseable unit of work — task definition, work products, session state, lineage, evidence, and version history in a single file or directory bundle.
+A self-contained unit of work: task definition, work products, terminal session, lineage, evidence, and version history — all in one directory bundle.
 
-**Version:** 0.1.0-draft  |  **Encoding:** UTF-8  |  **Status:** Draft
+## What is a `.bop` bundle?
 
----
+A `.bop` bundle is a macOS directory bundle (opaque in Finder, navigable via "Show Package Contents") that holds everything needed to define, execute, resume, and audit a task:
 
-## What is `.bop`?
+- **`task.bop`** — RFC 822 headers + Markdown body. The task definition.
+- **`.bop/`** — Control plane: state, lock, transition log, lineage, OTel baggage.
+- **`work/`** — The actual work products (source code, configs, scripts, docs).
+- **`session/`** — Zellij terminal session bundled with the task. Resume anywhere.
+- **`evidence/`** — Proof the work is correct (screenshots, test results, approvals).
+- **`output/`** — Final deliverables handed to the next stage or merge gate.
+- **`traces/`** — OTel-compatible agent telemetry.
 
-`.bop` is a file format for tracking tasks and their associated work. It comes in two modes:
+## Quick start
 
-- **Single-file mode** (`.bop`): An RFC 822-style plain text file with structured headers and a Markdown body. Grep-friendly, email-compatible, Obsidian-ready.
-- **Bundle mode** (`.boptask` directory): A self-contained directory that holds the task definition, all work products, a Zellij terminal session, observability data, evidence, and version history — all in one place.
+```sh
+# Create a task (single-file mode)
+cat > my-task.bop <<EOF
+Task-Id: $(uuidgen)
+Title: My first task
+State: inbox
+Created: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-Designed to be used by humans and AI agents alike. An agent can determine task state, priority, and dependencies by reading ≤1 file, ≤4KB.
+Description of what needs to be done.
+EOF
+
+# Read state (O(1))
+grep "^State:" my-task.bop
+
+# Create a bundle (directory mode)
+cp -c templates/implement.bop pending/my-task.bop   # macOS APFS clone
+bop resume pending/my-task.bop                      # launch Zellij session
+```
 
 ---
 
@@ -23,30 +43,7 @@ Designed to be used by humans and AI agents alike. An agent can determine task s
 |---|---|
 | [SPEC.md](SPEC.md) | Full format specification (v0.1.0-draft) |
 | [bop-design-rationale.md](bop-design-rationale.md) | Historical analysis, portability discussion, and design decisions |
-
----
-
-## Quick Example
-
-```
-Task-Id: 7b2a91f3-task-0042
-Title: Migrate auth service to mTLS
-State: doing
-Created: 2026-03-01T14:22:00Z
-Priority: 5
-Assignee: ryan
-Tags: infra, security, q2
-
-## Description
-
-Migrate the auth service from plaintext gRPC to mTLS.
-
-## Acceptance Criteria
-
-- [ ] Certs provisioned via cert-manager
-- [ ] Load test at 2x peak traffic
-- [x] Runbook updated
-```
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
 
 ---
 
@@ -59,6 +56,7 @@ Migrate the auth service from plaintext gRPC to mTLS.
 - **OpenLineage + OTel** — built-in observability: lineage, baggage propagation, agent traces
 - **Secrets-safe** — bundles reference secrets, never store them
 - **VCS-native** — jj or git tracks the entire bundle, including work products
+- **APFS-native** — zero-disk-cost template cloning on macOS
 
 ---
 
@@ -72,6 +70,6 @@ Also: `blocked`, `cancelled`
 
 ## Status
 
-This is a **0.1.0-draft** spec. See [SPEC.md § 10](SPEC.md#10-open-questions) for open questions and [bop-design-rationale.md](bop-design-rationale.md) for design decisions.
+This is a **0.1.0-draft** spec. See [SPEC.md § 11](SPEC.md#11-open-questions) for open questions and [bop-design-rationale.md](bop-design-rationale.md) for design decisions.
 
 YES! bop was heavily inspired by Steve Yegge's [Beads](https://github.com/steveyegge/beads) ❤️
