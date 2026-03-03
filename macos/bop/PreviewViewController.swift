@@ -485,14 +485,34 @@ fileprivate struct JobCardPreview: View {
 
     private var logsAction: String { isDoneLike ? "logs" : "tail" }
 
+    private func encodeBopPathSegment(_ raw: String) -> String {
+        let unreserved = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~".utf8)
+        var out = ""
+        out.reserveCapacity(raw.utf8.count)
+        for byte in raw.utf8 {
+            if unreserved.contains(byte) {
+                out.append(Character(UnicodeScalar(byte)))
+            } else {
+                out += String(format: "%%%02X", byte)
+            }
+        }
+        return out
+    }
+
+    private func bopCardURL(id: String, action: String) -> URL? {
+        let eid = encodeBopPathSegment(id)
+        let ea = encodeBopPathSegment(action)
+        return URL(string: "bop://card/\(eid)/\(ea)")
+    }
+
     private var logsURL: URL? {
         guard let id = meta?.id else { return nil }
-        return URL(string: "bop://card/\(id)/\(logsAction)")
+        return bopCardURL(id: id, action: logsAction)
     }
 
     private var stopURL: URL? {
         guard isRunning, let id = meta?.id else { return nil }
-        return URL(string: "bop://card/\(id)/stop")
+        return bopCardURL(id: id, action: "stop")
     }
 
     private var logsButtonText: String { isDoneLike ? "Logs" : "Tail" }
@@ -778,7 +798,7 @@ fileprivate struct JobCardPreview: View {
                     .help(logsHelpText)
                 }
                 if isRunning, let session = m.zellijSession,
-                   let url = URL(string: "bop://card/\(m.id)/session") {
+                   let url = bopCardURL(id: m.id, action: "session") {
                     Link(destination: url) {
                         HStack(spacing: 6) {
                             Image(systemName: "terminal")
