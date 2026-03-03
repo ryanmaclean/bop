@@ -73,3 +73,5 @@ Also: `blocked`, `cancelled`
 ## Status
 
 This is a **0.1.0-draft** spec. See [SPEC.md § 10](SPEC.md#10-open-questions) for open questions and [bop-design-rationale.md](bop-design-rationale.md) for design decisions.
+
+YES! bop was heavily inspired by Steve Yegge's [Beads](https://github.com/steveyegge/beads) ❤️
