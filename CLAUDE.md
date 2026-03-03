@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Skills
 
 Four skills provide orientation for this repo — invoke before working:
-- `jobcard-system` — what `bop` is (legacy alias: `jc`), card lifecycle, GTFS disambiguation
+- `jobcard-system` — what `bop` is, card lifecycle, state machine
 - `vibekanban` — Quick Look cards, Zellij plugin, glyph system, SwiftUI card anatomy
 - `unicode-glyphs` — playing card encoding, BMP/SMP safety, font recommendations
 - `bop-team` — dogfood rule: every unit of work on bop = a bop card
@@ -17,7 +17,7 @@ Four skills provide orientation for this repo — invoke before working:
 
 ## Commands
 
-```bash
+```zsh
 cargo build                  # Build all crates
 cargo test                   # Run all tests
 cargo test -p jobcard-core   # Run tests for a single crate
@@ -43,8 +43,10 @@ jj log -r '::@'
 
 This is a **Rust Cargo workspace** with two active crates:
 
-- **`crates/jobcard-core`** — shared library: `Meta` struct (job card state), `read_meta`/`write_meta`, `render_prompt` (template substitution with `{{spec}}`, `{{plan}}`, etc.), and the `realtime` module (feed validation types + tests).
+- **`crates/jobcard-core`** — shared library: `Meta` struct (card state), `read_meta`/`write_meta`, `render_prompt` (template substitution with `{{spec}}`, `{{plan}}`, etc.), and the `realtime` module (feed validation types + tests).
 - **`crates/jc`** — CLI binary (`bop` command). Crate directory remains `crates/jc/` for compatibility. Dispatcher and merge-gate support `--vcs-engine git_gt|jj`; prefer `jj` for active multi-agent sessions.
+
+> **Note:** Crate directories are still named `jobcard-core` and `jc` on disk — rename to `bop-core` and `bop-cli` is in progress.
 
 ### Multi-Agent VCS Rule (JJ First)
 
@@ -58,7 +60,7 @@ When multiple agents are active, use JJ as the collaboration layer and treat Git
 4. Publish to Git only from green JJ changes (`jj git push --all`).
 5. If a change is partially renamed or mid-refactor, do not land it; queue it behind a decision card.
 
-### Job Card State Machine
+### Card State Machine
 
 The filesystem is the state machine. `.cards/` subdirectories represent states; state transitions are atomic `fs::rename` calls:
 
@@ -68,13 +70,13 @@ pending/ → running/ → done/ → merged/
                  failed/
 ```
 
-Each job is a `<id>.jobcard/` directory bundle containing `meta.json`, `spec.md`, `prompt.md`, `logs/`, `output/`, and optionally `worktree/`.
+Each card is a `<id>.card/` directory bundle containing `meta.json`, `spec.md`, `prompt.md`, `logs/`, `output/`, and optionally `worktree/`.
 
 ### Key Data Flows
 
 1. **`bop new <template> <id>`** — COW-clones a template from `.cards/templates/` into `.cards/pending/` using APFS `cp -c` (macOS) or `--reflink=auto` (Linux), then writes `meta.json`.
 
-2. **Dispatcher loop** — polls `pending/`, moves cards to `running/`, selects a provider from `.cards/providers.json` (respecting cooldowns), spawns the adapter shell script, writes PID to `logs/pid` and as xattr `com.yourorg.agent-pid`, then moves the card to `done/` (exit 0), back to `pending/` (exit 75 = rate-limited), or `failed/`.
+2. **Dispatcher loop** — polls `pending/`, moves cards to `running/`, selects a provider from `.cards/providers.json` (respecting cooldowns), spawns the adapter zsh script, writes PID to `logs/pid` and as xattr `com.yourorg.agent-pid`, then moves the card to `done/` (exit 0), back to `pending/` (exit 75 = rate-limited), or `failed/`.
 
 3. **Provider failover** — each `Meta` has a `provider_chain: Vec<String>`. On rate-limit (exit 75), the chain rotates (front→back) and a 300s cooldown is set on that provider in `providers.json`. For QA stage, the dispatcher avoids reusing the same provider that ran `implement`.
 
@@ -84,11 +86,11 @@ Each job is a `<id>.jobcard/` directory bundle containing `meta.json`, `spec.md`
 
 ### Adapters
 
-Shell scripts in `adapters/` with the calling convention:
+**Nushell scripts** in `adapters/` with the calling convention:
 ```
-adapter.sh <workdir> <prompt_file> <stdout_log> <stderr_log> [timeout]
+adapter.nu <workdir> <prompt_file> <stdout_log> <stderr_log> [timeout]
 ```
-Exit code 75 signals rate-limiting (EX_TEMPFAIL). `mock.sh` is the default for testing.
+Exit code 75 signals rate-limiting (EX_TEMPFAIL). `mock.nu` is the default for testing.
 
 ### `realtime` Module
 

@@ -1,11 +1,27 @@
 # Rust build artifacts
 /target/
 
-# Card runtime state (logs, worktrees — ephemeral)
-.cards/*/running/
-.cards/*/done/
-.cards/*/failed/
-.cards/*/merged/
+# Card runtime state — all mutable card directories
+.cards/pending/
+.cards/running/
+.cards/done/
+.cards/failed/
+.cards/merged/
+.cards/drafts/
+.cards/.locks/
+.cards/logs/
+# Team-scoped card state
+.cards/team-*/
+# Recovery backups
+.cards/recovery/
+# Provider state (cooldowns, runtime)
+.cards/providers.json
+# Generated files in .cards/
+.cards/bop-gantt.html
+.cards/bop-agents.ics
+.cards/agents.md
+*.webloc
+*.ics
 
 # macOS
 .DS_Store
@@ -17,13 +33,22 @@
 # Local agent worktrees / scratch
 .claude/
 .worktrees/
-.workspaces/
 
 # Exploration / research scratch (not part of the build)
 emoji_personas.md
+plan.md
+build.log
+
+# Agent workspaces (jj/git worktrees)
+.workspaces/
+.auto-claude/
 
 # Finder custom icons (contain \r in filename)
 Icon?
 
 # Backup files
 *.bak
+*.bak.tmp
+
+# Stale card scratch
+🂠-*.md

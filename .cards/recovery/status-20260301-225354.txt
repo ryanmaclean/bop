@@ -1,8 +1,0 @@
-## main
- M crates/jc/src/main.rs
- M scripts/ingest_roadmap_hotfolder.zsh
- M scripts/policy_check.zsh
- M scripts/route_canary.zsh
-?? ".cards/pending/\360\237\202\241-bop.jobcard/"
-?? ".cards/pending/\360\237\202\242-about-bop.jobcard/"
-?? .cards/recovery/

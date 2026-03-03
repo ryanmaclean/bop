@@ -1,6 +1,6 @@
 # bop Format and Storage Contract
 
-This document defines the on-disk contract for `.jobcard` bundles and the storage behavior expected by `bop`.
+This document defines the on-disk contract for `.card` bundles and the storage behavior expected by `bop`.
 
 ## Design Principles
 
@@ -16,7 +16,7 @@ This document defines the on-disk contract for `.jobcard` bundles and the storag
 A card is a directory bundle:
 
 ```text
-<id>.jobcard/
+<id>.card/
   meta.json
   spec.md
   prompt.md

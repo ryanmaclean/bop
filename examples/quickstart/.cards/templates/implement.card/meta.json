@@ -1,0 +1,14 @@
+{
+  "id": "{{id}}",
+  "glyph": "🂡",
+  "token": "♠",
+  "stage": "implement",
+  "status": "pending",
+  "provider_chain": ["claude", "codex"],
+  "acceptance_criteria": [
+    "cargo test",
+    "cargo clippy -- -D warnings"
+  ],
+  "max_retries": 2,
+  "created_at": "{{now}}"
+}

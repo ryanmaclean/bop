@@ -1,23 +1,38 @@
 # bop — Heterogeneous Agent Orchestrator
 
-A pluggable job system for parallel AI coding agents. The filesystem IS the state machine: directory bundles (`.jobcard`) are navigable in Finder with Quick Look previews. No database. `mv` = state transition.
-
-**New agents:** read `plan.md` first, then `CLAUDE.md`.
+A pluggable job system for parallel AI coding agents. The filesystem IS the state machine: directory bundles (`.card`) are navigable in Finder with Quick Look previews. No database. `mv` = state transition.
 
 Reliability guards:
 - single-dispatcher lock: `.cards/.locks/dispatcher.lock`
-- per-run lease heartbeat: `<card>.jobcard/logs/lease.json`
+- per-run lease heartbeat: `<card>/logs/lease.json`
+
+## Install
+
+**macOS (pre-built):**
+Download the latest [release](https://github.com/ryanmaclean/bop/releases) — DMG or PKG installer.
+
+The DMG includes:
+- `bop` CLI binary (ARM64)
+- `BopDeck.app` with embedded Quick Look extension
+- `zellij` terminal multiplexer (MIT, pre-built)
+- Zellij layouts and WASM status plugin
+- Sample cards
+
+**From source:**
+```zsh
+cargo build --release
+cp target/release/bop /usr/local/bin/
+```
 
 ## Quick Start
 
-```bash
-cargo build
-./target/debug/bop doctor        # verify tooling
-./target/debug/bop init           # create .cards/ structure
-./target/debug/bop new implement my-feature
-./target/debug/bop status
-./target/debug/bop dispatcher --once   # process one pending card
-./target/debug/bop merge-gate --once   # merge one done card
+```zsh
+bop doctor                       # verify tooling
+bop init                         # create .cards/ structure
+bop new implement my-feature     # create a card from template
+bop status                       # board view across all states
+bop dispatcher --once            # process one pending card
+bop merge-gate --once            # merge one done card
 ```
 
 ## Architecture
@@ -26,20 +41,20 @@ cargo build
 Finder / Quick Look / Spotlight       ← FREE (macOS native)
         │ reads bundle state
         ▼
-dispatcher (~Rust binary)             ← bop dispatcher
+dispatcher (Rust binary)              ← bop dispatcher
         │ fork per job
         ▼
-adapters/ (~20 LOC shell each)        ← claude, codex, goose, aider, ollama, mock
+adapters/ (~20 LOC nushell each)      ← claude, codex, goose, aider, ollama, mock
         │ works inside
         ▼
-.cards/<state>/<id>.jobcard/          ← APFS COW clones
+.cards/<state>/<id>.card/             ← APFS COW clones
 ```
 
 **State machine:** `pending/ → running/ → done/ → merged/` (or `failed/`)
 
 Storage contract: see `docs/format-storage-contract.md`.
 
-## Filesystem Safety Rules
+## Filesystem Safety
 
 - State transitions are atomic `rename` operations.
 - Dispatcher acquires a lock directory; stale lock owners are reclaimed by PID liveness check.
@@ -48,10 +63,11 @@ Storage contract: see `docs/format-storage-contract.md`.
 
 ## CLI Commands
 
-```bash
+```zsh
 bop new <template> <id>       # Clone template → pending/
 bop status                    # Board view across all states
 bop inspect <id>              # Show meta/spec/log summary
+bop gantt                     # ANSI Gantt timeline of card runs
 bop dispatcher [--once]       # Run dispatcher (--once for single pass)
 bop merge-gate [--once]       # Run merge gate
 bop retry <id>                # Move card back to pending/
@@ -67,7 +83,7 @@ bop doctor                    # Verify local tooling
 ```
 
 macOS maintenance:
-```bash
+```zsh
 scripts/macos_cards_maintenance.zsh            # refresh terminal-state card thumbnails
 scripts/macos_cards_maintenance.zsh --compress # + HFS/APFS compression
 ```
@@ -75,7 +91,7 @@ scripts/macos_cards_maintenance.zsh --compress # + HFS/APFS compression
 ## Card Structure
 
 ```
-my-feature.jobcard/
+my-feature.card/
 ├── meta.json          ← machine-readable state (glyph, stage, provider_chain)
 ├── spec.md            ← what to build
 ├── prompt.md          ← agent prompt with {{variables}}
@@ -100,10 +116,10 @@ Joker (🃏) = emergency/breakdown needed. ASCII fallback: `S-A`, `H-K`, `D-7`, 
 
 ## Adapters
 
-Shell scripts in `adapters/` — one per AI provider:
+Nushell scripts in `adapters/` — one per AI provider:
 
 ```
-adapter.sh <workdir> <prompt_file> <stdout_log> <stderr_log>
+adapter.nu <workdir> <prompt_file> <stdout_log> <stderr_log> [timeout]
 ```
 
 Exit 75 = rate-limited (triggers provider rotation). Available: `claude`, `codex`, `goose`, `aider`, `opencode`, `ollama-local`, `mock`.
@@ -111,9 +127,26 @@ Exit 75 = rate-limited (triggers provider rotation). Available: `claude`, `codex
 Template cloning on macOS prefers `ditto --clone` (APFS COW), with `cp -c` fallback.
 Terminal-state card compression uses `ditto --hfsCompression` (macOS only).
 
+## BopDeck.app
+
+The macOS companion app provides:
+- **Quick Look** — preview `.card` bundles in Finder (thumbnail + full preview)
+- **Notch overlay** — live card status in the menu bar area
+- **`bop://` URL scheme** — deep link to cards
+
+The Quick Look extension (`BopDeckQL.appex`) is embedded in `BopDeck.app` and declares the `sh.bop.card` UTI.
+
+## Zellij Integration
+
+bop ships a Zellij layout (`layouts/bop.kdl`) and a WASM status bar plugin showing live card counts per state. Launch with:
+
+```zsh
+zellij --layout layouts/bop.kdl
+```
+
 ## Build & Test
 
-```bash
+```zsh
 cargo build                  # Build all crates
 cargo test                   # Run all tests
 cargo clippy -- -D warnings  # Lint
@@ -123,4 +156,4 @@ make check                   # All three at once
 
 ## License
 
-MIT
+[MIT](LICENSE)
