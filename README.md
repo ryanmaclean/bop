@@ -8,9 +8,9 @@ A `.bop` file is a macOS directory bundle (opaque in Finder, navigable via "Show
 
 - **`task.md`** — RFC 822 headers + Markdown body. The task definition.
 - **`.bop/`** — Control plane: state, lock, transition log, lineage, OTel baggage.
-- **`work/`** — The actual work products (source code, configs, scripts, docs).
+- **`work/`** — The actual work(space/tree) products from `git`/`jj` respectively (source code, configs, scripts, docs).
 - **`session/`** — Zellij terminal session bundled with the task. Resume anywhere.
-- **`evidence/`** — Proof the work is correct (screenshots, test results, approvals).
+- **`evidence/`** — Proof the work is correct ([termframe](https://github.com/pamburus/termframe) screenshots, compressed test results, approvals).
 - **`output/`** — Final deliverables handed to the next stage or merge gate.
 - **`traces/`** — OTel-compatible agent telemetry.
 
