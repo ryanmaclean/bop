@@ -114,23 +114,23 @@ migrate-auth-mtls.boptask/
     src/
     scripts/
     docs/
-  session/                    # Working environment (Zellij writes here)
+  session/                   # Working environment (Zellij writes here)
     zellij/                  # ZELLIJ_DATA_DIR points here
       config.kdl             # Per-task Zellij config
       layout.kdl             # Pane arrangement, startup commands
       session.name           # Session name for attach
       sessions/              # Zellij native session data
     shell/
-      history.sh             # Curated command history (runbook)
-      env.sh                 # Environment variables (references, not secrets)
+      history.nu             # Curated command history (runbook, nushell)
+      env.nu                 # Environment variables (references, not secrets, nushell)
     editor/
       workspace.code-workspace
-  evidence/                   # Proof the work is correct
+  evidence/                  # Proof the work is correct
     screenshots/
     test-results/
-    approvals/               # Can contain nested .bop files
+    approvals/                # Can contain nested .bop files
   traces/                     # OTel-compatible agent telemetry (JSONL)
-  .jj/                        # Version control (jj preferred, .git/ accepted)
+  .jj/                        # Version control worktspaces/workstrees (jj preferred, .git/ accepted)
 ```
 
 ### 3.1 `work/` — not `attachments/`
