@@ -7,11 +7,11 @@ A self-contained unit of work: task definition, work products, terminal session,
 A `.bop` file is a macOS directory [bundle](https://developer.apple.com/documentation/foundation/bundle) (opaque in Finder, navigable via "Show Package Contents") that holds everything needed to define, execute, resume, and audit a task:
 
 - **`task.md`** — [RFC 822](https://datatracker.ietf.org/doc/html/rfc822) headers + Markdown body. The task definition.
-- **`.bop/`** — Control plane: state, lock, transition log, lineage, OTel baggage.
+- **`.bop/`** — Control plane: state, lock, transition log, [OpenLineage](https://openlineage.io/) data, [OTel baggage](https://opentelemetry.io/docs/concepts/signals/baggage/).
 - **`work/`** — The actual work(space/tree) products from `git`/`jj` respectively (source code, configs, scripts, docs).
 - **`session/`** — [Zellij](https://github.com/zellij-org/zellij) terminal session bundled with the task. Resume anywhere.
 - **`evidence/`** — Proof the work is correct ([termframe](https://github.com/pamburus/termframe) screenshots, compressed test results, approvals).
-- **`output/`** — Final deliverables handed to the next stage or merge gate.
+- **`output/`** — [ICS VEVENTs](https://icalendar.org/iCalendar-RFC-5545/3-6-1-event-component.html), final deliverables handed to the next stage or merge gate.
 - **`traces/`** — OTel-compatible agent telemetry.
 
 ## Quick start
