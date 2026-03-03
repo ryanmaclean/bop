@@ -48,6 +48,7 @@ pub fn sync_icons_in_root(
                 let path = entry.path();
                 if path.extension().and_then(|e| e.to_str()) == Some("jobcard") && path.is_dir() {
                     set_card_icon(&path);
+                    quicklook::sync_card_action_links(&path);
                     if matches!(
                         quicklook::card_state_from_path(&path).as_deref(),
                         Some("done" | "failed" | "merged")
@@ -136,9 +137,10 @@ pub fn cmd_icons_watch(root: &Path) -> anyhow::Result<()> {
         for path in &event.paths {
             if path.extension().and_then(|e| e.to_str()) == Some("jobcard") && path.is_dir() {
                 set_card_icon(path);
+                quicklook::sync_card_action_links(path);
                 quicklook::compress_card(path);
                 println!(
-                    "  icon/compression updated: {}",
+                    "  icon/links/compression updated: {}",
                     path.file_name().unwrap_or_default().to_string_lossy()
                 );
             }
@@ -285,6 +287,9 @@ mod tests {
         assert_eq!(n_cards, 2);
         // done card is terminal
         assert_eq!(n_terminal, 1);
+        // link artifacts are refreshed during icons sync
+        assert!(card.join("links.md").exists());
+        assert!(done_card.join("Logs.webloc").exists());
     }
 
     #[test]
