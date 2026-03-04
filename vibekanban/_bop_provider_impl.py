@@ -1,17 +1,9 @@
-#!/usr/bin/env zsh
-# JobCard provider for vibekanban-cli.
-# Outputs all job cards as a JSON array to stdout.
-# Usage: CARDS_DIR=.cards ./vibekanban/bop-provider.zsh
-setopt NULL_GLOB
-set -euo pipefail
-
-CARDS_DIR="${CARDS_DIR:-.cards}"
-
-[[ -d "$CARDS_DIR" ]] || { print -u2 "ERROR: CARDS_DIR '$CARDS_DIR' does not exist"; exit 1; }
-
-# Build JSON array using python3 (available on macOS, MIT license)
-python3 - "$CARDS_DIR" <<'PYEOF'
-import json, os, sys, pathlib
+#!/usr/bin/env python3
+"""JobCard provider implementation. Called by bop-provider.nu."""
+import json
+import os
+import sys
+import pathlib
 
 cards_dir = pathlib.Path(sys.argv[1])
 tasks = []
@@ -79,4 +71,3 @@ for entry in sorted(cards_dir.iterdir()):
                 })
 
 print(json.dumps(tasks, indent=2))
-PYEOF

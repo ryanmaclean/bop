@@ -83,9 +83,9 @@ bop doctor                    # Verify local tooling
 ```
 
 macOS maintenance:
-```zsh
-scripts/macos_cards_maintenance.zsh            # refresh terminal-state card thumbnails
-scripts/macos_cards_maintenance.zsh --compress # + HFS/APFS compression
+```nu
+nu scripts/macos_cards_maintenance.nu            # refresh terminal-state card thumbnails
+nu scripts/macos_cards_maintenance.nu --compress # + HFS/APFS compression
 ```
 
 ## Card Structure

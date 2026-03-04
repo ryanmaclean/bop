@@ -19,5 +19,8 @@ jobs:
       - name: Build and quality gates
         run: make check
 
+      - name: Install Nushell
+        run: brew install nushell
+
       - name: Policy check (staged scope)
-        run: scripts/policy_check.zsh --staged --cards-dir .cards
+        run: nu scripts/policy_check.nu --staged --cards-dir .cards

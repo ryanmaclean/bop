@@ -1,27 +1,5 @@
-#!/usr/bin/env zsh
-set -euo pipefail
-
-ROOT=${0:A:h:h}WINDOW_MINUTES=1440
-OUTPUT="table"
-
-while (( $# > 0 )); do
-  case "$1" in
-    --window-minutes)
-      WINDOW_MINUTES="$2"
-      shift 2
-      ;;
-    --output)
-      OUTPUT="$2"
-      shift 2
-      ;;
-    *)
-      echo "Unknown arg: $1" >&2
-      exit 2
-      ;;
-  esac
-done
-
-python3 - <<'PY' "$ROOT" "$WINDOW_MINUTES" "$OUTPUT"
+#!/usr/bin/env python3
+"""Lane throughput metrics implementation. Called by lane_metrics.nu."""
 import json
 import pathlib
 import statistics
@@ -39,6 +17,7 @@ lanes = {
     "green": root / ".cards-green",
 }
 
+
 def parse_created(raw: str):
     if not raw:
         return None
@@ -47,6 +26,7 @@ def parse_created(raw: str):
         return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
     except Exception:
         return None
+
 
 results = {}
 for lane, lane_root in lanes.items():
@@ -141,4 +121,3 @@ for lane in ("blue", "green"):
         str(r["orphan_recovery_events"]),
     )
     print("\t".join(row))
-PY

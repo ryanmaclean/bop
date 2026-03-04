@@ -11,7 +11,7 @@
     <string>/usr/local/bin/bop</string>
     <string>dispatcher</string>
     <string>--adapter</string>
-    <string>adapters/mock.zsh</string>
+    <string>adapters/mock.nu</string>
     <string>--max-workers</string>
     <string>3</string>
     <string>--poll-ms</string>

@@ -1,76 +1,72 @@
-#!/usr/bin/env zsh
-set -euo pipefail
+#!/usr/bin/env nu
+# Policy check script — validates staged changes or card-scoped diffs
+# against configurable rules (file caps, scope, decision records, etc.).
+#
+# The heavy lifting is done by an embedded Python3 script; this Nushell
+# wrapper sets up environment variables and interprets the JSON result.
 
-MODE="staged"
-CARDS_DIR=".cards"
-CARD_DIR=""
-CARD_ID=""
-REPO_ROOT=""
-JSON_OUT=0
+def main [
+  --mode: string = "staged"      # staged | card
+  --cards-dir: string = ".cards" # Cards root directory
+  --card-dir: string = ""        # Required for --mode card
+  --id: string = ""              # Optional card id hint
+  --repo-root: string = ""       # Override git root
+  --staged                       # Shortcut for --mode staged
+  --json                         # Print JSON result
+  --help (-h)                    # Show usage
+] {
+  if $help {
+    print "Usage:"
+    print "  scripts/policy_check.nu --staged [--cards-dir .cards]"
+    print "  scripts/policy_check.nu --mode card --card-dir <path> [--cards-dir .cards]"
+    print ""
+    print "Options:"
+    print "  --mode staged|card"
+    print "  --staged                  Shortcut for --mode staged"
+    print "  --card-dir <path>         Required for --mode card"
+    print "  --id <id>                 Optional card id hint"
+    print "  --cards-dir <path>        Cards root (default .cards)"
+    print "  --repo-root <path>        Override git root"
+    print "  --json                    Print JSON result"
+    exit 0
+  }
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --mode)
-      MODE="$2"; shift 2 ;;
-    --cards-dir)
-      CARDS_DIR="$2"; shift 2 ;;
-    --card-dir)
-      CARD_DIR="$2"; shift 2 ;;
-    --id)
-      CARD_ID="$2"; shift 2 ;;
-    --repo-root)
-      REPO_ROOT="$2"; shift 2 ;;
-    --staged)
-      MODE="staged"; shift ;;
-    --json)
-      JSON_OUT=1; shift ;;
-    --help|-h)
-      cat <<USAGE
-Usage:
-  scripts/policy_check.zsh --staged [--cards-dir .cards]
-  scripts/policy_check.zsh --mode card --card-dir <path> [--cards-dir .cards]
+  # Resolve effective mode — --staged flag overrides --mode
+  mut effective_mode = $mode
+  if $staged {
+    $effective_mode = "staged"
+  }
 
-Options:
-  --mode staged|card
-  --staged                  Shortcut for --mode staged
-  --card-dir <path>         Required for --mode card
-  --id <id>                 Optional card id hint
-  --cards-dir <path>        Cards root (default .cards)
-  --repo-root <path>        Override git root
-  --json                    Print JSON result
-USAGE
-      exit 0 ;;
-    *)
-      echo "Unknown arg: $1" >&2
-      exit 2 ;;
-  esac
-done
+  if $effective_mode != "staged" and $effective_mode != "card" {
+    print -e $"Invalid --mode: ($effective_mode)"
+    exit 2
+  }
 
-if [[ "$MODE" != "staged" && "$MODE" != "card" ]]; then
-  echo "Invalid --mode: $MODE" >&2
-  exit 2
-fi
+  if $effective_mode == "card" and $card_dir == "" {
+    print -e "--card-dir is required for --mode card"
+    exit 2
+  }
 
-if [[ "$MODE" == "card" && -z "$CARD_DIR" ]]; then
-  echo "--card-dir is required for --mode card" >&2
-  exit 2
-fi
+  # Resolve repo root
+  mut resolved_root = $repo_root
+  if $resolved_root == "" {
+    let git_result = do { ^git rev-parse --show-toplevel } | complete
+    if $git_result.exit_code == 0 {
+      $resolved_root = ($git_result.stdout | str trim)
+    } else {
+      $resolved_root = (pwd)
+    }
+  }
 
-if [[ -z "$REPO_ROOT" ]]; then
-  if git rev-parse --show-toplevel >/dev/null 2>&1; then
-    REPO_ROOT="$(git rev-parse --show-toplevel)"
-  else
-    REPO_ROOT="$(pwd)"
-  fi
-fi
+  # Export environment for the Python script
+  $env.POLICY_MODE = $effective_mode
+  $env.POLICY_CARDS_DIR = $cards_dir
+  $env.POLICY_CARD_DIR = $card_dir
+  $env.POLICY_CARD_ID = $id
+  $env.POLICY_REPO_ROOT = $resolved_root
 
-export POLICY_MODE="$MODE"
-export POLICY_CARDS_DIR="$CARDS_DIR"
-export POLICY_CARD_DIR="$CARD_DIR"
-export POLICY_CARD_ID="$CARD_ID"
-export POLICY_REPO_ROOT="$REPO_ROOT"
-
-RESULT_JSON="$(python3 - <<'PY'
+  # Embedded Python policy engine — kept as-is from the ZSH version
+  let python_script = r#'
 import json
 import os
 import pathlib
@@ -249,9 +245,9 @@ if changed_loc > max_loc:
 
 # Rule 4b: card-copy/card-compression paths must keep APFS/reflink semantics.
 copy_guard_files = {
-    "scripts/route_canary.zsh",
-    "scripts/ingest_roadmap_hotfolder.zsh",
-    "scripts/macos_cards_maintenance.zsh",
+    "scripts/route_canary.nu",
+    "scripts/ingest_roadmap_hotfolder.nu",
+    "scripts/macos_cards_maintenance.nu",
 }
 for p in sorted(set(changed_paths)):
     if normalize_rel(p) not in copy_guard_files:
@@ -373,32 +369,28 @@ print(json.dumps({
         "card_id": card_id,
     },
 }, ensure_ascii=False))
-PY
-)"
+'#
 
-if [[ "$JSON_OUT" -eq 1 ]]; then
-  echo "$RESULT_JSON"
-fi
+  let result = (^python3 -c $python_script | str trim)
 
-OK="$(python3 - <<'PY' "$RESULT_JSON"
-import json, sys
-print("1" if json.loads(sys.argv[1]).get("ok") else "0")
-PY
-)"
+  if $json {
+    print $result
+  }
 
-if [[ "$OK" == "1" ]]; then
-  echo "POLICY PASS"
-  exit 0
-fi
+  let ok = ($result | from json | get ok)
 
-echo "POLICY FAIL"
-python3 - <<'PY' "$RESULT_JSON"
-import json
-import sys
-obj = json.loads(sys.argv[1])
-for r in obj.get("reasons", []):
-    print(f"- {r}")
-m = obj.get("metrics", {})
-print(f"changed_files={m.get('changed_files', 0)} changed_loc={m.get('changed_loc', 0)}")
-PY
-exit 1
+  if $ok {
+    print "POLICY PASS"
+    exit 0
+  }
+
+  print "POLICY FAIL"
+  let parsed = ($result | from json)
+  let reasons = ($parsed | get reasons)
+  for r in $reasons {
+    print $"- ($r)"
+  }
+  let metrics = ($parsed | get metrics)
+  print $"changed_files=($metrics | get changed_files) changed_loc=($metrics | get changed_loc)"
+  exit 1
+}

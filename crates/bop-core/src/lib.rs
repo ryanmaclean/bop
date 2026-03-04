@@ -239,7 +239,7 @@ pub struct Meta {
     pub estimates: BTreeMap<String, String>,
 
     /// Zellij session name for live attach (e.g. "bop-feat-auth").
-    /// Set by bop_bop.zsh before dispatch; cleared on merge.
+    /// Set by bop_bop.nu before dispatch; cleared on merge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zellij_session: Option<String>,
 

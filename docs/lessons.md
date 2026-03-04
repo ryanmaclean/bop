@@ -17,7 +17,7 @@ Without all three, agents drift. Skills without CLAUDE.md = right method, wrong 
 Not databases. Not APIs. Not shared in-process state. `mv` is atomic. `.cards/STATE/ID.jobcard/` is the state machine. Agents that write JSON to a file and move it are reliable. Agents that call an API are not.
 
 ## Scope creep is inevitable — make it cheap to undo
-Every session adds REST APIs, dashboards, memory systems. This is not failure; it's physics. The answer is: `policy_check.zsh --staged` at commit time + periodic trim cycles. TRIZ #2: extract the essential, delete the rest. Don't fight entropy, plan for it.
+Every session adds REST APIs, dashboards, memory systems. This is not failure; it's physics. The answer is: `policy_check.nu --staged` at commit time + periodic trim cycles. TRIZ #2: extract the essential, delete the rest. Don't fight entropy, plan for it.
 
 ## The card is the atom
 Not a ticket. Not a PR. Not a commit. The `.jobcard` bundle is the atomic unit of work. Everything else (branches, PRs, completions) is derived from it. This is the HyperCard insight applied to software factories.

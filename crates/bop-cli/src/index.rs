@@ -37,7 +37,7 @@ pub fn cmd_index(cards_root: &Path, print_flag: bool) -> anyhow::Result<()> {
         ),
         (
             "scripts/",
-            "Helper scripts: policy_check.zsh and other tooling",
+            "Helper scripts: policy_check.nu and other tooling",
         ),
         ("layouts/", "Zellij terminal layout files (bop.kdl)"),
         (
@@ -114,7 +114,7 @@ pub fn cmd_index(cards_root: &Path, print_flag: bool) -> anyhow::Result<()> {
             "Testing adapter: writes stub output immediately",
         ),
         (
-            "scripts/policy_check.zsh",
+            "scripts/policy_check.nu",
             "Policy gate: checks staged files against rules",
         ),
     ];

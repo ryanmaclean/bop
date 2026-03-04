@@ -40,10 +40,10 @@ tail -f /tmp/bop-merge-gate.err   # merge-gate stderr
 
 Use a filesystem drop folder to enqueue roadmap cards without typing `bop new`:
 
-```zsh
-scripts/install_roadmap_hotfolder_launchd.zsh \
-  --inbox "$(pwd)/examples/roadmap-inbox/drop" \
-  --cards-dir "$(pwd)/.cards"
+```nu
+nu scripts/install_roadmap_hotfolder_launchd.nu \
+  --inbox (pwd | path join examples/roadmap-inbox/drop) \
+  --cards-dir (pwd | path join .cards)
 ```
 
 Then drop any `.roadmap` / `.md` / `.txt` / `.json` request file into
@@ -52,8 +52,8 @@ Then drop any `.roadmap` / `.md` / `.txt` / `.json` request file into
 
 Remove it with:
 
-```zsh
-scripts/install_roadmap_hotfolder_launchd.zsh --uninstall
+```nu
+nu scripts/install_roadmap_hotfolder_launchd.nu --uninstall
 ```
 
 ## Legacy Plists

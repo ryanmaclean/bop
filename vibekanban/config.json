@@ -1,7 +1,7 @@
 {
   "provider": "custom",
   "custom_provider": {
-    "command": "./vibekanban/bop-provider.zsh",
+    "command": "nu ./vibekanban/bop-provider.nu",
     "poll_interval_ms": 2000,
     "cards_dir": ".cards"
   },

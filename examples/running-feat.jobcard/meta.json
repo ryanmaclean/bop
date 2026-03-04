@@ -14,7 +14,7 @@
   "stages": {
     "implement": {
       "status": "running",
-      "agent": "adapters/claude.zsh",
+      "agent": "adapters/claude.nu",
       "provider": "claude",
       "started": "2026-03-01T01:00:00Z"
     }

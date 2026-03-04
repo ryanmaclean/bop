@@ -120,7 +120,7 @@ def make_meta(card_id, feature_id, provider_name):
     }
 
 def make_providers_json(adapter_name):
-    adapter_path = str(ADAPTERS / f"{adapter_name}.zsh")
+    adapter_path = str(ADAPTERS / f"{adapter_name}.nu")
     return {
         "providers": {
             adapter_name: {
@@ -128,7 +128,7 @@ def make_providers_json(adapter_name):
                 "rate_limit_exit": 75,
             },
             "mock": {
-                "command": str(ADAPTERS / "mock.zsh"),
+                "command": str(ADAPTERS / "mock.nu"),
                 "rate_limit_exit": 75,
             },
         }

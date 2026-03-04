@@ -10,11 +10,11 @@ pub fn run_policy_script(cwd: &Path, args: &[&str]) -> anyhow::Result<std::proce
     // Prefer a script relative to the actual git root so the binary works
     // regardless of where it was compiled (avoids stale CARGO_MANIFEST_DIR).
     let git_root_candidate = find_git_root(cwd)
-        .map(|r| r.join("scripts").join("policy_check.zsh"))
-        .unwrap_or_else(|| cwd.join("scripts").join("policy_check.zsh"));
+        .map(|r| r.join("scripts").join("policy_check.nu"))
+        .unwrap_or_else(|| cwd.join("scripts").join("policy_check.nu"));
     let script_candidates = [
         git_root_candidate,
-        cwd.join("scripts").join("policy_check.zsh"),
+        cwd.join("scripts").join("policy_check.nu"),
     ];
     let script = script_candidates
         .iter()
@@ -27,12 +27,12 @@ pub fn run_policy_script(cwd: &Path, args: &[&str]) -> anyhow::Result<std::proce
                 script_candidates[1].display()
             )
         })?;
-    let output = StdCommand::new("zsh")
+    let output = StdCommand::new("nu")
         .arg(script)
         .args(args)
         .current_dir(cwd)
         .output()
-        .context("failed to run policy_check.zsh")?;
+        .context("failed to run policy_check.nu")?;
     Ok(output)
 }
 
@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn run_policy_script_fails_without_script() {
         let td = tempdir().unwrap();
-        // No scripts/policy_check.zsh exists — should error
+        // No scripts/policy_check.nu exists — should error
         let result = run_policy_script(td.path(), &["--staged"]);
         assert!(result.is_err());
     }

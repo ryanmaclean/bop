@@ -13,18 +13,18 @@ Drop request files into [`drop/`](./drop) and the launchd watcher can auto-creat
 
 ## Local one-shot ingest (manual test)
 
-```zsh
-scripts/ingest_roadmap_hotfolder.zsh \
-  --inbox "$(pwd)/examples/roadmap-inbox/drop" \
-  --cards-dir "$(pwd)/.cards"
+```nu
+nu scripts/ingest_roadmap_hotfolder.nu \
+  --inbox (pwd | path join examples/roadmap-inbox/drop) \
+  --cards-dir (pwd | path join .cards)
 ```
 
 ## launchd install (hot-folder trigger)
 
-```zsh
-scripts/install_roadmap_hotfolder_launchd.zsh \
-  --inbox "$(pwd)/examples/roadmap-inbox/drop" \
-  --cards-dir "$(pwd)/.cards"
+```nu
+nu scripts/install_roadmap_hotfolder_launchd.nu \
+  --inbox (pwd | path join examples/roadmap-inbox/drop) \
+  --cards-dir (pwd | path join .cards)
 ```
 
 Then simply copy a request file into `drop/`.

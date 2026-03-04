@@ -15,8 +15,8 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/zsh</string>
-    <string>__REPO_ROOT__/scripts/ingest_roadmap_hotfolder.zsh</string>
+    <string>nu</string>
+    <string>__REPO_ROOT__/scripts/ingest_roadmap_hotfolder.nu</string>
     <string>--inbox</string>
     <string>__REPO_ROOT__/examples/roadmap-inbox/drop</string>
     <string>--cards-dir</string>
