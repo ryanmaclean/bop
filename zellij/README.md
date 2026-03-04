@@ -1,11 +1,11 @@
-# Zellij Layout for JobCard
+# Zellij Layout for bop
 
 ## Launch
 
-```zsh
+```sh
 # Build the WASM status bar plugin first:
-cargo build --manifest-path crates/jc-zellij-plugin/Cargo.toml --target wasm32-wasip1 --release
-cp crates/jc-zellij-plugin/target/wasm32-wasip1/release/jc_zellij_plugin.wasm target/bop-status.wasm
+cargo build --manifest-path crates/bop-zellij-plugin/Cargo.toml --target wasm32-wasip1 --release
+cp crates/bop-zellij-plugin/target/wasm32-wasip1/release/bop_zellij_plugin.wasm target/bop-status.wasm
 
 # Then launch:
 zellij --layout zellij/bop.kdl

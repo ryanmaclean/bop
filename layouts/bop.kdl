@@ -34,7 +34,7 @@ layout {
 
                 // Board: auto-refreshing card list
                 pane name="board" size="25%" {
-                    command "sh"
+                    command "nu"
                     args "-c" "ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); while true; do clear; $ROOT/target/debug/bop status 2>/dev/null || echo 'run: cargo build'; sleep 2; done"
                 }
 
@@ -44,22 +44,22 @@ layout {
                 pane split_direction="horizontal" {
                     pane split_direction="vertical" size="50%" {
                         pane name="spec" {
-                            command "sh"
-                            args "-c" "echo 'SPEC — run: bop_focus.nu <id>'; cat /tmp/.bop_card 2>/dev/null | xargs -I{} sh -c \"find .cards -name '{}.bop' 2>/dev/null | head -1 | xargs -I@ cat @/spec.md\" 2>/dev/null || zsh"
+                            command "nu"
+                            args "-c" "echo 'SPEC — run: bop_focus.nu <id>'; cat /tmp/.bop_card 2>/dev/null | xargs -I{} sh -c \"find .cards -name '{}.bop' 2>/dev/null | head -1 | xargs -I@ cat @/spec.md\" 2>/dev/null || nu"
                         }
                         pane name="qa" {
-                            command "sh"
-                            args "-c" "echo 'QA — run: bop_focus.nu <id>'; zsh"
+                            command "nu"
+                            args "-c" "echo 'QA — run: bop_focus.nu <id>'; nu"
                         }
                     }
                     pane split_direction="vertical" size="50%" {
                         pane name="stdout" {
-                            command "sh"
-                            args "-c" "echo 'STDOUT — run: bop logs <id> --follow'; zsh"
+                            command "nu"
+                            args "-c" "echo 'STDOUT — run: bop logs <id> --follow'; nu"
                         }
                         pane name="stderr" {
-                            command "sh"
-                            args "-c" "echo 'STDERR — run: bop logs <id> --follow'; zsh"
+                            command "nu"
+                            args "-c" "echo 'STDERR — run: bop logs <id> --follow'; nu"
                         }
                     }
                 }
@@ -67,14 +67,14 @@ layout {
 
             // ── Middle 25%: inspector ─────────────────────────────────
             pane name="inspector" size="25%" {
-                command "sh"
-                args "-c" "echo 'INSPECTOR — run: bop inspect <id>  or  bop_focus.nu <id>'; zsh"
+                command "nu"
+                args "-c" "echo 'INSPECTOR — run: bop inspect <id>  or  bop_focus.nu <id>'; nu"
             }
 
             // ── Bottom 15%: shell ─────────────────────────────────────
             pane name="shell" size="15%" {
-                command "sh"
-                args "-c" "ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); export PATH=$ROOT/target/debug:$PATH; zsh"
+                command "nu"
+                args "-c" "ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); export PATH=$ROOT/target/debug:$PATH; nu"
             }
         }
     }
@@ -84,17 +84,17 @@ layout {
         pane split_direction="horizontal" {
             pane split_direction="vertical" size="75%" {
                 pane name="dispatcher" {
-                    command "sh"
+                    command "nu"
                     args "-c" "ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); $ROOT/target/debug/bop dispatcher 2>&1 | tee /tmp/bop-dispatcher.log"
                 }
                 pane name="merge-gate" {
-                    command "sh"
+                    command "nu"
                     args "-c" "ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); $ROOT/target/debug/bop merge-gate 2>&1 | tee /tmp/bop-mergate.log"
                 }
             }
             pane name="dispatch-shell" size="25%" {
-                command "sh"
-                args "-c" "ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); export PATH=$ROOT/target/debug:$PATH; zsh"
+                command "nu"
+                args "-c" "ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); export PATH=$ROOT/target/debug:$PATH; nu"
             }
         }
     }

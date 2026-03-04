@@ -19,14 +19,14 @@ The DMG includes:
 - Sample cards
 
 **From source:**
-```zsh
+```sh
 cargo build --release
 cp target/release/bop /usr/local/bin/
 ```
 
 ## Quick Start
 
-```zsh
+```sh
 bop doctor                       # verify tooling
 bop init                         # create .cards/ structure
 bop new implement my-feature     # create a card from template
@@ -63,7 +63,7 @@ Storage contract: see `docs/format-storage-contract.md`.
 
 ## CLI Commands
 
-```zsh
+```sh
 bop new <template> <id>       # Clone template → pending/
 bop status                    # Board view across all states
 bop inspect <id>              # Show meta/spec/log summary
@@ -140,13 +140,13 @@ The Quick Look extension (`BopDeckQL.appex`) is embedded in `BopDeck.app` and de
 
 bop ships a Zellij layout (`layouts/bop.kdl`) and a WASM status bar plugin showing live card counts per state. Launch with:
 
-```zsh
+```sh
 zellij --layout layouts/bop.kdl
 ```
 
 ## Build & Test
 
-```zsh
+```sh
 cargo build                  # Build all crates
 cargo test                   # Run all tests
 cargo clippy -- -D warnings  # Lint

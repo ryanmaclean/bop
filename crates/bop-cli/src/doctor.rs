@@ -43,7 +43,7 @@ pub fn cmd_doctor(cards_root: &Path) -> anyhow::Result<()> {
         ("gt", command_available("gt")),
         ("jj", command_available("jj")),
         ("gh", command_available("gh")),
-        ("zsh", command_available("zsh")),
+        ("nu", command_available("nu")),
         ("zellij", command_available("zellij")),
     ];
 

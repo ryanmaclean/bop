@@ -17,10 +17,10 @@ Four skills provide orientation for this repo — invoke before working:
 
 ## Commands
 
-```zsh
+```sh
 cargo build                  # Build all crates
 cargo test                   # Run all tests
-cargo test -p jobcard-core   # Run tests for a single crate
+cargo test -p bop-core       # Run tests for a single crate
 cargo clippy -- -D warnings  # Lint (warnings treated as errors)
 cargo fmt                    # Format code
 cargo fmt --check            # Check formatting without changes
@@ -43,10 +43,8 @@ jj log -r '::@'
 
 This is a **Rust Cargo workspace** with two active crates:
 
-- **`crates/jobcard-core`** — shared library: `Meta` struct (card state), `read_meta`/`write_meta`, `render_prompt` (template substitution with `{{spec}}`, `{{plan}}`, etc.), and the `realtime` module (feed validation types + tests).
-- **`crates/jc`** — CLI binary (`bop` command). Crate directory remains `crates/jc/` for compatibility. Dispatcher and merge-gate support `--vcs-engine git_gt|jj`; prefer `jj` for active multi-agent sessions.
-
-> **Note:** Crate directories are still named `jobcard-core` and `jc` on disk — rename to `bop-core` and `bop-cli` is in progress.
+- **`crates/bop-core`** — shared library: `Meta` struct (card state), `read_meta`/`write_meta`, `render_prompt` (template substitution with `{{spec}}`, `{{plan}}`, etc.), and the `realtime` module (feed validation types + tests).
+- **`crates/bop-cli`** — CLI binary (`bop` command). Dispatcher and merge-gate support `--vcs-engine git_gt|jj`; prefer `jj` for active multi-agent sessions.
 
 ### Multi-Agent VCS Rule (JJ First)
 
@@ -76,7 +74,7 @@ Each card is a `<id>.card/` directory bundle containing `meta.json`, `spec.md`, 
 
 1. **`bop new <template> <id>`** — COW-clones a template from `.cards/templates/` into `.cards/pending/` using APFS `cp -c` (macOS) or `--reflink=auto` (Linux), then writes `meta.json`.
 
-2. **Dispatcher loop** — polls `pending/`, moves cards to `running/`, selects a provider from `.cards/providers.json` (respecting cooldowns), spawns the adapter zsh script, writes PID to `logs/pid` and as xattr `com.yourorg.agent-pid`, then moves the card to `done/` (exit 0), back to `pending/` (exit 75 = rate-limited), or `failed/`.
+2. **Dispatcher loop** — polls `pending/`, moves cards to `running/`, selects a provider from `.cards/providers.json` (respecting cooldowns), spawns the adapter Nushell script, writes PID to `logs/pid` and as xattr `com.yourorg.agent-pid`, then moves the card to `done/` (exit 0), back to `pending/` (exit 75 = rate-limited), or `failed/`.
 
 3. **Provider failover** — each `Meta` has a `provider_chain: Vec<String>`. On rate-limit (exit 75), the chain rotates (front→back) and a 300s cooldown is set on that provider in `providers.json`. For QA stage, the dispatcher avoids reusing the same provider that ran `implement`.
 
@@ -94,4 +92,4 @@ Exit code 75 signals rate-limiting (EX_TEMPFAIL). `mock.nu` is the default for t
 
 ### `realtime` Module
 
-`jobcard_core::realtime` is a standalone sub-module providing types for feed validation (`FeedConfig`, `FeedRecord`, `FeedMetrics`, `validate_record`, `check_alerts`). It has comprehensive unit tests but is not wired into the dispatcher or CLI yet.
+`bop_core::realtime` is a standalone sub-module providing types for feed validation (`FeedConfig`, `FeedRecord`, `FeedMetrics`, `validate_record`, `check_alerts`). It has comprehensive unit tests but is not wired into the dispatcher or CLI yet.

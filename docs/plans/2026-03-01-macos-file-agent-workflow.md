@@ -34,7 +34,7 @@ pending card -> event wake -> running agent -> done -> merge-gate -> merged.
   - orphan reaper continues on timer.
 
 3. Agent Execution
-- Adapter launched from repo-local paths (`adapters/*.zsh`).
+- Adapter launched from repo-local paths (`adapters/*.nu`).
 - PID recorded in `logs/pid` and xattr for kill/reap.
 - Exit handling:
   - `0` -> `done/`,
@@ -72,7 +72,7 @@ Operational rule: launchd restart + orphan reaping should restore progress after
 ## Rename Hardening Rules
 
 1. No absolute `/Users/studio/gtfs/...` adapter commands in active provider configs.
-2. Prefer repo-relative adapter paths (`adapters/claude.zsh`, etc.).
+2. Prefer repo-relative adapter paths (`adapters/claude.nu`, etc.).
 3. Historical merged/failed cards may keep old paths as immutable audit records.
 4. New docs/examples use `bop` (legacy `jc` only where compatibility is explicitly discussed).
 

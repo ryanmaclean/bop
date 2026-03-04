@@ -585,9 +585,8 @@ pub async fn run_card(
         let _ = write_meta(card_dir, m);
     }
 
-    let mut cmd = if adapter.ends_with(".zsh") || adapter.ends_with(".nu") {
-        let shell = if adapter.ends_with(".nu") { "nu" } else { "zsh" };
-        let mut c = TokioCommand::new(shell);
+    let mut cmd = if adapter.ends_with(".nu") {
+        let mut c = TokioCommand::new("nu");
         let adapter_path = if std::path::Path::new(adapter).is_absolute() {
             adapter.to_string()
         } else {

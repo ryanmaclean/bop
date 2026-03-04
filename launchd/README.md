@@ -4,7 +4,7 @@
 
 ## Quick Start
 
-```zsh
+```sh
 bop factory install   # generates plists from repo root, loads both services
 bop factory status    # check if dispatcher + merge-gate are running
 bop factory stop      # stop both services
@@ -29,7 +29,7 @@ Plists are written to `~/Library/LaunchAgents/` with:
 
 ## Logs
 
-```zsh
+```sh
 tail -f /tmp/bop-dispatcher.log   # dispatcher stdout
 tail -f /tmp/bop-dispatcher.err   # dispatcher stderr
 tail -f /tmp/bop-merge-gate.log   # merge-gate stdout
@@ -47,7 +47,7 @@ nu scripts/install_roadmap_hotfolder_launchd.nu \
 ```
 
 Then drop any `.roadmap` / `.md` / `.txt` / `.json` request file into
-`examples/roadmap-inbox/drop`. The ingest agent creates `🂠-*.jobcard` in
+`examples/roadmap-inbox/drop`. The ingest agent creates `🂠-*.bop` in
 `.cards/pending/` using the roadmap template and APFS clone-safe copy rules.
 
 Remove it with:

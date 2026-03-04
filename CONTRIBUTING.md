@@ -2,18 +2,18 @@
 
 ## Development Setup
 
-```zsh
+```sh
 git clone https://github.com/ryanmaclean/bop.git
 cd bop
 cargo build
 cargo test
 ```
 
-**Requirements:** Rust 1.75+, macOS (primary) or Linux. Shell scripts use `#!/usr/bin/env zsh` — **never bash**.
+**Requirements:** Rust 1.75+, Nushell 0.100+, macOS (primary) or Linux.
 
 ## Running Tests
 
-```zsh
+```sh
 make check           # cargo test + clippy + fmt check
 cargo test -p bop-core   # single crate
 ```
@@ -53,14 +53,14 @@ my-template.card/
 
 - `cargo fmt` before committing
 - `cargo clippy -- -D warnings` must pass (warnings = errors)
-- All shell scripts: `#!/usr/bin/env zsh`, never bash
+- All shell scripts: `#!/usr/bin/env nu` (Nushell, MIT licensed)
 - Python scripts (in `scripts/`): Python 3.9+, dd-trace instrumented via `bop_trace.py`
 
 ## Card Symbol Protocol
 
 See the main README for the glyph encoding table. When creating cards programmatically, set both `glyph` (SMP playing card) and `token` (BMP symbol) in `meta.json`.
 
-**Filename rule:** Never use SMP characters (U+10000+) in filenames — bash/zsh/find/Rust tooling breaks on 4-byte UTF-8. Use BMP-only `token` for filename suffixes.
+**Filename rule:** Never use SMP characters (U+10000+) in filenames — shell/find/Rust tooling breaks on 4-byte UTF-8. Use BMP-only `token` for filename suffixes.
 
 ## Pull Requests
 
