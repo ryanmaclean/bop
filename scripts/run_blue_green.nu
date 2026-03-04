@@ -1,12 +1,49 @@
 #!/usr/bin/env nu
 # run_blue_green.nu — start blue/green factory with dual dispatcher + merge-gate pairs
 
-def main [] {
+# Build adapter path given a root directory
+def adapter_path [root: string, name: string]: nothing -> string {
+  $"($root)/adapters/($name).nu"
+}
+
+# Build cards directory path for a color lane
+def cards_dir [root: string, color: string]: nothing -> string {
+  $"($root)/.cards-($color)"
+}
+
+def run_tests [] {
+  use std/assert
+
+  # Test adapter path construction
+  assert equal (adapter_path "/opt/bop" "mock") "/opt/bop/adapters/mock.nu"
+  assert equal (adapter_path "/home/user/bop" "claude") "/home/user/bop/adapters/claude.nu"
+  assert equal (adapter_path "/tmp/test" "ollama-local") "/tmp/test/adapters/ollama-local.nu"
+
+  # Test cards directory path construction
+  assert equal (cards_dir "/opt/bop" "blue") "/opt/bop/.cards-blue"
+  assert equal (cards_dir "/opt/bop" "green") "/opt/bop/.cards-green"
+
+  # Test that blue and green dirs are distinct
+  let b = (cards_dir "/root" "blue")
+  let g = (cards_dir "/root" "green")
+  assert ($b != $g) "blue and green dirs must differ"
+
+  print "PASS: run_blue_green.nu"
+}
+
+def main [
+  --test  # Run internal self-tests
+] {
+  if $test {
+    run_tests
+    return
+  }
+
   let root = ($env.FILE_PWD | path dirname)
   let bop = $"($root)/target/debug/bop"
-  let blue_dir = $"($root)/.cards-blue"
-  let green_dir = $"($root)/.cards-green"
-  let adapter_default = $"($root)/adapters/mock.nu"
+  let blue_dir = (cards_dir $root "blue")
+  let green_dir = (cards_dir $root "green")
+  let adapter_default = (adapter_path $root "mock")
 
   if not ($bop | path exists) {
     print -e $"Missing bop binary: ($bop)"

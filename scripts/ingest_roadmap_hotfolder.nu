@@ -174,14 +174,67 @@ def log_line [log_file: string, msg: string] {
   $"($ts) ($msg)\n" | save --append $log_file
 }
 
+def run_tests [] {
+  use std/assert
+
+  # Test slugify: basic lowercasing and replacement
+  assert equal (slugify "Hello World") "hello-world" "slugify basic"
+  assert equal (slugify "My--Task") "my-task" "slugify double dash"
+  assert equal (slugify "---leading---") "leading" "slugify leading/trailing dashes"
+  assert equal (slugify "foo_bar.baz") "foo_bar.baz" "slugify preserves underscores and dots"
+  assert equal (slugify "UPPER CASE 123") "upper-case-123" "slugify upper case with numbers"
+  assert equal (slugify "") "" "slugify empty string"
+
+  # Test supports_request_file
+  assert (supports_request_file "yaml") "yaml is supported"
+  assert (supports_request_file "yml") "yml is supported"
+  assert (supports_request_file "md") "md is supported"
+  assert (supports_request_file "txt") "txt is supported"
+  assert (supports_request_file "json") "json is supported"
+  assert (supports_request_file "roadmap") "roadmap is supported"
+  assert (supports_request_file "YAML") "YAML uppercase is supported"
+  assert (not (supports_request_file "exe")) "exe is not supported"
+  assert (not (supports_request_file "py")) "py is not supported"
+
+  # Test template path construction
+  let cards = "/tmp/test-cards"
+  let tmpl = $"($cards)/templates/roadmap.bop"
+  assert equal $tmpl "/tmp/test-cards/templates/roadmap.bop" "template path construction"
+
+  # Test pending dir construction
+  let pending = $"($cards)/pending"
+  assert equal $pending "/tmp/test-cards/pending" "pending dir construction"
+
+  # Test YAML parsing with temp file
+  let tmp_dir = (mktemp -d)
+  let yaml_file = $"($tmp_dir)/test.yaml"
+  "title: Test Roadmap\nitems:\n  - step one\n  - step two\n" | save $yaml_file
+  let content = (open --raw $yaml_file)
+  assert ($content | str contains "title: Test Roadmap") "YAML file readable"
+  assert ($content | str contains "step one") "YAML content has items"
+  rm -rf $tmp_dir
+
+  # Test card name construction
+  let id = "my-roadmap"
+  let card_name = $"🂠-($id).bop"
+  assert equal $card_name "🂠-my-roadmap.bop" "card name construction"
+
+  print "PASS: ingest_roadmap_hotfolder.nu"
+}
+
 def main [
-  --inbox: string      # Hot folder directory to watch
-  --cards-dir: string  # Cards root directory
-  --template-dir: string  # Template directory path
-  --processed-dir: string # Directory for processed request files
-  --failed-dir: string    # Directory for failed request files
-  --dry-run              # Preview without creating cards
+  --test                    # Run internal self-tests
+  --inbox: string           # Hot folder directory to watch
+  --cards-dir: string       # Cards root directory
+  --template-dir: string    # Template directory path
+  --processed-dir: string   # Directory for processed request files
+  --failed-dir: string      # Directory for failed request files
+  --dry-run                 # Preview without creating cards
 ] {
+  if $test {
+    run_tests
+    return
+  }
   let root = ($env.FILE_PWD | path dirname)
   let inbox_dir = ($inbox | default $"($root)/examples/roadmap-inbox/drop")
   let cards = ($cards_dir | default $"($root)/.cards")

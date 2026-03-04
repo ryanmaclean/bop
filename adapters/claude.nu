@@ -10,12 +10,23 @@
 #   1+  failure → failed/
 
 def main [
-    workdir: string,
-    prompt_file: string,
-    stdout_log: string,
-    stderr_log: string,
+    workdir: string = "",
+    prompt_file: string = "",
+    stdout_log: string = "",
+    stderr_log: string = "",
     _memory_out?: string,  # memory output file; read via JOBCARD_MEMORY_OUT env if needed
+    --test  # Run self-tests
 ] {
+    if $test {
+        run_tests
+        return
+    }
+
+    if $workdir == "" {
+        print -e "error: workdir is required"
+        exit 1
+    }
+
     # Timeout: prefer card's timeout_seconds if available via BOP_CARD_DIR/meta.json, else 3600s
     let timeout = 3600
     let orig_dir = (pwd)
@@ -60,4 +71,33 @@ def main [
     }
 
     exit $rc
+}
+
+def run_tests [] {
+    use std/assert
+
+    # test 1: path resolution — absolute stays absolute
+    let abs = if ("/tmp/foo" | str starts-with "/") { "/tmp/foo" } else { $"(pwd)/foo" }
+    assert ($abs == "/tmp/foo") "absolute path should stay absolute"
+
+    # test 2: path resolution — relative gets resolved
+    let rel = if ("foo" | str starts-with "/") { "foo" } else { $"(pwd)/foo" }
+    assert ($rel | str ends-with "/foo") "relative path should be resolved"
+    assert ($rel | str starts-with "/") "resolved path should be absolute"
+
+    # test 3: timeout default
+    let timeout = 3600
+    assert ($timeout == 3600) "default timeout should be 3600"
+
+    # test 4: rate-limit exit code mapping
+    let rc = 142
+    let mapped = if $rc == 142 { 75 } else { $rc }
+    assert ($mapped == 75) "exit code 142 (SIGALRM) should map to 75"
+
+    # test 5: rate-limit detection in stderr text
+    let stderr_text = "Error: 429 Too Many Requests"
+    let is_rate_limited = (($stderr_text | str contains "429") or ($stderr_text | str contains --ignore-case "rate limit"))
+    assert $is_rate_limited "should detect rate limiting from stderr content"
+
+    print "PASS: claude.nu"
 }

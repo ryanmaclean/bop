@@ -1,12 +1,54 @@
 #!/usr/bin/env nu
 # land_safe.nu — safe branch landing with git/jj cleanliness checks and gate enforcement
 
+# Validate that source and target branch names are non-empty and distinct.
+# Returns null on success, or an error string on failure.
+def validate_branches [source: string, target: string]: nothing -> string {
+  if ($source | is-empty) or ($target | is-empty) {
+    return "source/target branch must be non-empty"
+  }
+  if $source == $target {
+    return $"Source and target are the same branch \(($source)\); nothing to do."
+  }
+  ""
+}
+
+def run_tests [] {
+  use std/assert
+
+  # Test valid branches
+  assert equal (validate_branches "feature" "main") ""
+
+  # Test empty source
+  assert equal (validate_branches "" "main") "source/target branch must be non-empty"
+
+  # Test empty target
+  assert equal (validate_branches "feature" "") "source/target branch must be non-empty"
+
+  # Test both empty
+  assert equal (validate_branches "" "") "source/target branch must be non-empty"
+
+  # Test same branch
+  let result = (validate_branches "main" "main")
+  assert ($result | str contains "same branch") "should reject same branch"
+
+  # Test different valid branches
+  assert equal (validate_branches "fix/bug-123" "develop") ""
+
+  print "PASS: land_safe.nu"
+}
+
 def main [
   --target: string = "main"    # Target branch to land onto
   --source: string = ""        # Source branch (default: current branch)
   --push: string = ""          # Remote to push target branch to after landing
   --skip-checks                # Skip gate checks (make check + bop policy check)
+  --test                       # Run internal self-tests
 ] {
+  if $test {
+    run_tests
+    return
+  }
   let root = ($env.FILE_PWD | path dirname)
   cd $root
 
@@ -17,8 +59,9 @@ def main [
     $source
   }
 
-  if ($source_branch | is-empty) or ($target_branch | is-empty) {
-    print -e "source/target branch must be non-empty"
+  let validation_error = (validate_branches $source_branch $target_branch)
+  if ($validation_error | is-not-empty) {
+    print -e $validation_error
     exit 2
   }
 
@@ -57,11 +100,6 @@ def main [
   let target_ref = (do { ^git show-ref --verify --quiet $"refs/heads/($target_branch)" } | complete)
   if $target_ref.exit_code != 0 {
     print -e $"Unknown target branch: ($target_branch)"
-    exit 1
-  }
-
-  if $source_branch == $target_branch {
-    print -e $"Source and target are the same branch \(($source_branch)\); nothing to do."
     exit 1
   }
 

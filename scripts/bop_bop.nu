@@ -3,7 +3,54 @@
 #
 # Usage: bop_bop.nu <goal description>
 
-def main [...goal: string] {
+def slugify [text: string]: nothing -> string {
+  $text
+    | str downcase
+    | str replace --all " " "-"
+    | str replace --all --regex "[^a-z0-9-]" ""
+    | str substring 0..40
+}
+
+def run_tests [] {
+  use std/assert
+
+  # Test basic slug generation
+  assert equal (slugify "Hello World") "hello-world"
+
+  # Test uppercase conversion
+  assert equal (slugify "FooBar") "foobar"
+
+  # Test special characters removed
+  assert equal (slugify "Fix bug #42!") "fix-bug-42"
+
+  # Test truncation (0..40 is inclusive, yields at most 41 chars)
+  let long_input = "this is a very long goal description that exceeds forty characters easily"
+  let slug = slugify $long_input
+  assert (($slug | str length) <= 41) "slug should be truncated to at most 41 chars"
+
+  # Test spaces become hyphens
+  assert equal (slugify "a b c") "a-b-c"
+
+  # Test empty after stripping
+  assert equal (slugify "!!!") ""
+
+  # Test card id prefix
+  let slug = (slugify "my task")
+  let id = $"bop-($slug)"
+  assert equal $id "bop-my-task"
+
+  print "PASS: bop_bop.nu"
+}
+
+def main [
+  --test  # Run internal self-tests
+  ...goal: string
+] {
+  if $test {
+    run_tests
+    return
+  }
+
   if ($goal | length) == 0 {
     print -e "Usage: bop_bop.nu <goal description>"
     exit 1
@@ -14,11 +61,7 @@ def main [...goal: string] {
   let bop = $"($root)/target/debug/bop"
 
   # Slugify goal -> card id
-  let id_raw = ($goal_text
-    | str downcase
-    | str replace --all " " "-"
-    | str replace --all --regex "[^a-z0-9-]" ""
-    | str substring 0..40)
+  let id_raw = (slugify $goal_text)
   let id = $"bop-($id_raw)"
   let session = $"bop-($id)"
 

@@ -21,6 +21,61 @@
 #
 # Alt+arrows move focus between panes manually.
 
+def find_card_dir [root: string, id: string]: nothing -> string {
+  mut card_dir = ""
+  for state in [running pending done merged failed] {
+    let candidate = $"($root)/.cards/($state)/($id).bop"
+    if ($candidate | path exists) {
+      $card_dir = $candidate
+      break
+    }
+  }
+  $card_dir
+}
+
+def run_self_tests [] {
+  use std/assert
+
+  # Create temp .cards/ structure with a known card
+  let tmp = (mktemp -d)
+  let cards_root = $"($tmp)/.cards"
+  mkdir $"($cards_root)/pending"
+  mkdir $"($cards_root)/running"
+  mkdir $"($cards_root)/done"
+  mkdir $"($cards_root)/merged"
+  mkdir $"($cards_root)/failed"
+
+  # Place a card in running/
+  let test_id = "test-focus-card"
+  mkdir $"($cards_root)/running/($test_id).bop"
+
+  # Test: card found in running
+  let found = (find_card_dir $tmp $test_id)
+  assert equal $found $"($cards_root)/running/($test_id).bop"
+
+  # Test: card not found
+  let not_found = (find_card_dir $tmp "nonexistent")
+  assert equal $not_found ""
+
+  # Test: card in done/ is found
+  let done_id = "done-card"
+  mkdir $"($cards_root)/done/($done_id).bop"
+  let found_done = (find_card_dir $tmp $done_id)
+  assert equal $found_done $"($cards_root)/done/($done_id).bop"
+
+  # Test: search order — running before done
+  let both_id = "both-card"
+  mkdir $"($cards_root)/running/($both_id).bop"
+  mkdir $"($cards_root)/done/($both_id).bop"
+  let found_both = (find_card_dir $tmp $both_id)
+  assert equal $found_both $"($cards_root)/running/($both_id).bop"
+
+  # Cleanup
+  rm -rf $tmp
+
+  print "PASS: bop_focus.nu"
+}
+
 def main [
   id?: string        # Card ID to focus
   --auto             # Sweep all panes and type commands in (Zellij only)
@@ -58,8 +113,9 @@ def main [
   # -- Test mode --
   if $test {
     if not ("ZELLIJ" in $env) {
-      print -e "ERROR: --test requires running inside a Zellij session"
-      exit 1
+      # No Zellij — run internal self-tests
+      run_self_tests
+      return
     }
     print "▶ Testing pane traversal from shell (pane 7)..."
     print "  Watch for 'PANE N' appearing in each pane."
@@ -83,14 +139,7 @@ def main [
   }
 
   # -- Locate the card --
-  mut card_dir = ""
-  for state in [running pending done merged failed] {
-    let candidate = $"($root)/.cards/($state)/($id).bop"
-    if ($candidate | path exists) {
-      $card_dir = $candidate
-      break
-    }
-  }
+  let card_dir = (find_card_dir $root $id)
 
   if $card_dir == "" {
     print -e $"ERROR: card '($id)' not found in any state"

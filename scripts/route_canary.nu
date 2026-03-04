@@ -1,9 +1,67 @@
 #!/usr/bin/env nu
 # route_canary.nu — route pending cards to blue/green lanes with canary support
 
+def run_tests [] {
+  use std/assert
+
+  # Test deterministic_bucket: known input produces consistent output
+  let bucket1 = (deterministic_bucket "test-card-1")
+  let bucket2 = (deterministic_bucket "test-card-1")
+  assert equal $bucket1 $bucket2 "deterministic_bucket is deterministic for same input"
+
+  # Test bucket is always in [0, 100)
+  for key in ["a" "b" "foo" "bar-baz" "card-123" "🂠-roadmap" "z" ""] {
+    let b = (deterministic_bucket $key)
+    assert ($b >= 0) $"bucket for '($key)' >= 0, got ($b)"
+    assert ($b < 100) $"bucket for '($key)' < 100, got ($b)"
+  }
+
+  # Test different inputs produce different buckets (probabilistic but reliable for these)
+  let ba = (deterministic_bucket "alpha")
+  let bb = (deterministic_bucket "beta")
+  # Not guaranteed different, but extremely unlikely to collide for these
+  # Just verify they return valid numbers
+  assert ($ba >= 0 and $ba < 100) "alpha bucket in range"
+  assert ($bb >= 0 and $bb < 100) "beta bucket in range"
+
+  # Test route_lane with overrides
+  let lane_blue = (route_lane "card-1" "" "blue-only" [] 50)
+  assert equal $lane_blue "blue" "blue-only override routes to blue"
+
+  let lane_green = (route_lane "card-1" "" "green-only" [] 50)
+  assert equal $lane_green "green" "green-only override routes to green"
+
+  # Test route_lane with canary team
+  let lane_dual = (route_lane "card-1" "teamA" "" ["teamA" "teamB"] 50)
+  assert equal $lane_dual "dual" "canary team routes to dual"
+
+  # Test route_lane balanced (no override, no canary)
+  let lane_balanced = (route_lane "card-1" "teamX" "" ["teamA"] 50)
+  assert ($lane_balanced == "blue" or $lane_balanced == "green") "balanced routes to blue or green"
+
+  # Test team extraction from JSON-like data
+  let meta_json = '{"id": "test", "team": "platform"}'
+  let parsed = ($meta_json | from json)
+  let team = ($parsed | get -o team | default "")
+  assert equal $team "platform" "team extracted from JSON"
+
+  # Test empty team from JSON
+  let meta_no_team = '{"id": "test"}'
+  let parsed2 = ($meta_no_team | from json)
+  let team2 = ($parsed2 | get -o team | default "")
+  assert equal $team2 "" "missing team defaults to empty string"
+
+  print "PASS: route_canary.nu"
+}
+
 def main [
+  --test                 # Run internal self-tests
   --green-pct: int = 20  # Percentage of traffic routed to green lane
 ] {
+  if $test {
+    run_tests
+    return
+  }
   let root = ($env.FILE_PWD | path dirname)
   let source_dir = $"($root)/.cards"
   let blue_dir = $"($root)/.cards-blue"

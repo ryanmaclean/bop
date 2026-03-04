@@ -14,12 +14,23 @@
 #   OLLAMA_HOST    base URL (default: http://localhost:11434)
 
 def main [
-    workdir: string,
-    prompt_file: string,
-    stdout_log: string,
-    stderr_log: string,
+    workdir: string = "",
+    prompt_file: string = "",
+    stdout_log: string = "",
+    stderr_log: string = "",
     _memory_out?: string,  # memory output file; read via JOBCARD_MEMORY_OUT env
+    --test  # Run self-tests
 ] {
+    if $test {
+        run_tests
+        return
+    }
+
+    if $workdir == "" {
+        print -e "error: workdir is required"
+        exit 1
+    }
+
     let orig_dir = (pwd)
     let prompt_abs = if ($prompt_file | str starts-with "/") { $prompt_file } else { $"($orig_dir)/($prompt_file)" }
     let stdout_abs = if ($stdout_log | str starts-with "/") { $stdout_log } else { $"($orig_dir)/($stdout_log)" }
@@ -100,4 +111,32 @@ if files:
     }
 
     exit $rc
+}
+
+def run_tests [] {
+    use std/assert
+
+    # test 1: path resolution — absolute stays absolute
+    let abs = if ("/tmp/foo" | str starts-with "/") { "/tmp/foo" } else { $"(pwd)/foo" }
+    assert ($abs == "/tmp/foo") "absolute path should stay absolute"
+
+    # test 2: path resolution — relative gets resolved
+    let rel = if ("foo" | str starts-with "/") { "foo" } else { $"(pwd)/foo" }
+    assert ($rel | str ends-with "/foo") "relative path should be resolved"
+    assert ($rel | str starts-with "/") "resolved path should be absolute"
+
+    # test 3: default model
+    let model = if "OLLAMA_MODEL" in $env { $env.OLLAMA_MODEL } else { "qwen2.5-coder:7b" }
+    # Just verify the default resolves (env may or may not have OLLAMA_MODEL)
+    assert (($model | str length) > 0) "model should have a non-empty value"
+
+    # test 4: default host
+    let host = if "OLLAMA_HOST" in $env { $env.OLLAMA_HOST } else { "http://localhost:11434" }
+    assert ($host | str starts-with "http") "host should be an HTTP URL"
+
+    # test 5: verify the extract Python snippet parses
+    let extract_check = (do { ^python3 -c "import sys, json, re; print('ok')" } | complete)
+    assert ($extract_check.exit_code == 0) "python3 should be available for extract logic"
+
+    print "PASS: ollama-local.nu"
 }

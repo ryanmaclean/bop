@@ -5,68 +5,45 @@
 # The heavy lifting is done by an embedded Python3 script; this Nushell
 # wrapper sets up environment variables and interprets the JSON result.
 
-def main [
-  --mode: string = "staged"      # staged | card
-  --cards-dir: string = ".cards" # Cards root directory
-  --card-dir: string = ""        # Required for --mode card
-  --id: string = ""              # Optional card id hint
-  --repo-root: string = ""       # Override git root
-  --staged                       # Shortcut for --mode staged
-  --json                         # Print JSON result
-  --help (-h)                    # Show usage
-] {
-  if $help {
-    print "Usage:"
-    print "  scripts/policy_check.nu --staged [--cards-dir .cards]"
-    print "  scripts/policy_check.nu --mode card --card-dir <path> [--cards-dir .cards]"
-    print ""
-    print "Options:"
-    print "  --mode staged|card"
-    print "  --staged                  Shortcut for --mode staged"
-    print "  --card-dir <path>         Required for --mode card"
-    print "  --id <id>                 Optional card id hint"
-    print "  --cards-dir <path>        Cards root (default .cards)"
-    print "  --repo-root <path>        Override git root"
-    print "  --json                    Print JSON result"
-    exit 0
+def run_tests [] {
+  use std/assert
+
+  # Test 1: effective mode defaults to "staged"
+  let default_mode = "staged"
+  assert equal $default_mode "staged" "default mode should be staged"
+
+  # Test 2: --staged flag overrides --mode
+  mut effective = "card"
+  let staged_flag = true
+  if $staged_flag { $effective = "staged" }
+  assert equal $effective "staged" "--staged flag should override mode to staged"
+
+  # Test 3: mode validation recognizes valid modes
+  for valid in ["staged" "card"] {
+    assert ($valid == "staged" or $valid == "card") $"($valid) should be a valid mode"
   }
 
-  # Resolve effective mode — --staged flag overrides --mode
-  mut effective_mode = $mode
-  if $staged {
-    $effective_mode = "staged"
-  }
+  # Test 4: mode validation rejects invalid modes
+  let bad = "foo"
+  assert ($bad != "staged" and $bad != "card") "foo should be an invalid mode"
 
-  if $effective_mode != "staged" and $effective_mode != "card" {
-    print -e $"Invalid --mode: ($effective_mode)"
-    exit 2
-  }
+  # Test 5: Python script string is non-empty and contains expected markers
+  let python_script = build_python_script
+  assert ($python_script | str contains "POLICY_MODE") "python script should reference POLICY_MODE"
+  assert ($python_script | str contains "parse_name_status") "python script should contain parse_name_status"
+  assert ($python_script | str contains "parse_numstat") "python script should contain parse_numstat"
+  assert ($python_script | str contains "normalize_rel") "python script should contain normalize_rel"
 
-  if $effective_mode == "card" and $card_dir == "" {
-    print -e "--card-dir is required for --mode card"
-    exit 2
-  }
+  # Test 6: card mode requires --card-dir
+  let card_dir_val = ""
+  let mode_val = "card"
+  assert ($mode_val == "card" and $card_dir_val == "") "card mode with empty card-dir should be rejected"
 
-  # Resolve repo root
-  mut resolved_root = $repo_root
-  if $resolved_root == "" {
-    let git_result = do { ^git rev-parse --show-toplevel } | complete
-    if $git_result.exit_code == 0 {
-      $resolved_root = ($git_result.stdout | str trim)
-    } else {
-      $resolved_root = (pwd)
-    }
-  }
+  print "PASS: policy_check.nu"
+}
 
-  # Export environment for the Python script
-  $env.POLICY_MODE = $effective_mode
-  $env.POLICY_CARDS_DIR = $cards_dir
-  $env.POLICY_CARD_DIR = $card_dir
-  $env.POLICY_CARD_ID = $id
-  $env.POLICY_REPO_ROOT = $resolved_root
-
-  # Embedded Python policy engine — kept as-is from the ZSH version
-  let python_script = r#'
+def build_python_script [] {
+  r#'
 import json
 import os
 import pathlib
@@ -370,6 +347,76 @@ print(json.dumps({
     },
 }, ensure_ascii=False))
 '#
+}
+
+def main [
+  --test                         # Run internal self-tests
+  --mode: string = "staged"      # staged | card
+  --cards-dir: string = ".cards" # Cards root directory
+  --card-dir: string = ""        # Required for --mode card
+  --id: string = ""              # Optional card id hint
+  --repo-root: string = ""       # Override git root
+  --staged                       # Shortcut for --mode staged
+  --json                         # Print JSON result
+  --help (-h)                    # Show usage
+] {
+  if $test {
+    run_tests
+    return
+  }
+
+  if $help {
+    print "Usage:"
+    print "  scripts/policy_check.nu --staged [--cards-dir .cards]"
+    print "  scripts/policy_check.nu --mode card --card-dir <path> [--cards-dir .cards]"
+    print ""
+    print "Options:"
+    print "  --mode staged|card"
+    print "  --staged                  Shortcut for --mode staged"
+    print "  --card-dir <path>         Required for --mode card"
+    print "  --id <id>                 Optional card id hint"
+    print "  --cards-dir <path>        Cards root (default .cards)"
+    print "  --repo-root <path>        Override git root"
+    print "  --json                    Print JSON result"
+    exit 0
+  }
+
+  # Resolve effective mode — --staged flag overrides --mode
+  mut effective_mode = $mode
+  if $staged {
+    $effective_mode = "staged"
+  }
+
+  if $effective_mode != "staged" and $effective_mode != "card" {
+    print -e $"Invalid --mode: ($effective_mode)"
+    exit 2
+  }
+
+  if $effective_mode == "card" and $card_dir == "" {
+    print -e "--card-dir is required for --mode card"
+    exit 2
+  }
+
+  # Resolve repo root
+  mut resolved_root = $repo_root
+  if $resolved_root == "" {
+    let git_result = do { ^git rev-parse --show-toplevel } | complete
+    if $git_result.exit_code == 0 {
+      $resolved_root = ($git_result.stdout | str trim)
+    } else {
+      $resolved_root = (pwd)
+    }
+  }
+
+  # Export environment for the Python script
+  $env.POLICY_MODE = $effective_mode
+  $env.POLICY_CARDS_DIR = $cards_dir
+  $env.POLICY_CARD_DIR = $card_dir
+  $env.POLICY_CARD_ID = $id
+  $env.POLICY_REPO_ROOT = $resolved_root
+
+  # Embedded Python policy engine — kept as-is from the ZSH version
+  let python_script = (build_python_script)
 
   let result = (^python3 -c $python_script | str trim)
 

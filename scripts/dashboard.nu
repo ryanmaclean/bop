@@ -6,7 +6,32 @@ def count_cards [dir: string]: nothing -> int {
   glob $"($dir)/*.bop" | where { |p| ($p | path type) == "dir" } | length
 }
 
-def main [] {
+def build_progress_bar [n_merged: int, n_done: int, n_running: int, n_failed: int, total: int]: nothing -> string {
+  mut bar = ""
+  for i in 0..<$total {
+    if $i < $n_merged {
+      $bar = $"($bar)M"
+    } else if $i < ($n_merged + $n_done) {
+      $bar = $"($bar)✓"
+    } else if $i < ($n_merged + $n_done + $n_running) {
+      $bar = $"($bar)▶"
+    } else if $i < ($total - $n_failed) {
+      $bar = $"($bar)·"
+    } else {
+      $bar = $"($bar)✗"
+    }
+  }
+  $bar
+}
+
+def main [
+  --test  # Run internal self-tests
+] {
+  if $test {
+    run_tests
+    return
+  }
+
   let root = ($env.FILE_PWD | path dirname)
 
   let teams = [
@@ -35,21 +60,7 @@ def main [] {
       let n_failed  = (count_cards $"($cards_dir)/failed")
       let total = 5
 
-      # Progress bar: M=merged, check=done, tri=running, dot=queued, X=failed
-      mut bar = ""
-      for i in 0..<$total {
-        if $i < $n_merged {
-          $bar = $"($bar)M"
-        } else if $i < ($n_merged + $n_done) {
-          $bar = $"($bar)✓"
-        } else if $i < ($n_merged + $n_done + $n_running) {
-          $bar = $"($bar)▶"
-        } else if $i < ($total - $n_failed) {
-          $bar = $"($bar)·"
-        } else {
-          $bar = $"($bar)✗"
-        }
-      }
+      let bar = (build_progress_bar $n_merged $n_done $n_running $n_failed $total)
 
       print $"║  ($team.name | fill -w 18)  [($bar)] [($team.adapter)]"
       print $"║  p:($n_pending | fill -w 2) r:($n_running | fill -w 2) d:($n_done | fill -w 2) m:($n_merged | fill -w 2) f:($n_failed | fill -w 2)                                 ║"
@@ -105,4 +116,52 @@ def main [] {
 
     sleep 3sec
   }
+}
+
+def run_tests [] {
+  use std/assert
+
+  # Test: count_cards on non-existent directory returns 0
+  let count = (count_cards "/tmp/nonexistent-dir-bop-test-xyz")
+  assert equal $count 0 "count_cards on missing dir should be 0"
+
+  # Test: count_cards on an empty temp directory returns 0
+  let tmp = (mktemp -d)
+  let count_empty = (count_cards $tmp)
+  assert equal $count_empty 0 "count_cards on empty dir should be 0"
+
+  # Test: count_cards counts .bop directories
+  let test_dir = $"($tmp)/cards"
+  mkdir $test_dir
+  mkdir $"($test_dir)/card1.bop"
+  mkdir $"($test_dir)/card2.bop"
+  "not a dir" | save $"($test_dir)/card3.bop"
+  let count_bop = (count_cards $test_dir)
+  assert equal $count_bop 2 "count_cards should count only .bop directories"
+
+  # Test: build_progress_bar produces correct characters
+  let bar1 = (build_progress_bar 2 1 1 0 5)
+  assert equal $bar1 "MM✓▶·" "bar with 2M 1done 1run 0fail"
+
+  let bar2 = (build_progress_bar 0 0 0 0 5)
+  assert equal $bar2 "·····" "bar with all pending"
+
+  let bar3 = (build_progress_bar 5 0 0 0 5)
+  assert equal $bar3 "MMMMM" "bar with all merged"
+
+  let bar4 = (build_progress_bar 0 0 0 2 5)
+  assert equal $bar4 "···✗✗" "bar with 2 failed"
+
+  let bar5 = (build_progress_bar 1 1 1 1 5)
+  assert equal $bar5 "M✓▶·✗" "bar with one of each + one pending"
+
+  # Test: card name extraction logic
+  let card_path = "/some/path/running/my-task.bop"
+  let card_name = ($card_path | path basename | str replace ".bop" "")
+  assert equal $card_name "my-task" "card name should strip .bop suffix"
+
+  # Cleanup
+  rm -rf $tmp
+
+  print "PASS: dashboard.nu"
 }

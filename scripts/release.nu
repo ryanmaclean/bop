@@ -6,19 +6,54 @@
 #   - NOTARIZE_APPLE_ID and NOTARIZE_PASSWORD (app-specific) in env
 #     OR stored in keychain profile "bop-notary" (xcrun notarytool store-credentials)
 
+# Extract version from Cargo.toml content string
+def extract_version [cargo_content: string]: nothing -> string {
+  $cargo_content
+    | lines
+    | where ($it | str starts-with "version")
+    | first
+    | parse --regex 'version\s*=\s*"([^"]+)"'
+    | get capture0.0
+}
+
+def run_tests [] {
+  use std/assert
+
+  # Test version extraction from typical Cargo.toml content
+  let cargo = "[package]\nname = \"bop\"\nversion = \"0.3.1\"\nedition = \"2021\""
+  assert equal (extract_version $cargo) "0.3.1"
+
+  # Test with extra spacing
+  let cargo2 = "version  =  \"1.2.3\""
+  assert equal (extract_version $cargo2) "1.2.3"
+
+  # Test version with pre-release
+  let cargo3 = "version = \"0.1.0-alpha.1\""
+  assert equal (extract_version $cargo3) "0.1.0-alpha.1"
+
+  # Test with temp file round-trip
+  let tmp = (mktemp)
+  "[package]\nname = \"test\"\nversion = \"2.5.0\"\n" | save --force $tmp
+  let from_file = (extract_version (open --raw $tmp))
+  assert equal $from_file "2.5.0"
+  rm $tmp
+
+  print "PASS: release.nu"
+}
+
 def main [
   --version: string = ""  # Version string (default: read from Cargo.toml)
+  --test                   # Run internal self-tests
 ] {
+  if $test {
+    run_tests
+    return
+  }
   let root = ($env.FILE_PWD | path dirname)
 
   mut ver = $version
   if ($ver | is-empty) {
-    $ver = (open --raw $"($root)/crates/jc/Cargo.toml"
-      | lines
-      | where ($it | str starts-with "version")
-      | first
-      | parse --regex 'version\s*=\s*"([^"]+)"'
-      | get capture0.0)
+    $ver = (extract_version (open --raw $"($root)/crates/jc/Cargo.toml"))
   }
 
   let dist = $"($root)/dist/bop-($ver)-macos"
