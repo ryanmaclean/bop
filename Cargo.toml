@@ -1,11 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/jobcard-core",
-  "crates/jc",
+  "crates/bop-core",
+  "crates/bop-cli",
 ]
-# jc-zellij-plugin is a WASM-only cdylib and must be built separately:
-#   cargo build -p jc-zellij-plugin --target wasm32-wasip1 --release
+# bop-zellij-plugin is a WASM-only cdylib and must be built separately:
+#   cargo build -p bop-zellij-plugin --target wasm32-wasip1 --release
 # It cannot be compiled for the host target (cdylib + WASM-only deps).
 
 [workspace.package]

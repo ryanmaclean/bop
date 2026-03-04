@@ -12,7 +12,7 @@ deliverables, guardrails, and escalation rule.
 
 ## Trigger Signals
 
-- Card filename starts with an emoji prefix: `<emoji>-<slug>.jobcard`
+- Card filename starts with an emoji prefix: `<emoji>-<slug>.bop`
 - `meta.labels` includes `kind=persona` and `persona=<emoji>`
 - User explicitly asks for an emoji persona
 

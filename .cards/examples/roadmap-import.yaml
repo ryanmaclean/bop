@@ -1,7 +1,7 @@
 # Example: bop import .cards/examples/roadmap-import.yaml
 #
 # This file demonstrates the roadmap YAML format for `bop import`.
-# Each entry becomes a .jobcard in drafts/ (or pending/ with --immediate).
+# Each entry becomes a .bop in drafts/ (or pending/ with --immediate).
 #
 # Fields:
 #   id            (required) — unique card identifier

@@ -15,7 +15,7 @@ usage() {
 usage: ingest_roadmap_hotfolder.zsh [--inbox DIR] [--cards-dir DIR] [--template-dir DIR] [--processed-dir DIR] [--failed-dir DIR] [--dry-run]
 
 Scans a hot folder for roadmap request files and atomically creates roadmap
-jobcard bundles in pending/ without requiring interactive CLI usage.
+bop bundles in pending/ without requiring interactive CLI usage.
 USAGE
 }
 
@@ -58,7 +58,7 @@ while (( $# > 0 )); do
 done
 
 if [[ -z "${TEMPLATE_DIR}" ]]; then
-  TEMPLATE_DIR="${CARDS_DIR}/templates/roadmap.jobcard"
+  TEMPLATE_DIR="${CARDS_DIR}/templates/roadmap.bop"
 fi
 if [[ -z "${PROCESSED_DIR}" ]]; then
   PROCESSED_DIR="${INBOX_DIR:h}/processed"
@@ -117,10 +117,10 @@ id_exists_anywhere() {
   local id="$1"
   local state
   for state in pending running done merged failed; do
-    if [[ -d "${CARDS_DIR}/${state}/${id}.jobcard" ]]; then
+    if [[ -d "${CARDS_DIR}/${state}/${id}.bop" ]]; then
       return 0
     fi
-    local matches=("${CARDS_DIR}/${state}"/*-"${id}".jobcard(N))
+    local matches=("${CARDS_DIR}/${state}"/*-"${id}".bop(N))
     if (( ${#matches[@]} > 0 )); then
       return 0
     fi
@@ -237,7 +237,7 @@ process_request() {
   local created
   created=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-  local card_name="🂠-${id}.jobcard"
+  local card_name="🂠-${id}.bop"
   local final_card="${PENDING_DIR}/${card_name}"
   local temp_card="${PENDING_DIR}/.${card_name}.tmp.$$"
 

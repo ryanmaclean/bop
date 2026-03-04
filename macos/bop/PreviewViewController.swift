@@ -4,7 +4,7 @@ import SwiftUI
 
 // MARK: - Codable model
 
-fileprivate struct JobCardMeta: Codable {
+fileprivate struct BopCardMeta: Codable {
     let id: String
     let title: String?
     let description: String?
@@ -452,9 +452,9 @@ fileprivate enum CardTab: String, CaseIterable {
     case files = "Files"
 }
 
-fileprivate struct JobCardPreview: View {
+fileprivate struct BopCardPreview: View {
     var url: URL?
-    var meta: JobCardMeta?
+    var meta: BopCardMeta?
     var logs: String = ""
     var bundleFiles: [String] = []
     var lastActivityAt: Date? = nil
@@ -465,7 +465,7 @@ fileprivate struct JobCardPreview: View {
     @State private var selectedTab: CardTab = .overview
 
     private var displayTitle: String {
-        meta?.title ?? meta?.id ?? url?.lastPathComponent ?? "JobCard"
+        meta?.title ?? meta?.id ?? url?.lastPathComponent ?? "BopCard"
     }
 
     private var cardState: String {
@@ -542,7 +542,7 @@ fileprivate struct JobCardPreview: View {
         return labels.contains { $0.kind == "phase" || $0.kind == "complexity" || $0.kind == "impact" }
     }
 
-    private func displayStageOrder(for m: JobCardMeta) -> [(key: String, label: String)] {
+    private func displayStageOrder(for m: BopCardMeta) -> [(key: String, label: String)] {
         if let chain = m.stageChain, !chain.isEmpty {
             return chain.map { (key: $0, label: stageDisplayName($0)) }
         }
@@ -556,7 +556,7 @@ fileprivate struct JobCardPreview: View {
         stageDisplayName(key)
     }
 
-    private func inferredRoadmapProgress(_ m: JobCardMeta) -> Int {
+    private func inferredRoadmapProgress(_ m: BopCardMeta) -> Int {
         if let progress = m.progress {
             return progress
         }
@@ -573,7 +573,7 @@ fileprivate struct JobCardPreview: View {
         }
     }
 
-    private func elapsedTimeText(_ m: JobCardMeta) -> String {
+    private func elapsedTimeText(_ m: BopCardMeta) -> String {
         let start = parseISODate(m.stages?[m.stage]?.started) ?? parseISODate(m.created)
         guard let start else { return "0:00" }
         return formatElapsed(Int(Date().timeIntervalSince(start)))
@@ -583,7 +583,7 @@ fileprivate struct JobCardPreview: View {
         relativeTimeFromDate(lastActivityAt)
     }
 
-    private func roadmapStatusTitle(_ m: JobCardMeta) -> String {
+    private func roadmapStatusTitle(_ m: BopCardMeta) -> String {
         switch m.stage.lowercased() {
         case "analyze": return "Analyzing"
         case "discover": return "Discovering"
@@ -597,7 +597,7 @@ fileprivate struct JobCardPreview: View {
         }
     }
 
-    private func roadmapStatusSubtitle(_ m: JobCardMeta) -> String {
+    private func roadmapStatusSubtitle(_ m: BopCardMeta) -> String {
         switch m.stage.lowercased() {
         case "analyze":
             return "Analyzing project structure and current state."
@@ -620,7 +620,7 @@ fileprivate struct JobCardPreview: View {
         }
     }
 
-    private func roadmapStatusIcon(_ m: JobCardMeta) -> String {
+    private func roadmapStatusIcon(_ m: BopCardMeta) -> String {
         switch m.stage.lowercased() {
         case "analyze": return "magnifyingglass.circle"
         case "discover": return "person.2.circle"
@@ -674,7 +674,7 @@ fileprivate struct JobCardPreview: View {
     }
 
     @ViewBuilder
-    private func cardBody(_ m: JobCardMeta) -> some View {
+    private func cardBody(_ m: BopCardMeta) -> some View {
         VStack(alignment: .leading, spacing: 0) {
 
             // Header: Glyph + Title
@@ -844,7 +844,7 @@ fileprivate struct JobCardPreview: View {
     }
 
     @ViewBuilder
-    private func overviewTab(_ m: JobCardMeta) -> some View {
+    private func overviewTab(_ m: BopCardMeta) -> some View {
         VStack(alignment: .leading, spacing: 24) {
             // Labels & Priority — separate phase/complexity/impact for visual grouping
             let phaseLabels = m.labels?.filter { $0.kind == "phase" } ?? []
@@ -982,7 +982,7 @@ fileprivate struct JobCardPreview: View {
     }
 
     @ViewBuilder
-    private func roadmapStatusPanel(_ m: JobCardMeta) -> some View {
+    private func roadmapStatusPanel(_ m: BopCardMeta) -> some View {
         let progress = inferredRoadmapProgress(m)
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 12) {
@@ -1144,7 +1144,7 @@ fileprivate struct JobCardPreview: View {
     }
 
     @ViewBuilder
-    private func subtasksTab(_ m: JobCardMeta) -> some View {
+    private func subtasksTab(_ m: BopCardMeta) -> some View {
         if let subs = m.subtasks, !subs.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
                 let doneCount = subs.filter(\.done).count
@@ -1271,27 +1271,27 @@ fileprivate struct JobCardPreview: View {
 @objc(PreviewViewController)
 class PreviewViewController: NSViewController, QLPreviewingController {
 
-    private var hostingView: NSHostingView<JobCardPreview>!
+    private var hostingView: NSHostingView<BopCardPreview>!
 
     override var nibName: NSNib.Name? { nil }
 
     override func loadView() {
-        hostingView = NSHostingView(rootView: JobCardPreview())
+        hostingView = NSHostingView(rootView: BopCardPreview())
         self.view = hostingView
     }
 
     func preparePreviewOfFile(at url: URL, completionHandler handler: @escaping (Error?) -> Void) {
         let metaUrl = url.appendingPathComponent("meta.json")
-        var meta: JobCardMeta?
+        var meta: BopCardMeta?
 
         if let data = try? Data(contentsOf: metaUrl) {
-            meta = try? JSONDecoder().decode(JobCardMeta.self, from: data)
+            meta = try? JSONDecoder().decode(BopCardMeta.self, from: data)
         }
         if meta == nil {
             var coordErr: NSError?
             NSFileCoordinator().coordinate(readingItemAt: metaUrl, options: .withoutChanges, error: &coordErr) { u in
                 if let data = try? Data(contentsOf: u) {
-                    meta = try? JSONDecoder().decode(JobCardMeta.self, from: data)
+                    meta = try? JSONDecoder().decode(BopCardMeta.self, from: data)
                 }
             }
         }
@@ -1347,7 +1347,7 @@ class PreviewViewController: NSViewController, QLPreviewingController {
         }
 
         DispatchQueue.main.async {
-            self.hostingView.rootView = JobCardPreview(
+            self.hostingView.rootView = BopCardPreview(
                 url: url,
                 meta: meta,
                 logs: logs,

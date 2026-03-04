@@ -5,16 +5,16 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 mkdir -p "$tmp/team-cli/pending" "$tmp/team-cli/running"
-mkdir -p "$tmp/team-cli/pending/card-abc.jobcard"
+mkdir -p "$tmp/team-cli/pending/card-abc.bop"
 printf '{"id":"card-abc","title":"Test card","stage":"implement"}' \
-  > "$tmp/team-cli/pending/card-abc.jobcard/meta.json"
-mkdir -p "$tmp/team-cli/running/card-xyz.jobcard"
+  > "$tmp/team-cli/pending/card-abc.bop/meta.json"
+mkdir -p "$tmp/team-cli/running/card-xyz.bop"
 printf '{"id":"card-xyz","title":"Running card","stage":"test"}' \
-  > "$tmp/team-cli/running/card-xyz.jobcard/meta.json"
+  > "$tmp/team-cli/running/card-xyz.bop/meta.json"
 
 # Run provider
 SCRIPT_DIR="${0:A:h}"
-out=$(CARDS_DIR="$tmp" "$SCRIPT_DIR/jobcard-provider.zsh")
+out=$(CARDS_DIR="$tmp" "$SCRIPT_DIR/bop-provider.zsh")
 echo "Provider output: $out"
 
 # Validate: must be a JSON array with 2 items

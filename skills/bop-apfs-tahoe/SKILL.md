@@ -16,7 +16,7 @@ Target platform: macOS Tahoe and other APFS systems.
 
 Treat the system as three primitives:
 
-1. Job: card bundle (`<id>.jobcard/`) with spec + metadata.
+1. Job: card bundle (`<id>.bop/`) with spec + metadata.
 2. Run: one execution attempt with logs, session info, and outcome.
 3. Event: append-only lineage record (`events.jsonl` / OpenLineage payloads).
 

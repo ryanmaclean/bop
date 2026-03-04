@@ -1,6 +1,6 @@
 //
 //  ContentView.swift
-//  JobCardHost
+//  BopCardHost
 //
 //  Created by studio on 2026/02/28.
 //

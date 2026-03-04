@@ -154,9 +154,9 @@ move_or_copy() {
 
 moved=0
 dual=0
-for card in "$SOURCE_DIR"/pending/*.jobcard; do
+for card in "$SOURCE_DIR"/pending/*.bop; do
   [[ -d "$card" ]] || continue
-  id="$(basename "$card" .jobcard)"
+  id="$(basename "$card" .bop)"
 
   team=""
   if [[ -f "$card/meta.json" ]]; then

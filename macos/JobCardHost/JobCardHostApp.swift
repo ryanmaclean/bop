@@ -1,13 +1,13 @@
 //
-//  JobCardHostApp.swift
-//  JobCardHost
+//  BopCardHostApp.swift
+//  BopCardHost
 //
 
 import SwiftUI
 import AppKit
 
 @main
-struct JobCardHostApp: App {
+struct BopCardHostApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
     var body: some Scene {
@@ -45,8 +45,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func findCardDirectory(id: String) -> URL? {
-        let suffix = "-\(id).jobcard"
-        let exact = "\(id).jobcard"
+        let suffix = "-\(id).bop"
+        let exact = "\(id).bop"
         let fm = FileManager.default
 
         for base in cardRootCandidates() {

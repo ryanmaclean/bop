@@ -27,7 +27,7 @@ print "▶ Creating card: ${id}"
 # Locate the card
 card_dir=""
 for state in pending running done; do
-  candidate="${ROOT}/.cards/${state}/${id}.jobcard"
+  candidate="${ROOT}/.cards/${state}/${id}.bop"
   [[ -d "$candidate" ]] && card_dir="$candidate" && break
 done
 

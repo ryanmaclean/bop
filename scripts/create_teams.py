@@ -150,14 +150,14 @@ for team in TEAMS:
     print(f"\n── {team['name']} ({team['adapter']}) ── {team['desc']}")
 
     for card_id, feature_id, override_desc in team["cards"]:
-        card_dir = cards_dir / "pending" / f"{card_id}.jobcard"
+        card_dir = cards_dir / "pending" / f"{card_id}.bop"
         card_dir.mkdir(parents=True, exist_ok=True)
         (card_dir / "logs").mkdir(exist_ok=True)
         (card_dir / "output").mkdir(exist_ok=True)
 
         (card_dir / "spec.md").write_text(build_spec(feature_id, override_desc))
         (card_dir / "prompt.md").write_text(
-            "You are working inside a Rust Cargo workspace (jobcard-core + jc crates).\n"
+            "You are working inside a Rust Cargo workspace (bop-core + jc crates).\n"
             "The project root is your working directory.\n\n"
             "{{spec}}\n\n"
             "Acceptance criteria:\n{{acceptance_criteria}}\n"

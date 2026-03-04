@@ -5,10 +5,10 @@
 ```zsh
 # Build the WASM status bar plugin first:
 cargo build --manifest-path crates/jc-zellij-plugin/Cargo.toml --target wasm32-wasip1 --release
-cp crates/jc-zellij-plugin/target/wasm32-wasip1/release/jc_zellij_plugin.wasm target/jobcard-status.wasm
+cp crates/jc-zellij-plugin/target/wasm32-wasip1/release/jc_zellij_plugin.wasm target/bop-status.wasm
 
 # Then launch:
-zellij --layout zellij/jobcard.kdl
+zellij --layout zellij/bop.kdl
 ```
 
 ## Layout

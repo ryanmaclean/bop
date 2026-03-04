@@ -104,7 +104,7 @@ fi
 # ── Locate the card ───────────────────────────────────────────────────────────
 card_dir=""
 for state in running pending done merged failed; do
-  candidate="${ROOT}/.cards/${state}/${id}.jobcard"
+  candidate="${ROOT}/.cards/${state}/${id}.bop"
   [[ -d "$candidate" ]] && card_dir="$candidate" && break
 done
 

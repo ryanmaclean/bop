@@ -221,7 +221,7 @@ for p in sorted(set(changed_paths)):
     for root in runtime_roots():
         if not p_norm.startswith(root + "/"):
             continue
-        if ".jobcard/" not in p_norm:
+        if ".bop/" not in p_norm:
             continue
         if p_norm.endswith("/meta.json"):
             reasons.append(f"runtime card meta changed in VCS diff: {p}")

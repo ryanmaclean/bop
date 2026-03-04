@@ -13,7 +13,7 @@ TEAMS=(
   "team-platform:codex:adapters/codex.zsh"
 )
 
-SESSION="jobcard-teams"
+SESSION="bop-teams"
 
 # Kill existing session if present
 zellij delete-session "$SESSION" --force 2>/dev/null || true
@@ -24,7 +24,7 @@ echo "Launching dispatchers in zellij session: $SESSION"
 for (( i = 1; i <= ${#TEAMS}; i++ )); do
   IFS=':' read -r team_name adapter_name adapter_path <<< "${TEAMS[$i]}"
   cards_dir="$ROOT/.cards/$team_name"
-  log_file="/tmp/jobcard-$team_name.log"
+  log_file="/tmp/bop-$team_name.log"
 
   CMD=" --cards-dir $cards_dir dispatcher \
     --adapter $ROOT/$adapter_path \
@@ -56,7 +56,7 @@ done
 
 echo ""
 echo "All 5 dispatchers launched."
-echo "Watch logs:  tail -f /tmp/jobcard-team-*.log"
+echo "Watch logs:  tail -f /tmp/bop-team-*.log"
 echo "Check status per team:"
 for team in team-cli team-arch team-quality team-intelligence team-platform; do
   echo "   --cards-dir $ROOT/.cards/$team status"

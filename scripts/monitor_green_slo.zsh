@@ -32,7 +32,7 @@ for state in ("merged", "failed"):
     state_dir = root / state
     if not state_dir.exists():
         continue
-    for card in state_dir.glob("*.jobcard"):
+    for card in state_dir.glob("*.bop"):
         try:
             mtime = card.stat().st_mtime
         except OSError:

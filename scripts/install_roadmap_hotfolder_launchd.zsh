@@ -14,7 +14,7 @@ usage() {
 usage: install_roadmap_hotfolder_launchd.zsh [--inbox DIR] [--cards-dir DIR] [--uninstall] [--status]
 
 Installs a launchd QueueDirectories agent that watches a roadmap hot folder and
-creates roadmap jobcards in pending/.
+creates roadmap bops in pending/.
 USAGE
 }
 

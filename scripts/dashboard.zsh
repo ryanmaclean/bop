@@ -10,7 +10,7 @@ TEAMS=(
   "team-platform:codex"
 )
 
-count_cards() { find "$1" -maxdepth 1 -name '*.jobcard' -type d 2>/dev/null | wc -l | tr -d ' '; }
+count_cards() { find "$1" -maxdepth 1 -name '*.bop' -type d 2>/dev/null | wc -l | tr -d ' '; }
 
 while true; do
   clear
@@ -44,9 +44,9 @@ while true; do
     printf "║  p:%-2s r:%-2s d:%-2s m:%-2s f:%-2s%33s║\n" \
       "$n_pending" "$n_running" "$n_done" "$n_merged" "$n_failed" ""
 
-    for card_dir in "$cards_dir/running/"*.jobcard; do
+    for card_dir in "$cards_dir/running/"*.bop; do
       [ -d "$card_dir" ] || continue
-      card_name=$(basename "$card_dir" .jobcard)
+      card_name=$(basename "$card_dir" .bop)
       pid=""; pid_file="$card_dir/logs/pid"
       [ -f "$pid_file" ] && pid=" [$(cat "$pid_file")]"
       printf "║  ▶ %-25s%-32s║\n" "$card_name" "$pid"
@@ -78,9 +78,9 @@ while true; do
   for entry in "${TEAMS[@]}"; do
     IFS=':' read -r team _ <<< "$entry"
     for state in done merged; do
-      for card_dir in "$ROOT/.cards/$team/$state/"*.jobcard; do
+      for card_dir in "$ROOT/.cards/$team/$state/"*.bop; do
         [ -d "$card_dir" ] || continue
-        printf "  ✓ %-26s %s\n" "$(basename "$card_dir" .jobcard)" "$team"
+        printf "  ✓ %-26s %s\n" "$(basename "$card_dir" .bop)" "$team"
       done
     done
   done

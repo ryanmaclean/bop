@@ -1,4 +1,4 @@
-// bop.kdl — 7-pane Zellij layout for jobcard development
+// bop.kdl — 7-pane Zellij layout for bop development
 //
 // Pane map (card lifecycle left → right, top → bottom):
 //
@@ -45,7 +45,7 @@ layout {
                     pane split_direction="vertical" size="50%" {
                         pane name="spec" {
                             command "sh"
-                            args "-c" "echo 'SPEC — run: bop_focus.zsh <id>'; cat /tmp/.bop_card 2>/dev/null | xargs -I{} sh -c \"find .cards -name '{}.jobcard' 2>/dev/null | head -1 | xargs -I@ cat @/spec.md\" 2>/dev/null || zsh"
+                            args "-c" "echo 'SPEC — run: bop_focus.zsh <id>'; cat /tmp/.bop_card 2>/dev/null | xargs -I{} sh -c \"find .cards -name '{}.bop' 2>/dev/null | head -1 | xargs -I@ cat @/spec.md\" 2>/dev/null || zsh"
                         }
                         pane name="qa" {
                             command "sh"

@@ -20,8 +20,8 @@ npx vibe-kanban --config vibekanban/config.json
 
 ## Provider Script
 
-`jobcard-provider.zsh` polls the `.cards/` directory and outputs a JSON array of tasks.
-Override the cards directory with `CARDS_DIR=path ./vibekanban/jobcard-provider.zsh`.
+`bop-provider.zsh` polls the `.cards/` directory and outputs a JSON array of tasks.
+Override the cards directory with `CARDS_DIR=path ./vibekanban/bop-provider.zsh`.
 
 ## Actions
 

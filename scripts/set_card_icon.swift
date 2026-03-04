@@ -1,9 +1,9 @@
 #!/usr/bin/env swift
 // set_card_icon.swift <path>
 //
-// Sets a custom Finder icon on a .jobcard bundle OR a state directory.
+// Sets a custom Finder icon on a .bop bundle OR a state directory.
 //
-// .jobcard bundle  → stage-coloured rounded square with playing-card glyph (fan crop)
+// .bop bundle  → stage-coloured rounded square with playing-card glyph (fan crop)
 // state directory  → same colour + bold state label (DONE / FAILED / etc.)
 //
 // State colours (shared between cards and their parent dirs):
@@ -16,13 +16,13 @@ import Foundation
 // MARK: - Args
 
 guard CommandLine.arguments.count == 2 else {
-    fputs("usage: set_card_icon.swift <card.jobcard | state-dir>\n", stderr)
+    fputs("usage: set_card_icon.swift <card.bop | state-dir>\n", stderr)
     exit(2)
 }
 
 let targetPath = (CommandLine.arguments[1] as NSString).expandingTildeInPath
 let targetURL  = URL(fileURLWithPath: targetPath)
-let isCard     = targetURL.lastPathComponent.hasSuffix(".jobcard")
+let isCard     = targetURL.lastPathComponent.hasSuffix(".bop")
 
 // MARK: - Colours (keyed by state name)
 

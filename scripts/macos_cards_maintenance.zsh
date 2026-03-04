@@ -52,12 +52,12 @@ compress_card_hfs() {
 
 typeset -a cards
 cards=(
-  "${CARDS_ROOT}"/done/*.jobcard
-  "${CARDS_ROOT}"/failed/*.jobcard
-  "${CARDS_ROOT}"/merged/*.jobcard
-  "${CARDS_ROOT}"/team-*/done/*.jobcard
-  "${CARDS_ROOT}"/team-*/failed/*.jobcard
-  "${CARDS_ROOT}"/team-*/merged/*.jobcard
+  "${CARDS_ROOT}"/done/*.bop
+  "${CARDS_ROOT}"/failed/*.bop
+  "${CARDS_ROOT}"/merged/*.bop
+  "${CARDS_ROOT}"/team-*/done/*.bop
+  "${CARDS_ROOT}"/team-*/failed/*.bop
+  "${CARDS_ROOT}"/team-*/merged/*.bop
 )
 
 for card_dir in "${cards[@]}"; do
