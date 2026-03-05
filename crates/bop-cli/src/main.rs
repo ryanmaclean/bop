@@ -167,9 +167,9 @@ enum Command {
         /// Card ID, or "all" to promote every draft.
         id: String,
     },
-    /// Import cards from a YAML file into drafts/ (or pending/ with --immediate).
+    /// Import cards from a JSON file into drafts/ (or pending/ with --immediate).
     Import {
-        /// Path to YAML file with card definitions (same format as cards.yaml).
+        /// Path to JSON file with card definitions (a JSON array of card objects).
         source: String,
         /// Import directly to pending/ instead of drafts/.
         #[arg(long)]

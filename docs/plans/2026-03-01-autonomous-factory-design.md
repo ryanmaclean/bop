@@ -63,7 +63,7 @@ Templates configure three strategy dimensions:
 
 When a card finishes its current stage (exit 0):
 1. Dispatcher checks `stage_chain` in meta.json
-2. If next stage exists → writes `output/cards.yaml` with child card
+2. If next stage exists → writes `output/cards.json` with child card
 3. Child inherits: spec, glyph, constraints + prior stage output
 4. If final stage → card goes to done/ for merge-gate
 

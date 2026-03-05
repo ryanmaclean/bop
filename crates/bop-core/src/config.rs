@@ -25,42 +25,64 @@ pub fn merge_configs(base: Config, overlay: Config) -> Config {
     }
 }
 
-/// Parse YAML bytes into Config, returning a clear error on bad schema.
-pub fn parse_config(yaml: &str) -> anyhow::Result<Config> {
-    if yaml.trim().is_empty() {
+/// Parse JSON bytes into Config, returning a clear error on bad schema.
+pub fn parse_config(json: &str) -> anyhow::Result<Config> {
+    if json.trim().is_empty() {
         return Ok(Config::default());
     }
-    serde_yaml::from_str(yaml).context(
+    serde_json::from_str(json).context(
         "malformed config: expected schema with optional fields: \
         default_provider_chain, max_concurrent, cooldown_seconds, \
         log_retention_days, default_template",
     )
 }
 
-/// Return the global config path: ~/.bop/config.yaml
+/// Return the global config path: ~/.bop/config.json
 pub fn global_config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".bop").join("config.yaml"))
+    dirs::home_dir().map(|h| h.join(".bop").join("config.json"))
 }
 
-/// Return the project config path: <cwd>/.bop/config.yaml
+/// Return the project config path: <cwd>/.bop/config.json
 pub fn project_config_path() -> PathBuf {
     std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(".bop")
-        .join("config.yaml")
+        .join("config.json")
+}
+
+/// Migration warning: config.yaml → config.json
+fn warn_if_stale_yaml(json_path: &std::path::Path) {
+    let yaml_path = json_path.with_extension("yaml");
+    if !json_path.exists() && yaml_path.exists() {
+        eprintln!(
+            "bop: config file '{}' found but '{}' not present. \
+             Please rename your config file: mv {} {}",
+            yaml_path.display(),
+            json_path.display(),
+            yaml_path.display(),
+            json_path.display(),
+        );
+    }
 }
 
 /// Load and merge global + project configs.  Missing files are silently skipped.
-/// Returns merged Config and emits a clear error for malformed YAML.
+/// Returns merged Config and emits a clear error for malformed JSON.
 pub fn load_config() -> anyhow::Result<Config> {
     let global = match global_config_path() {
-        Some(p) if p.exists() => {
-            read_config_file(&p).with_context(|| format!("global config error: {}", p.display()))?
+        Some(p) => {
+            warn_if_stale_yaml(&p);
+            if p.exists() {
+                read_config_file(&p)
+                    .with_context(|| format!("global config error: {}", p.display()))?
+            } else {
+                Config::default()
+            }
         }
-        _ => Config::default(),
+        None => Config::default(),
     };
 
     let project_path = project_config_path();
+    warn_if_stale_yaml(&project_path);
     let project = if project_path.exists() {
         read_config_file(&project_path)
             .with_context(|| format!("project config error: {}", project_path.display()))?
@@ -73,9 +95,9 @@ pub fn load_config() -> anyhow::Result<Config> {
 
 /// Read config from a specific path (used by `bop config get/set`).
 pub fn read_config_file(path: &Path) -> anyhow::Result<Config> {
-    let yaml = std::fs::read_to_string(path)
+    let json = std::fs::read_to_string(path)
         .with_context(|| format!("cannot read config: {}", path.display()))?;
-    parse_config(&yaml).with_context(|| format!("invalid config at {}", path.display()))
+    parse_config(&json).with_context(|| format!("invalid config at {}", path.display()))
 }
 
 /// Write config to a specific path (used by `bop config set`).
@@ -84,8 +106,8 @@ pub fn write_config_file(path: &Path, cfg: &Config) -> anyhow::Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("cannot create config dir: {}", parent.display()))?;
     }
-    let yaml = serde_yaml::to_string(cfg).context("failed to serialize config")?;
-    std::fs::write(path, yaml)
+    let json = serde_json::to_string_pretty(cfg).context("failed to serialize config")?;
+    std::fs::write(path, json)
         .with_context(|| format!("cannot write config: {}", path.display()))?;
     Ok(())
 }
@@ -95,15 +117,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_valid_yaml() {
-        let yaml = r#"
-default_provider_chain: [claude, codex]
-max_concurrent: 3
-cooldown_seconds: 120
-log_retention_days: 7
-default_template: implement
-"#;
-        let cfg = parse_config(yaml).unwrap();
+    fn parse_valid_json() {
+        let json = r#"{
+  "default_provider_chain": ["claude", "codex"],
+  "max_concurrent": 3,
+  "cooldown_seconds": 120,
+  "log_retention_days": 7,
+  "default_template": "implement"
+}"#;
+        let cfg = parse_config(json).unwrap();
         assert_eq!(
             cfg.default_provider_chain,
             Some(vec!["claude".to_string(), "codex".to_string()])
@@ -115,22 +137,22 @@ default_template: implement
     }
 
     #[test]
-    fn parse_partial_yaml() {
-        let yaml = "max_concurrent: 5\n";
-        let cfg = parse_config(yaml).unwrap();
+    fn parse_partial_json() {
+        let json = r#"{"max_concurrent": 5}"#;
+        let cfg = parse_config(json).unwrap();
         assert_eq!(cfg.max_concurrent, Some(5));
         assert_eq!(cfg.default_provider_chain, None);
     }
 
     #[test]
-    fn parse_empty_yaml() {
+    fn parse_empty_json() {
         let cfg = parse_config("").unwrap();
         assert_eq!(cfg, Config::default());
     }
 
     #[test]
-    fn parse_malformed_yaml_returns_error() {
-        let result = parse_config("max_concurrent: not_a_number\n");
+    fn parse_malformed_json_returns_error() {
+        let result = parse_config(r#"{"max_concurrent": "not_a_number"}"#);
         assert!(result.is_err(), "expected error for bad schema");
         let msg = result.unwrap_err().to_string();
         assert!(
@@ -172,7 +194,7 @@ default_template: implement
     #[test]
     fn roundtrip_config_file() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.yaml");
+        let path = dir.path().join("config.json");
         let cfg = Config {
             max_concurrent: Some(2),
             default_template: Some("implement".to_string()),
@@ -186,7 +208,7 @@ default_template: implement
 
     #[test]
     fn read_missing_file_returns_error() {
-        let result = read_config_file(std::path::Path::new("/nonexistent/path/config.yaml"));
+        let result = read_config_file(std::path::Path::new("/nonexistent/path/config.json"));
         assert!(result.is_err());
     }
 }

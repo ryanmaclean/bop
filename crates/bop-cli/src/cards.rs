@@ -238,9 +238,9 @@ pub fn create_card(
     Ok(card_dir)
 }
 
-// ── YAML card helpers ────────────────────────────────────────────────────────
+// ── JSON card helpers ─────────────────────────────────────────────────────────
 
-pub fn priority_from_yaml(value: &serde_yaml::Value) -> i64 {
+pub fn priority_from_json(value: &serde_json::Value) -> i64 {
     if let Some(n) = value.as_i64() {
         return n;
     }
@@ -260,11 +260,11 @@ pub fn priority_from_yaml(value: &serde_yaml::Value) -> i64 {
 
 /// Build labels array from explicit labels + roadmap-specific fields
 /// (phase, complexity, impact).
-pub fn labels_from_yaml(entry: &serde_yaml::Value) -> Vec<serde_json::Value> {
+pub fn labels_from_json(entry: &serde_json::Value) -> Vec<serde_json::Value> {
     let mut labels: Vec<serde_json::Value> = Vec::new();
 
     // Explicit labels array
-    if let Some(seq) = entry["labels"].as_sequence() {
+    if let Some(seq) = entry["labels"].as_array() {
         for item in seq {
             if let Some(name) = item.as_str() {
                 labels.push(serde_json::json!({"name": name}));
@@ -308,11 +308,11 @@ pub fn labels_from_yaml(entry: &serde_yaml::Value) -> Vec<serde_json::Value> {
 }
 
 /// Build subtasks array from explicit subtasks + user_stories.
-pub fn subtasks_from_yaml(entry: &serde_yaml::Value) -> Vec<serde_json::Value> {
+pub fn subtasks_from_json(entry: &serde_json::Value) -> Vec<serde_json::Value> {
     let mut subtasks: Vec<serde_json::Value> = Vec::new();
 
     // Explicit subtasks
-    if let Some(seq) = entry["subtasks"].as_sequence() {
+    if let Some(seq) = entry["subtasks"].as_array() {
         for item in seq {
             if let Some(title) = item["title"].as_str() {
                 subtasks.push(serde_json::json!({
@@ -325,7 +325,7 @@ pub fn subtasks_from_yaml(entry: &serde_yaml::Value) -> Vec<serde_json::Value> {
     }
 
     // User stories → subtasks
-    if let Some(seq) = entry["user_stories"].as_sequence() {
+    if let Some(seq) = entry["user_stories"].as_array() {
         for (i, story) in seq.iter().enumerate() {
             if let Some(text) = story.as_str() {
                 subtasks.push(serde_json::json!({
@@ -340,10 +340,10 @@ pub fn subtasks_from_yaml(entry: &serde_yaml::Value) -> Vec<serde_json::Value> {
     subtasks
 }
 
-/// Build spec.md content from a YAML card entry.
+/// Build spec.md content from a JSON card entry.
 ///
 /// Assembles sections: description, rationale, user stories, dependencies.
-pub fn build_spec_md(entry: &serde_yaml::Value, id: &str) -> String {
+pub fn build_spec_md(entry: &serde_json::Value, id: &str) -> String {
     let title = entry["title"].as_str().unwrap_or(id);
     let mut spec = format!("# {}\n", title);
 
@@ -355,7 +355,7 @@ pub fn build_spec_md(entry: &serde_yaml::Value, id: &str) -> String {
         spec.push_str(&format!("\n## Rationale\n\n{}\n", rationale));
     }
 
-    if let Some(stories) = entry["user_stories"].as_sequence() {
+    if let Some(stories) = entry["user_stories"].as_array() {
         let items: Vec<&str> = stories.iter().filter_map(|v| v.as_str()).collect();
         if !items.is_empty() {
             spec.push_str("\n## User Stories\n\n");
@@ -365,7 +365,7 @@ pub fn build_spec_md(entry: &serde_yaml::Value, id: &str) -> String {
         }
     }
 
-    if let Some(deps) = entry["depends_on"].as_sequence() {
+    if let Some(deps) = entry["depends_on"].as_array() {
         let items: Vec<&str> = deps.iter().filter_map(|v| v.as_str()).collect();
         if !items.is_empty() {
             spec.push_str("\n## Dependencies\n\n");
@@ -375,7 +375,7 @@ pub fn build_spec_md(entry: &serde_yaml::Value, id: &str) -> String {
         }
     }
 
-    if let Some(criteria) = entry["acceptance_criteria"].as_sequence() {
+    if let Some(criteria) = entry["acceptance_criteria"].as_array() {
         let items: Vec<&str> = criteria.iter().filter_map(|v| v.as_str()).collect();
         if !items.is_empty() {
             spec.push_str("\n## Acceptance Criteria\n\n");
@@ -388,9 +388,9 @@ pub fn build_spec_md(entry: &serde_yaml::Value, id: &str) -> String {
     spec
 }
 
-/// Create a .bop directory from a YAML entry. Used by both
+/// Create a .bop directory from a JSON entry. Used by both
 /// `spawn_child_cards()` and `cmd_import()`.
-pub fn create_card_from_yaml(dest_dir: &Path, entry: &serde_yaml::Value) -> Option<String> {
+pub fn create_card_from_json(dest_dir: &Path, entry: &serde_json::Value) -> Option<String> {
     let id = entry["id"].as_str()?;
     let child_dir = dest_dir.join(format!("{}.bop", id));
     if child_dir.exists() {
@@ -399,8 +399,8 @@ pub fn create_card_from_yaml(dest_dir: &Path, entry: &serde_yaml::Value) -> Opti
     let _ = fs::create_dir_all(child_dir.join("logs"));
     let _ = fs::create_dir_all(child_dir.join("output"));
 
-    let labels = labels_from_yaml(entry);
-    let subtasks = subtasks_from_yaml(entry);
+    let labels = labels_from_json(entry);
+    let subtasks = subtasks_from_json(entry);
 
     let stage = entry["stage"].as_str().unwrap_or("spec");
     let workflow_mode = entry["workflow_mode"].as_str();
@@ -410,9 +410,9 @@ pub fn create_card_from_yaml(dest_dir: &Path, entry: &serde_yaml::Value) -> Opti
         "title": entry["title"].as_str().unwrap_or(id),
         "description": entry["description"].as_str().unwrap_or(""),
         "stage": stage,
-        "priority": priority_from_yaml(&entry["priority"]),
+        "priority": priority_from_json(&entry["priority"]),
         "created": chrono::Utc::now().to_rfc3339(),
-        "provider_chain": entry["provider_chain"].as_sequence()
+        "provider_chain": entry["provider_chain"].as_array()
             .map(|s| s.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
             .unwrap_or_else(|| vec!["claude"]),
         "stages": {
@@ -421,7 +421,7 @@ pub fn create_card_from_yaml(dest_dir: &Path, entry: &serde_yaml::Value) -> Opti
             "implement": {"status": "blocked", "agent": null},
             "qa": {"status": "blocked", "agent": null}
         },
-        "acceptance_criteria": entry["acceptance_criteria"].as_sequence()
+        "acceptance_criteria": entry["acceptance_criteria"].as_array()
             .map(|s| s.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
             .unwrap_or_default(),
         "retry_count": 0
@@ -437,7 +437,7 @@ pub fn create_card_from_yaml(dest_dir: &Path, entry: &serde_yaml::Value) -> Opti
     if let Some(wm) = workflow_mode {
         meta["workflow_mode"] = serde_json::Value::String(wm.to_string());
     }
-    if let Some(deps) = entry["depends_on"].as_sequence() {
+    if let Some(deps) = entry["depends_on"].as_array() {
         let dep_ids: Vec<serde_json::Value> = deps
             .iter()
             .filter_map(|v| v.as_str().map(|s| serde_json::Value::String(s.to_string())))
@@ -457,7 +457,7 @@ pub fn create_card_from_yaml(dest_dir: &Path, entry: &serde_yaml::Value) -> Opti
     let _ = fs::write(child_dir.join("spec.md"), spec);
 
     // Write roadmap.json snapshot if features are present
-    if let Some(features) = entry["features"].as_sequence() {
+    if let Some(features) = entry["features"].as_array() {
         let roadmap_json = serde_json::json!({
             "features": features.iter().map(|f| {
                 serde_json::json!({
@@ -479,15 +479,15 @@ pub fn create_card_from_yaml(dest_dir: &Path, entry: &serde_yaml::Value) -> Opti
 }
 
 pub fn spawn_child_cards(cards_dir: &Path, done_card_dir: &Path) {
-    let yaml_path = done_card_dir.join("output/cards.yaml");
-    if !yaml_path.exists() {
+    let json_path = done_card_dir.join("output/cards.json");
+    if !json_path.exists() {
         return;
     }
 
-    let Ok(text) = fs::read_to_string(&yaml_path) else {
+    let Ok(text) = fs::read_to_string(&json_path) else {
         return;
     };
-    let Ok(entries) = serde_yaml::from_str::<Vec<serde_yaml::Value>>(&text) else {
+    let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(&text) else {
         return;
     };
 
@@ -500,7 +500,7 @@ pub fn spawn_child_cards(cards_dir: &Path, done_card_dir: &Path) {
     let _ = fs::create_dir_all(&dest_dir);
 
     for entry in entries {
-        if let Some(id) = create_card_from_yaml(&dest_dir, &entry) {
+        if let Some(id) = create_card_from_json(&dest_dir, &entry) {
             eprintln!("[child-cards] created {} in {}/", id, dest);
         }
     }
@@ -753,8 +753,8 @@ pub fn cmd_bstorm(
 
 pub fn cmd_import(root: &Path, source: &str, immediate: bool) -> anyhow::Result<()> {
     let text = fs::read_to_string(source).with_context(|| format!("cannot read {}", source))?;
-    let entries: Vec<serde_yaml::Value> = serde_yaml::from_str(&text)
-        .context("invalid YAML — expected a sequence of card definitions")?;
+    let entries: Vec<serde_json::Value> = serde_json::from_str(&text)
+        .context("invalid JSON — expected a JSON array of card definitions")?;
 
     let dest = if immediate { "pending" } else { "drafts" };
     let dest_dir = root.join(dest);
@@ -765,7 +765,7 @@ pub fn cmd_import(root: &Path, source: &str, immediate: bool) -> anyhow::Result<
         if entry["id"].as_str().is_none() {
             continue;
         }
-        match create_card_from_yaml(&dest_dir, entry) {
+        match create_card_from_json(&dest_dir, entry) {
             Some(id) => {
                 eprintln!("[import] created {}", id);
                 count += 1;
@@ -840,179 +840,159 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    // ── priority_from_yaml ────────────────────────────────────────────────
+    // ── priority_from_json ────────────────────────────────────────────────
 
     #[test]
-    fn priority_from_yaml_integer_passthrough() {
-        let v: serde_yaml::Value = serde_yaml::from_str("2").unwrap();
-        assert_eq!(priority_from_yaml(&v), 2);
+    fn priority_from_json_integer_passthrough() {
+        let v = serde_json::json!(2);
+        assert_eq!(priority_from_json(&v), 2);
     }
 
     #[test]
-    fn priority_from_yaml_must_maps_to_1() {
-        let v: serde_yaml::Value = serde_yaml::from_str("must").unwrap();
-        assert_eq!(priority_from_yaml(&v), 1);
+    fn priority_from_json_must_maps_to_1() {
+        let v = serde_json::json!("must");
+        assert_eq!(priority_from_json(&v), 1);
     }
 
     #[test]
-    fn priority_from_yaml_should_maps_to_2() {
-        let v: serde_yaml::Value = serde_yaml::from_str("should").unwrap();
-        assert_eq!(priority_from_yaml(&v), 2);
+    fn priority_from_json_should_maps_to_2() {
+        let v = serde_json::json!("should");
+        assert_eq!(priority_from_json(&v), 2);
     }
 
     #[test]
-    fn priority_from_yaml_could_maps_to_3() {
-        let v: serde_yaml::Value = serde_yaml::from_str("could").unwrap();
-        assert_eq!(priority_from_yaml(&v), 3);
+    fn priority_from_json_could_maps_to_3() {
+        let v = serde_json::json!("could");
+        assert_eq!(priority_from_json(&v), 3);
     }
 
     #[test]
-    fn priority_from_yaml_critical_maps_to_1() {
-        let v: serde_yaml::Value = serde_yaml::from_str("critical").unwrap();
-        assert_eq!(priority_from_yaml(&v), 1);
+    fn priority_from_json_critical_maps_to_1() {
+        let v = serde_json::json!("critical");
+        assert_eq!(priority_from_json(&v), 1);
     }
 
     #[test]
-    fn priority_from_yaml_important_maps_to_2() {
-        let v: serde_yaml::Value = serde_yaml::from_str("important").unwrap();
-        assert_eq!(priority_from_yaml(&v), 2);
+    fn priority_from_json_important_maps_to_2() {
+        let v = serde_json::json!("important");
+        assert_eq!(priority_from_json(&v), 2);
     }
 
     #[test]
-    fn priority_from_yaml_string_number_parsed() {
-        let v: serde_yaml::Value = serde_yaml::from_str("\"2\"").unwrap();
-        assert_eq!(priority_from_yaml(&v), 2);
+    fn priority_from_json_string_number_parsed() {
+        let v = serde_json::json!("2");
+        assert_eq!(priority_from_json(&v), 2);
     }
 
     #[test]
-    fn priority_from_yaml_unknown_defaults_to_3() {
-        let v: serde_yaml::Value = serde_yaml::from_str("banana").unwrap();
-        assert_eq!(priority_from_yaml(&v), 3);
+    fn priority_from_json_unknown_defaults_to_3() {
+        let v = serde_json::json!("banana");
+        assert_eq!(priority_from_json(&v), 3);
     }
 
     #[test]
-    fn priority_from_yaml_must_have_maps_to_1() {
-        let v: serde_yaml::Value = serde_yaml::from_str("must_have").unwrap();
-        assert_eq!(priority_from_yaml(&v), 1);
+    fn priority_from_json_must_have_maps_to_1() {
+        let v = serde_json::json!("must_have");
+        assert_eq!(priority_from_json(&v), 1);
     }
 
     #[test]
-    fn priority_from_yaml_nice_to_have_maps_to_3() {
-        let v: serde_yaml::Value = serde_yaml::from_str("nice_to_have").unwrap();
-        assert_eq!(priority_from_yaml(&v), 3);
+    fn priority_from_json_nice_to_have_maps_to_3() {
+        let v = serde_json::json!("nice_to_have");
+        assert_eq!(priority_from_json(&v), 3);
     }
 
-    // ── labels_from_yaml ──────────────────────────────────────────────────
+    // ── labels_from_json ──────────────────────────────────────────────────
 
     #[test]
-    fn labels_from_yaml_explicit_labels_array() {
-        let entry: serde_yaml::Value = serde_yaml::from_str(
-            r#"
-labels:
-  - "Coding"
-  - "Performance"
-"#,
-        )
-        .unwrap();
-        let labels = labels_from_yaml(&entry);
+    fn labels_from_json_explicit_labels_array() {
+        let entry = serde_json::json!({"labels": ["Coding", "Performance"]});
+        let labels = labels_from_json(&entry);
         assert_eq!(labels.len(), 2);
         assert_eq!(labels[0]["name"], "Coding");
         assert_eq!(labels[1]["name"], "Performance");
     }
 
     #[test]
-    fn labels_from_yaml_phase_label() {
-        let entry: serde_yaml::Value = serde_yaml::from_str("phase: alpha").unwrap();
-        let labels = labels_from_yaml(&entry);
+    fn labels_from_json_phase_label() {
+        let entry = serde_json::json!({"phase": "alpha"});
+        let labels = labels_from_json(&entry);
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0]["name"], "alpha");
         assert_eq!(labels[0]["kind"], "phase");
     }
 
     #[test]
-    fn labels_from_yaml_complexity_low() {
-        let entry: serde_yaml::Value = serde_yaml::from_str("complexity: low").unwrap();
-        let labels = labels_from_yaml(&entry);
+    fn labels_from_json_complexity_low() {
+        let entry = serde_json::json!({"complexity": "low"});
+        let labels = labels_from_json(&entry);
         assert_eq!(labels[0]["name"], "Low Complexity");
         assert_eq!(labels[0]["kind"], "complexity");
     }
 
     #[test]
-    fn labels_from_yaml_complexity_medium() {
-        let entry: serde_yaml::Value = serde_yaml::from_str("complexity: medium").unwrap();
-        let labels = labels_from_yaml(&entry);
+    fn labels_from_json_complexity_medium() {
+        let entry = serde_json::json!({"complexity": "medium"});
+        let labels = labels_from_json(&entry);
         assert_eq!(labels[0]["name"], "Medium Complexity");
     }
 
     #[test]
-    fn labels_from_yaml_complexity_high() {
-        let entry: serde_yaml::Value = serde_yaml::from_str("complexity: high").unwrap();
-        let labels = labels_from_yaml(&entry);
+    fn labels_from_json_complexity_high() {
+        let entry = serde_json::json!({"complexity": "high"});
+        let labels = labels_from_json(&entry);
         assert_eq!(labels[0]["name"], "High Complexity");
     }
 
     #[test]
-    fn labels_from_yaml_impact_low() {
-        let entry: serde_yaml::Value = serde_yaml::from_str("impact: low").unwrap();
-        let labels = labels_from_yaml(&entry);
+    fn labels_from_json_impact_low() {
+        let entry = serde_json::json!({"impact": "low"});
+        let labels = labels_from_json(&entry);
         assert_eq!(labels[0]["name"], "Low Impact");
         assert_eq!(labels[0]["kind"], "impact");
     }
 
     #[test]
-    fn labels_from_yaml_impact_medium() {
-        let entry: serde_yaml::Value = serde_yaml::from_str("impact: medium").unwrap();
-        let labels = labels_from_yaml(&entry);
+    fn labels_from_json_impact_medium() {
+        let entry = serde_json::json!({"impact": "medium"});
+        let labels = labels_from_json(&entry);
         assert_eq!(labels[0]["name"], "Medium Impact");
     }
 
     #[test]
-    fn labels_from_yaml_impact_high() {
-        let entry: serde_yaml::Value = serde_yaml::from_str("impact: high").unwrap();
-        let labels = labels_from_yaml(&entry);
+    fn labels_from_json_impact_high() {
+        let entry = serde_json::json!({"impact": "high"});
+        let labels = labels_from_json(&entry);
         assert_eq!(labels[0]["name"], "High Impact");
     }
 
     #[test]
-    fn labels_from_yaml_empty_for_no_labels() {
-        let entry: serde_yaml::Value = serde_yaml::from_str("id: foo").unwrap();
-        let labels = labels_from_yaml(&entry);
+    fn labels_from_json_empty_for_no_labels() {
+        let entry = serde_json::json!({"id": "foo"});
+        let labels = labels_from_json(&entry);
         assert!(labels.is_empty());
     }
 
     #[test]
-    fn labels_from_yaml_structured_labels_with_kind() {
-        let entry: serde_yaml::Value = serde_yaml::from_str(
-            r#"
-labels:
-  - name: "Bug"
-    kind: "type"
-"#,
-        )
-        .unwrap();
-        let labels = labels_from_yaml(&entry);
+    fn labels_from_json_structured_labels_with_kind() {
+        let entry = serde_json::json!({"labels": [{"name": "Bug", "kind": "type"}]});
+        let labels = labels_from_json(&entry);
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0]["name"], "Bug");
         assert_eq!(labels[0]["kind"], "type");
     }
 
-    // ── subtasks_from_yaml ────────────────────────────────────────────────
+    // ── subtasks_from_json ────────────────────────────────────────────────
 
     #[test]
-    fn subtasks_from_yaml_explicit_subtasks() {
-        let entry: serde_yaml::Value = serde_yaml::from_str(
-            r#"
-subtasks:
-  - id: "st-1"
-    title: "Write tests"
-    done: true
-  - id: "st-2"
-    title: "Review PR"
-    done: false
-"#,
-        )
-        .unwrap();
-        let subs = subtasks_from_yaml(&entry);
+    fn subtasks_from_json_explicit_subtasks() {
+        let entry = serde_json::json!({
+            "subtasks": [
+                {"id": "st-1", "title": "Write tests", "done": true},
+                {"id": "st-2", "title": "Review PR", "done": false}
+            ]
+        });
+        let subs = subtasks_from_json(&entry);
         assert_eq!(subs.len(), 2);
         assert_eq!(subs[0]["id"], "st-1");
         assert_eq!(subs[0]["title"], "Write tests");
@@ -1021,16 +1001,14 @@ subtasks:
     }
 
     #[test]
-    fn subtasks_from_yaml_user_stories_converted() {
-        let entry: serde_yaml::Value = serde_yaml::from_str(
-            r#"
-user_stories:
-  - "As a user I want to login"
-  - "As a user I want to logout"
-"#,
-        )
-        .unwrap();
-        let subs = subtasks_from_yaml(&entry);
+    fn subtasks_from_json_user_stories_converted() {
+        let entry = serde_json::json!({
+            "user_stories": [
+                "As a user I want to login",
+                "As a user I want to logout"
+            ]
+        });
+        let subs = subtasks_from_json(&entry);
         assert_eq!(subs.len(), 2);
         assert_eq!(subs[0]["id"], "us-1");
         assert_eq!(subs[0]["title"], "As a user I want to login");
@@ -1039,9 +1017,9 @@ user_stories:
     }
 
     #[test]
-    fn subtasks_from_yaml_empty_for_no_subtasks() {
-        let entry: serde_yaml::Value = serde_yaml::from_str("id: foo").unwrap();
-        let subs = subtasks_from_yaml(&entry);
+    fn subtasks_from_json_empty_for_no_subtasks() {
+        let entry = serde_json::json!({"id": "foo"});
+        let subs = subtasks_from_json(&entry);
         assert!(subs.is_empty());
     }
 
@@ -1049,23 +1027,21 @@ user_stories:
 
     #[test]
     fn build_spec_md_includes_title_as_h1() {
-        let entry: serde_yaml::Value = serde_yaml::from_str("title: My Feature").unwrap();
+        let entry = serde_json::json!({"title": "My Feature"});
         let spec = build_spec_md(&entry, "my-feature");
         assert!(spec.starts_with("# My Feature\n"));
     }
 
     #[test]
     fn build_spec_md_includes_description() {
-        let entry: serde_yaml::Value =
-            serde_yaml::from_str("title: T\ndescription: Some details").unwrap();
+        let entry = serde_json::json!({"title": "T", "description": "Some details"});
         let spec = build_spec_md(&entry, "t");
         assert!(spec.contains("\nSome details\n"));
     }
 
     #[test]
     fn build_spec_md_includes_rationale() {
-        let entry: serde_yaml::Value =
-            serde_yaml::from_str("title: T\nrationale: Because reasons").unwrap();
+        let entry = serde_json::json!({"title": "T", "rationale": "Because reasons"});
         let spec = build_spec_md(&entry, "t");
         assert!(spec.contains("## Rationale"));
         assert!(spec.contains("Because reasons"));
@@ -1073,15 +1049,10 @@ user_stories:
 
     #[test]
     fn build_spec_md_includes_user_stories_as_bullet_list() {
-        let entry: serde_yaml::Value = serde_yaml::from_str(
-            r#"
-title: T
-user_stories:
-  - "story one"
-  - "story two"
-"#,
-        )
-        .unwrap();
+        let entry = serde_json::json!({
+            "title": "T",
+            "user_stories": ["story one", "story two"]
+        });
         let spec = build_spec_md(&entry, "t");
         assert!(spec.contains("## User Stories"));
         assert!(spec.contains("- story one\n"));
@@ -1090,14 +1061,10 @@ user_stories:
 
     #[test]
     fn build_spec_md_includes_dependencies_with_backticks() {
-        let entry: serde_yaml::Value = serde_yaml::from_str(
-            r#"
-title: T
-depends_on:
-  - "core-lib"
-"#,
-        )
-        .unwrap();
+        let entry = serde_json::json!({
+            "title": "T",
+            "depends_on": ["core-lib"]
+        });
         let spec = build_spec_md(&entry, "t");
         assert!(spec.contains("## Dependencies"));
         assert!(spec.contains("- `core-lib`\n"));
@@ -1105,14 +1072,10 @@ depends_on:
 
     #[test]
     fn build_spec_md_includes_acceptance_criteria_as_checklist() {
-        let entry: serde_yaml::Value = serde_yaml::from_str(
-            r#"
-title: T
-acceptance_criteria:
-  - "Tests pass"
-"#,
-        )
-        .unwrap();
+        let entry = serde_json::json!({
+            "title": "T",
+            "acceptance_criteria": ["Tests pass"]
+        });
         let spec = build_spec_md(&entry, "t");
         assert!(spec.contains("## Acceptance Criteria"));
         assert!(spec.contains("- [ ] Tests pass\n"));
@@ -1120,33 +1083,44 @@ acceptance_criteria:
 
     #[test]
     fn build_spec_md_handles_entry_with_only_title() {
-        let entry: serde_yaml::Value = serde_yaml::from_str("title: Minimal").unwrap();
+        let entry = serde_json::json!({"title": "Minimal"});
         let spec = build_spec_md(&entry, "minimal");
         assert_eq!(spec, "# Minimal\n");
     }
 
     #[test]
     fn build_spec_md_uses_id_when_title_absent() {
-        let entry: serde_yaml::Value = serde_yaml::from_str("description: foo").unwrap();
+        let entry = serde_json::json!({"description": "foo"});
         let spec = build_spec_md(&entry, "fallback-id");
         assert!(spec.starts_with("# fallback-id\n"));
     }
 
-    // ── create_card_from_yaml ─────────────────────────────────────────────
+    // ── create_card_from_json ─────────────────────────────────────────────
 
     #[test]
-    fn create_card_from_yaml_creates_bop_dir() {
+    fn create_card_from_json_seed() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let entry: serde_json::Value = serde_json::json!({
+            "id": "child-test",
+            "template": "implement",
+            "spec": "# Child\nDo Y"
+        });
+        let id = create_card_from_json(tmp.path(), &entry);
+        assert!(id.is_some(), "should create card directory");
+        let card_dir = tmp.path().join("child-test.bop");
+        assert!(card_dir.join("meta.json").exists(), "meta.json must exist");
+    }
+
+    #[test]
+    fn create_card_from_json_creates_bop_dir() {
         let td = tempdir().unwrap();
         let dest = td.path();
-        let entry: serde_yaml::Value = serde_yaml::from_str(
-            r#"
-id: "test-card"
-title: "Test Card"
-description: "A test"
-"#,
-        )
-        .unwrap();
-        let result = create_card_from_yaml(dest, &entry);
+        let entry = serde_json::json!({
+            "id": "test-card",
+            "title": "Test Card",
+            "description": "A test"
+        });
+        let result = create_card_from_json(dest, &entry);
         assert_eq!(result, Some("test-card".to_string()));
 
         let card_dir = dest.join("test-card.bop");
@@ -1158,40 +1132,35 @@ description: "A test"
     }
 
     #[test]
-    fn create_card_from_yaml_skips_existing() {
+    fn create_card_from_json_skips_existing() {
         let td = tempdir().unwrap();
         let dest = td.path();
         fs::create_dir_all(dest.join("test-card.bop")).unwrap();
 
-        let entry: serde_yaml::Value = serde_yaml::from_str("id: test-card\ntitle: Test").unwrap();
-        let result = create_card_from_yaml(dest, &entry);
+        let entry = serde_json::json!({"id": "test-card", "title": "Test"});
+        let result = create_card_from_json(dest, &entry);
         assert_eq!(result, None);
     }
 
     #[test]
-    fn create_card_from_yaml_returns_none_without_id() {
+    fn create_card_from_json_returns_none_without_id() {
         let td = tempdir().unwrap();
-        let entry: serde_yaml::Value = serde_yaml::from_str("title: No ID").unwrap();
-        let result = create_card_from_yaml(td.path(), &entry);
+        let entry = serde_json::json!({"title": "No ID"});
+        let result = create_card_from_json(td.path(), &entry);
         assert_eq!(result, None);
     }
 
     #[test]
-    fn create_card_from_yaml_writes_roadmap_json_with_features() {
+    fn create_card_from_json_writes_roadmap_json_with_features() {
         let td = tempdir().unwrap();
-        let entry: serde_yaml::Value = serde_yaml::from_str(
-            r#"
-id: "roadmap-card"
-title: "Roadmap"
-features:
-  - title: "Feature A"
-    status: "planned"
-    priority: "high"
-    phase: "alpha"
-"#,
-        )
-        .unwrap();
-        create_card_from_yaml(td.path(), &entry);
+        let entry = serde_json::json!({
+            "id": "roadmap-card",
+            "title": "Roadmap",
+            "features": [
+                {"title": "Feature A", "status": "planned", "priority": "high", "phase": "alpha"}
+            ]
+        });
+        create_card_from_json(td.path(), &entry);
         let roadmap = td.path().join("roadmap-card.bop/output/roadmap.json");
         assert!(roadmap.exists());
         let content: serde_json::Value =
@@ -1200,18 +1169,15 @@ features:
     }
 
     #[test]
-    fn create_card_from_yaml_meta_json_has_correct_fields() {
+    fn create_card_from_json_meta_json_has_correct_fields() {
         let td = tempdir().unwrap();
-        let entry: serde_yaml::Value = serde_yaml::from_str(
-            r#"
-id: "meta-test"
-title: "Meta Test"
-priority: must
-stage: plan
-"#,
-        )
-        .unwrap();
-        create_card_from_yaml(td.path(), &entry);
+        let entry = serde_json::json!({
+            "id": "meta-test",
+            "title": "Meta Test",
+            "priority": "must",
+            "stage": "plan"
+        });
+        create_card_from_json(td.path(), &entry);
         let meta_path = td.path().join("meta-test.bop/meta.json");
         let meta: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(meta_path).unwrap()).unwrap();
@@ -1656,12 +1622,12 @@ stage: plan
     // ── spawn_child_cards ─────────────────────────────────────────────────
 
     #[test]
-    fn spawn_child_cards_creates_children_from_yaml() {
+    fn spawn_child_cards_creates_children_from_json() {
         let td = tempdir().unwrap();
         let root = td.path();
         paths::ensure_cards_layout(root).unwrap();
 
-        // Create a done card with output/cards.yaml
+        // Create a done card with output/cards.json
         let done_card = root.join("done/parent.bop");
         fs::create_dir_all(done_card.join("output")).unwrap();
         fs::create_dir_all(done_card.join("logs")).unwrap();
@@ -1716,13 +1682,11 @@ stage: plan
         };
         write_meta(&done_card, &parent_meta).unwrap();
 
-        let yaml = r#"
-- id: child-a
-  title: Child A
-- id: child-b
-  title: Child B
-"#;
-        fs::write(done_card.join("output/cards.yaml"), yaml).unwrap();
+        let json = r#"[
+  {"id": "child-a", "title": "Child A"},
+  {"id": "child-b", "title": "Child B"}
+]"#;
+        fs::write(done_card.join("output/cards.json"), json).unwrap();
 
         spawn_child_cards(root, &done_card);
 
@@ -1731,12 +1695,12 @@ stage: plan
     }
 
     #[test]
-    fn spawn_child_cards_noop_when_yaml_missing() {
+    fn spawn_child_cards_noop_when_json_missing() {
         let td = tempdir().unwrap();
         let root = td.path();
         paths::ensure_cards_layout(root).unwrap();
 
-        let done_card = root.join("done/no-yaml.bop");
+        let done_card = root.join("done/no-json.bop");
         fs::create_dir_all(done_card.join("logs")).unwrap();
 
         // Should not panic or error
@@ -1746,24 +1710,22 @@ stage: plan
     // ── cmd_import ────────────────────────────────────────────────────────
 
     #[test]
-    fn cmd_import_creates_cards_from_yaml() {
+    fn cmd_import_creates_cards_from_json() {
         let td = tempdir().unwrap();
         let root = td.path();
         paths::ensure_cards_layout(root).unwrap();
 
-        let yaml_file = root.join("import.yaml");
+        let json_file = root.join("import.json");
         fs::write(
-            &yaml_file,
-            r#"
-- id: imp-a
-  title: Imported A
-- id: imp-b
-  title: Imported B
-"#,
+            &json_file,
+            r#"[
+  {"id": "imp-a", "title": "Imported A"},
+  {"id": "imp-b", "title": "Imported B"}
+]"#,
         )
         .unwrap();
 
-        cmd_import(root, yaml_file.to_str().unwrap(), false).unwrap();
+        cmd_import(root, json_file.to_str().unwrap(), false).unwrap();
         assert!(root.join("drafts/imp-a.bop").exists());
         assert!(root.join("drafts/imp-b.bop").exists());
     }
@@ -1774,10 +1736,10 @@ stage: plan
         let root = td.path();
         paths::ensure_cards_layout(root).unwrap();
 
-        let yaml_file = root.join("import.yaml");
-        fs::write(&yaml_file, "- id: imp-now\n  title: Now\n").unwrap();
+        let json_file = root.join("import.json");
+        fs::write(&json_file, r#"[{"id": "imp-now", "title": "Now"}]"#).unwrap();
 
-        cmd_import(root, yaml_file.to_str().unwrap(), true).unwrap();
+        cmd_import(root, json_file.to_str().unwrap(), true).unwrap();
         assert!(root.join("pending/imp-now.bop").exists());
     }
 
@@ -1787,18 +1749,17 @@ stage: plan
         let root = td.path();
         paths::ensure_cards_layout(root).unwrap();
 
-        let yaml_file = root.join("import.yaml");
+        let json_file = root.join("import.json");
         fs::write(
-            &yaml_file,
-            r#"
-- title: No ID here
-- id: has-id
-  title: Has ID
-"#,
+            &json_file,
+            r#"[
+  {"title": "No ID here"},
+  {"id": "has-id", "title": "Has ID"}
+]"#,
         )
         .unwrap();
 
-        cmd_import(root, yaml_file.to_str().unwrap(), false).unwrap();
+        cmd_import(root, json_file.to_str().unwrap(), false).unwrap();
         // Only has-id should be created
         assert!(root.join("drafts/has-id.bop").exists());
         // Count .bop dirs in drafts
@@ -1818,13 +1779,13 @@ stage: plan
         let root = td.path();
         paths::ensure_cards_layout(root).unwrap();
 
-        let yaml_file = root.join("import.yaml");
-        fs::write(&yaml_file, "- id: dup\n  title: Dup\n").unwrap();
+        let json_file = root.join("import.json");
+        fs::write(&json_file, r#"[{"id": "dup", "title": "Dup"}]"#).unwrap();
 
         // Import once
-        cmd_import(root, yaml_file.to_str().unwrap(), false).unwrap();
+        cmd_import(root, json_file.to_str().unwrap(), false).unwrap();
         // Import again — should succeed but skip existing
-        cmd_import(root, yaml_file.to_str().unwrap(), false).unwrap();
+        cmd_import(root, json_file.to_str().unwrap(), false).unwrap();
         // Still only one card
         assert!(root.join("drafts/dup.bop").exists());
     }
