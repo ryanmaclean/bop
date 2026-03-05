@@ -2,7 +2,9 @@
 # launch_teams.nu — Launch 5 team dispatchers in a zellij session, one pane each.
 
 def build_dispatcher_cmd [bop: string, root: string, team: record<name: string, adapter_name: string, adapter_path: string>]: nothing -> string {
-  $"($bop) --cards-dir ($root)/.cards/($team.name) dispatcher --adapter ($root)/($team.adapter_path) --max-workers 5 --poll-ms 500 --max-retries 3 --reap-ms 2000"
+  let cards_dir = ($root | path join ".cards" $team.name)
+  let adapter = ($root | path join $team.adapter_path)
+  $"($bop) --cards-dir ($cards_dir) dispatcher --adapter ($adapter) --max-workers 5 --poll-ms 500 --max-retries 3 --reap-ms 2000"
 }
 
 def build_log_path [team_name: string]: nothing -> string {
@@ -18,7 +20,7 @@ def main [
   }
 
   let root = ($env.FILE_PWD | path dirname)
-  let bop = $"($root)/target/debug/bop"
+  let bop = ($root | path join "target" "debug" "bop")
 
   let teams = [
     { name: "team-cli",          adapter_name: "claude",   adapter_path: "adapters/claude.nu" }
@@ -39,7 +41,7 @@ def main [
   for entry in ($teams | enumerate) {
     let i = $entry.index
     let team = $entry.item
-    let cards_dir = $"($root)/.cards/($team.name)"
+    let cards_dir = ($root | path join ".cards" $team.name)
     let log_file = (build_log_path $team.name)
 
     let cmd = (build_dispatcher_cmd $bop $root $team)
@@ -62,7 +64,8 @@ def main [
   print "Watch logs:  tail -f /tmp/bop-team-*.log"
   print "Check status per team:"
   for team in [team-cli team-arch team-quality team-intelligence team-platform] {
-    print $"   --cards-dir ($root)/.cards/($team) status"
+    let team_cards = ($root | path join ".cards" $team)
+    print $"   --cards-dir ($team_cards) status"
   }
 }
 

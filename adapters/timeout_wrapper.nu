@@ -22,13 +22,13 @@ def main [
     }
 
     if $nu.os-info.name == "macos" {
-        ^perl -e 'alarm(shift); exec @ARGV or die $!' -- $"($timeout)" ...$args
+        ^perl -e 'alarm(shift); exec @ARGV or die $!' -- ($timeout | into string) ...$args
     } else {
         ^timeout $timeout ...$args
     }
 }
 
-def run_tests [] {
+def run_tests []: nothing -> nothing {
     use std/assert
 
     # test 1: platform detection works

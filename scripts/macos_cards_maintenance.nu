@@ -3,20 +3,21 @@
 # Darwin only.
 
 def refresh_thumbnail [render_swift: string, card_dir: string] {
-  let meta = $"($card_dir)/meta.json"
-  let out = $"($card_dir)/QuickLook/Thumbnail.png"
+  let meta = ($card_dir | path join "meta.json")
+  let ql_dir = ($card_dir | path join "QuickLook")
+  let out = ($ql_dir | path join "Thumbnail.png")
   if not ($meta | path exists) {
     return
   }
-  mkdir $"($card_dir)/QuickLook"
+  mkdir $ql_dir
   do { ^swift $render_swift $meta $out } | complete | ignore
 }
 
 def compress_card_hfs [card_dir: string] {
   let parent = ($card_dir | path dirname)
   let name = ($card_dir | path basename)
-  let tmp = $"($parent)/($name).hfs.tmp"
-  let backup = $"($parent)/($name).bak.tmp"
+  let tmp = ($parent | path join $"($name).hfs.tmp")
+  let backup = ($parent | path join $"($name).bak.tmp")
   if ($tmp | path exists) { ^rm -rf $tmp }
   if ($backup | path exists) { ^rm -rf $backup }
 
@@ -37,12 +38,12 @@ def compress_card_hfs [card_dir: string] {
 
 def card_glob_patterns [cards_root: string] {
   [
-    $"($cards_root)/done/*.bop"
-    $"($cards_root)/failed/*.bop"
-    $"($cards_root)/merged/*.bop"
-    $"($cards_root)/team-*/done/*.bop"
-    $"($cards_root)/team-*/failed/*.bop"
-    $"($cards_root)/team-*/merged/*.bop"
+    ($cards_root | path join "done" "*.bop")
+    ($cards_root | path join "failed" "*.bop")
+    ($cards_root | path join "merged" "*.bop")
+    ($cards_root | path join "team-*" "done" "*.bop")
+    ($cards_root | path join "team-*" "failed" "*.bop")
+    ($cards_root | path join "team-*" "merged" "*.bop")
   ]
 }
 
@@ -70,13 +71,13 @@ def run_tests [] {
 
   # Test QuickLook path construction
   let card_dir = "/tmp/.cards/done/test.bop"
-  let ql_dir = $"($card_dir)/QuickLook"
-  let thumb = $"($card_dir)/QuickLook/Thumbnail.png"
+  let ql_dir = ($card_dir | path join "QuickLook")
+  let thumb = ($card_dir | path join "QuickLook" "Thumbnail.png")
   assert equal $ql_dir "/tmp/.cards/done/test.bop/QuickLook" "QuickLook dir path"
   assert equal $thumb "/tmp/.cards/done/test.bop/QuickLook/Thumbnail.png" "Thumbnail path"
 
   # Test meta.json path construction
-  let meta = $"($card_dir)/meta.json"
+  let meta = ($card_dir | path join "meta.json")
   assert equal $meta "/tmp/.cards/done/test.bop/meta.json" "meta.json path"
 
   print "PASS: macos_cards_maintenance.nu"
@@ -97,8 +98,8 @@ def main [
   }
 
   let root = ($env.FILE_PWD | path dirname)
-  let cards_root = $"($root)/.cards"
-  let render_swift = $"($root)/scripts/render_card_thumbnail.swift"
+  let cards_root = ($root | path join ".cards")
+  let render_swift = ($root | path join "scripts" "render_card_thumbnail.swift")
 
   if not ($render_swift | path exists) {
     print --stderr $"missing renderer: ($render_swift)"

@@ -3,12 +3,12 @@
 
 # Build adapter path given a root directory
 def adapter_path [root: string, name: string]: nothing -> string {
-  $"($root)/adapters/($name).nu"
+  $root | path join "adapters" $"($name).nu"
 }
 
 # Build cards directory path for a color lane
 def cards_dir [root: string, color: string]: nothing -> string {
-  $"($root)/.cards-($color)"
+  $root | path join $".cards-($color)"
 }
 
 def run_tests [] {
@@ -40,7 +40,7 @@ def main [
   }
 
   let root = ($env.FILE_PWD | path dirname)
-  let bop = $"($root)/target/debug/bop"
+  let bop = ($root | path join "target" "debug" "bop")
   let blue_dir = (cards_dir $root "blue")
   let green_dir = (cards_dir $root "green")
   let adapter_default = (adapter_path $root "mock")
@@ -56,13 +56,16 @@ def main [
   ^$bop --cards-dir $green_dir init o> /dev/null
 
   # Keep templates/providers in sync from the canonical cards root when present
-  if ($"($root)/.cards/templates" | path exists) {
-    ^rsync -a --delete $"($root)/.cards/templates/" $"($blue_dir)/templates/"
-    ^rsync -a --delete $"($root)/.cards/templates/" $"($green_dir)/templates/"
+  let cards_root = ($root | path join ".cards")
+  let templates_src = ($cards_root | path join "templates")
+  let providers_src = ($cards_root | path join "providers.json")
+  if ($templates_src | path exists) {
+    ^rsync -a --delete $"($templates_src)/" $"(($blue_dir | path join "templates"))/"
+    ^rsync -a --delete $"($templates_src)/" $"(($green_dir | path join "templates"))/"
   }
-  if ($"($root)/.cards/providers.json" | path exists) {
-    cp $"($root)/.cards/providers.json" $"($blue_dir)/providers.json"
-    cp $"($root)/.cards/providers.json" $"($green_dir)/providers.json"
+  if ($providers_src | path exists) {
+    cp $providers_src ($blue_dir | path join "providers.json")
+    cp $providers_src ($green_dir | path join "providers.json")
   }
 
   let blue_disp_log = "/tmp/bop-blue-dispatcher.log"

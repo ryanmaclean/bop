@@ -13,7 +13,7 @@ def main [
   }
 
   let root = ($env.FILE_PWD | path dirname)
-  let py_file = $"($root)/scripts/_lane_metrics_impl.py"
+  let py_file = ($root | path join "scripts" "_lane_metrics_impl.py")
 
   ^python3 $py_file $root $"($window_minutes)" $output
 }
@@ -32,7 +32,7 @@ def run_tests [] {
 
   # Test: path construction for python script
   let root = "/tmp/test-root"
-  let py_file = $"($root)/scripts/_lane_metrics_impl.py"
+  let py_file = ($root | path join "scripts" "_lane_metrics_impl.py")
   assert equal $py_file "/tmp/test-root/scripts/_lane_metrics_impl.py"
 
   # Test: window-minutes string interpolation (used when calling python)

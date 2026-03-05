@@ -20,9 +20,9 @@ def main [
     }
 
     let orig_dir = (pwd)
-    let prompt_abs = if ($prompt_file | str starts-with "/") { $prompt_file } else { $"($orig_dir)/($prompt_file)" }
-    let stdout_abs = if ($stdout_log | str starts-with "/") { $stdout_log } else { $"($orig_dir)/($stdout_log)" }
-    let stderr_abs = if ($stderr_log | str starts-with "/") { $stderr_log } else { $"($orig_dir)/($stderr_log)" }
+    let prompt_abs = if ($prompt_file | str starts-with "/") { $prompt_file } else { [$orig_dir $prompt_file] | path join }
+    let stdout_abs = if ($stdout_log | str starts-with "/") { $stdout_log } else { [$orig_dir $stdout_log] | path join }
+    let stderr_abs = if ($stderr_log | str starts-with "/") { $stderr_log } else { [$orig_dir $stderr_log] | path join }
 
     cd $workdir
 
@@ -41,15 +41,15 @@ def main [
     exit $rc
 }
 
-def run_tests [] {
+def run_tests []: nothing -> nothing {
     use std/assert
 
     # test 1: path resolution — absolute stays absolute
-    let abs = if ("/tmp/foo" | str starts-with "/") { "/tmp/foo" } else { $"(pwd)/foo" }
+    let abs = if ("/tmp/foo" | str starts-with "/") { "/tmp/foo" } else { [(pwd) "foo"] | path join }
     assert ($abs == "/tmp/foo") "absolute path should stay absolute"
 
     # test 2: path resolution — relative gets resolved
-    let rel = if ("foo" | str starts-with "/") { "foo" } else { $"(pwd)/foo" }
+    let rel = if ("foo" | str starts-with "/") { "foo" } else { [(pwd) "foo"] | path join }
     assert ($rel | str ends-with "/foo") "relative path should be resolved"
     assert ($rel | str starts-with "/") "resolved path should be absolute"
 

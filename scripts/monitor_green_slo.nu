@@ -1,7 +1,7 @@
 #!/usr/bin/env nu
 # monitor_green_slo.nu — monitor green lane SLO and trigger rollback to blue-only
 
-def compute_window_metrics [merged: int, failed: int] {
+def compute_window_metrics [merged: int, failed: int]: nothing -> record {
   let total = $merged + $failed
   let failure_rate = if $total > 0 { $failed / $total } else { 0.0 }
   {
@@ -77,8 +77,8 @@ def main [
     return
   }
   let root = ($env.FILE_PWD | path dirname)
-  let green_dir = $"($root)/.cards-green"
-  let override_file = $"($root)/.cards/route.override"
+  let green_dir = ($root | path join ".cards-green")
+  let override_file = ($root | path join ".cards" "route.override")
 
   let required_breach_intervals = (($window_minutes * 60 + $check_interval_sec - 1) / $check_interval_sec)
   mut consecutive_breach = 0
@@ -113,7 +113,7 @@ def main [
   }
 }
 
-def gather_window_metrics [green_dir: string, window_minutes: int] {
+def gather_window_metrics [green_dir: string, window_minutes: int]: nothing -> record {
   let cutoff = ((date now) - ($window_minutes * 1min))
 
   mut merged = 0
@@ -121,10 +121,10 @@ def gather_window_metrics [green_dir: string, window_minutes: int] {
   mut policy_violations = 0
 
   for state in ["merged", "failed"] {
-    let state_dir = $"($green_dir)/($state)"
+    let state_dir = ($green_dir | path join $state)
     if not ($state_dir | path exists) { continue }
 
-    let cards = (glob $"($state_dir)/*.bop")
+    let cards = (glob ($state_dir | path join "*.bop"))
     for card in $cards {
       let mtime = (ls -l $card | get 0.modified)
       if $mtime < $cutoff { continue }
@@ -133,13 +133,11 @@ def gather_window_metrics [green_dir: string, window_minutes: int] {
         $merged = $merged + 1
       } else {
         $failed = $failed + 1
-        let meta_path = $"($card)/meta.json"
+        let meta_path = ($card | path join "meta.json")
         if ($meta_path | path exists) {
-          try {
-            let meta = (open $meta_path)
-            if ($meta | get -o failure_reason | default "") == "policy_violation" {
-              $policy_violations = $policy_violations + 1
-            }
+          let meta = (open $meta_path)
+          if ($meta | get -o failure_reason | default "") == "policy_violation" {
+            $policy_violations = $policy_violations + 1
           }
         }
       }

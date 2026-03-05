@@ -53,10 +53,10 @@ def main [
 
   mut ver = $version
   if ($ver | is-empty) {
-    $ver = (extract_version (open --raw $"($root)/crates/jc/Cargo.toml"))
+    $ver = (extract_version (open --raw ($root | path join "crates" "jc" "Cargo.toml")))
   }
 
-  let dist = $"($root)/dist/bop-($ver)-macos"
+  let dist = ($root | path join "dist" $"bop-($ver)-macos")
   mkdir $dist
 
   print $"-- bop release ($ver) --"
@@ -81,16 +81,20 @@ def main [
 
   # -- 2. Build CLI (Release) --
   print "\n-- CLI --"
-  ^cargo build --release --manifest-path $"($root)/Cargo.toml"
-  cp $"($root)/target/release/bop" $"($dist)/bop"
-  ^codesign --force --sign $sign_id --options runtime $"($dist)/bop"
-  print $"  bop signed: ($dist)/bop"
+  let manifest = ($root | path join "Cargo.toml")
+  let bop_bin = ($root | path join "target" "release" "bop")
+  let dist_bop = ($dist | path join "bop")
+  ^cargo build --release --manifest-path $manifest
+  cp $bop_bin $dist_bop
+  ^codesign --force --sign $sign_id --options runtime $dist_bop
+  print $"  bop signed: ($dist_bop)"
 
   # -- 3. Build QL app (Release) --
   print "\n-- QL extension --"
-  ^xcodebuild -project $"($root)/macos/macos.xcodeproj" -scheme JobCardHost -configuration Release $"DEVELOPMENT_TEAM=($team_id)" $"CODE_SIGN_IDENTITY=($sign_id)" CODE_SIGN_STYLE=Manual build
+  let xcodeproj = ($root | path join "macos" "macos.xcodeproj")
+  ^xcodebuild -project $xcodeproj -scheme JobCardHost -configuration Release $"DEVELOPMENT_TEAM=($team_id)" $"CODE_SIGN_IDENTITY=($sign_id)" CODE_SIGN_STYLE=Manual build
 
-  let derived = (^xcodebuild -project $"($root)/macos/macos.xcodeproj" -scheme JobCardHost -configuration Release -showBuildSettings
+  let derived = (^xcodebuild -project $xcodeproj -scheme JobCardHost -configuration Release -showBuildSettings
     | lines
     | where ($it | str contains "BUILT_PRODUCTS_DIR")
     | first
@@ -99,26 +103,28 @@ def main [
     | get column2.0
     | str trim)
 
-  let app = $"($derived)/JobCardHost.app"
-  cp -r $app $"($dist)/JobCardHost.app"
+  let app = ($derived | path join "JobCardHost.app")
+  cp -r $app ($dist | path join "JobCardHost.app")
   print "  JobCardHost.app built"
 
   # -- 4. Notarize --
   print "\n-- notarize --"
-  ^ditto -c -k --keepParent $"($dist)/JobCardHost.app" $"($dist)/JobCardHost.zip"
+  let dist_app = ($dist | path join "JobCardHost.app")
+  let dist_zip = ($dist | path join "JobCardHost.zip")
+  ^ditto -c -k --keepParent $dist_app $dist_zip
 
   if ("NOTARIZE_APPLE_ID" in $env) {
-    ^xcrun notarytool submit $"($dist)/JobCardHost.zip" --apple-id $env.NOTARIZE_APPLE_ID --password $env.NOTARIZE_PASSWORD --team-id $team_id --wait
+    ^xcrun notarytool submit $dist_zip --apple-id $env.NOTARIZE_APPLE_ID --password $env.NOTARIZE_PASSWORD --team-id $team_id --wait
   } else {
-    ^xcrun notarytool submit $"($dist)/JobCardHost.zip" --keychain-profile "bop-notary" --wait
+    ^xcrun notarytool submit $dist_zip --keychain-profile "bop-notary" --wait
   }
 
-  ^xcrun stapler staple $"($dist)/JobCardHost.app"
+  ^xcrun stapler staple $dist_app
   print "  notarized and stapled"
 
   # -- 5. Package --
   print "\n-- package --"
-  cd $"($root)/dist"
+  cd ($root | path join "dist")
   ^tar czf $"bop-($ver)-macos-arm64.tar.gz" $"bop-($ver)-macos/"
   print $"  ($root)/dist/bop-($ver)-macos-arm64.tar.gz"
 

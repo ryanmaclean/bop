@@ -63,18 +63,19 @@ def main [
     return
   }
   let root = ($env.FILE_PWD | path dirname)
-  let source_dir = $"($root)/.cards"
-  let blue_dir = $"($root)/.cards-blue"
-  let green_dir = $"($root)/.cards-green"
-  let canary_teams_file = $"($root)/.cards/canary-teams.txt"
-  let route_override_file = $"($root)/.cards/route.override"
+  let source_dir = ($root | path join ".cards")
+  let blue_dir = ($root | path join ".cards-blue")
+  let green_dir = ($root | path join ".cards-green")
+  let canary_teams_file = ($root | path join ".cards" "canary-teams.txt")
+  let route_override_file = ($root | path join ".cards" "route.override")
 
-  if not ($"($source_dir)/pending" | path exists) {
-    print -e $"No pending source dir at ($source_dir)/pending"
+  let pending_dir = ($source_dir | path join "pending")
+  if not ($pending_dir | path exists) {
+    print -e $"No pending source dir at ($pending_dir)"
     exit 1
   }
 
-  mkdir $"($blue_dir)/pending" $"($green_dir)/pending"
+  mkdir ($blue_dir | path join "pending") ($green_dir | path join "pending")
 
   # Read route override
   mut route_override = ""
@@ -97,7 +98,7 @@ def main [
   }
 
   # Get pending cards
-  let cards = (glob $"($source_dir)/pending/*.bop" | where ($it | path type) == "dir")
+  let cards = (glob ($pending_dir | path join "*.bop") | where ($it | path type) == "dir")
 
   mut moved = 0
   mut dual_count = 0
@@ -108,12 +109,10 @@ def main [
 
     # Read team from meta.json if present
     mut team = ""
-    let meta_path = $"($card)/meta.json"
+    let meta_path = ($card | path join "meta.json")
     if ($meta_path | path exists) {
-      try {
-        let meta = (open $meta_path)
-        $team = ($meta | get -o team | default "")
-      }
+      let meta = (open $meta_path)
+      $team = ($meta | get -o team | default "")
     }
 
     let lane = (route_lane $id $team $route_override $canary_teams $green_pct)
@@ -171,12 +170,13 @@ def deterministic_bucket [key: string]: nothing -> int {
 
 def copy_card [src: string, dst_dir: string]: nothing -> bool {
   let base = ($src | path basename)
+  let dst_path = ($dst_dir | path join $base)
   if $nu.os-info.name == "macos" {
     # Try APFS clone copy first
-    let ditto_result = (do { ^ditto --clone $src $"($dst_dir)/($base)" } | complete)
+    let ditto_result = (do { ^ditto --clone $src $dst_path } | complete)
     if $ditto_result.exit_code == 0 { return true }
 
-    let cp_clone = (do { ^cp -cR $src $"($dst_dir)/" } | complete)
+    let cp_clone = (do { ^cp -cR $src $dst_dir } | complete)
     if $cp_clone.exit_code == 0 { return true }
 
     print -e $"copy_card: APFS clone copy failed for ($src) -> ($dst_dir)"
@@ -184,10 +184,10 @@ def copy_card [src: string, dst_dir: string]: nothing -> bool {
   }
 
   # Linux: try reflink, fallback to regular copy
-  let reflink = (do { ^cp --reflink=auto -r $src $"($dst_dir)/" } | complete)
+  let reflink = (do { ^cp --reflink=auto -r $src $dst_dir } | complete)
   if $reflink.exit_code == 0 { return true }
 
-  cp -r $src $"($dst_dir)/"
+  cp -r $src $dst_dir
   true
 }
 
@@ -198,28 +198,30 @@ def move_or_copy [
   blue_dir: string
   green_dir: string
 ]: nothing -> bool {
+  let blue_pending = ($blue_dir | path join "pending")
+  let green_pending = ($green_dir | path join "pending")
   match $lane {
     "blue" => {
-      if ($"($blue_dir)/pending/($base)" | path exists) {
+      if ($blue_pending | path join $base | path exists) {
         print -e $"skip ($base): already exists in blue"
         return false
       }
-      mv $card $"($blue_dir)/pending/"
+      mv $card $blue_pending
     }
     "green" => {
-      if ($"($green_dir)/pending/($base)" | path exists) {
+      if ($green_pending | path join $base | path exists) {
         print -e $"skip ($base): already exists in green"
         return false
       }
-      mv $card $"($green_dir)/pending/"
+      mv $card $green_pending
     }
     "dual" => {
-      if ($"($blue_dir)/pending/($base)" | path exists) or ($"($green_dir)/pending/($base)" | path exists) {
+      if ($blue_pending | path join $base | path exists) or ($green_pending | path join $base | path exists) {
         print -e $"skip ($base): already exists in blue or green"
         return false
       }
-      if not (copy_card $card $"($blue_dir)/pending") { return false }
-      if not (copy_card $card $"($green_dir)/pending") { return false }
+      if not (copy_card $card $blue_pending) { return false }
+      if not (copy_card $card $green_pending) { return false }
       rm -rf $card
     }
     _ => {

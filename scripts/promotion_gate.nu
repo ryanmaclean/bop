@@ -19,7 +19,7 @@ def check_gate3 [green_sr: float, blue_sr: float]: nothing -> bool {
 def list_incidents [incidents_dir: string]: nothing -> list<string> {
   if not ($incidents_dir | path exists) { return [] }
   if (($incidents_dir | path type) != "dir") { return [] }
-  ls $incidents_dir | where type == "file" | get name | each { |p| $p | path basename }
+  glob ($incidents_dir | path join "*") | where {|f| ($f | path type) == "file" } | each { |p| $p | path basename }
 }
 
 def main [
@@ -32,11 +32,11 @@ def main [
 
   let root = ($env.FILE_PWD | path dirname)
   let window_minutes = 48 * 60
-  let check_history_file = $"($root)/.cards/promotion/make_check_runs.log"
-  let incidents_dir = $"($root)/.cards/incidents/critical"
+  let check_history_file = ($root | path join ".cards" "promotion" "make_check_runs.log")
+  let incidents_dir = ($root | path join ".cards" "incidents" "critical")
 
   # Get metrics from lane_metrics
-  let metrics_json = (^nu $"($root)/scripts/lane_metrics.nu" --window-minutes $window_minutes --output json | from json)
+  let metrics_json = (^nu ($root | path join "scripts" "lane_metrics.nu") --window-minutes $window_minutes --output json | from json)
 
   mut failures = []
 
@@ -99,27 +99,27 @@ def run_tests [] {
   assert equal (check_gate1 "/tmp/nonexistent-bop-xyz") false "gate1: missing file -> false"
 
   # File with fewer than 5 entries -> false
-  let f1 = $"($tmp)/gate1_short.log"
+  let f1 = ($tmp | path join "gate1_short.log")
   "pass\npass\npass\n" | save $f1
   assert equal (check_gate1 $f1) false "gate1: only 3 entries -> false"
 
   # File with 5 passes -> true
-  let f2 = $"($tmp)/gate1_pass.log"
+  let f2 = ($tmp | path join "gate1_pass.log")
   "pass\npass\npass\npass\npass\n" | save $f2
   assert equal (check_gate1 $f2) true "gate1: 5 passes -> true"
 
   # File with a fail in last 5 -> false
-  let f3 = $"($tmp)/gate1_fail.log"
+  let f3 = ($tmp | path join "gate1_fail.log")
   "pass\npass\nfail\npass\npass\n" | save $f3
   assert equal (check_gate1 $f3) false "gate1: fail in last 5 -> false"
 
   # Mixed case -> still passes (normalized to lowercase)
-  let f4 = $"($tmp)/gate1_mixed.log"
+  let f4 = ($tmp | path join "gate1_mixed.log")
   "PASS\nPass\npass\nPASS\npass\n" | save $f4
   assert equal (check_gate1 $f4) true "gate1: mixed case passes -> true"
 
   # More than 5 entries, last 5 are pass -> true
-  let f5 = $"($tmp)/gate1_long.log"
+  let f5 = ($tmp | path join "gate1_long.log")
   "fail\nfail\npass\npass\npass\npass\npass\n" | save $f5
   assert equal (check_gate1 $f5) true "gate1: old fails, last 5 pass -> true"
 
@@ -139,13 +139,13 @@ def run_tests [] {
   assert equal (list_incidents "/tmp/nonexistent-bop-xyz") [] "gate4: missing dir -> empty"
 
   # Empty dir -> empty
-  let inc_dir = $"($tmp)/incidents"
+  let inc_dir = ($tmp | path join "incidents")
   mkdir $inc_dir
   assert equal (list_incidents $inc_dir) [] "gate4: empty dir -> empty"
 
   # Dir with files -> lists them
-  "outage" | save $"($inc_dir)/inc-001.json"
-  "outage" | save $"($inc_dir)/inc-002.json"
+  "outage" | save ($inc_dir | path join "inc-001.json")
+  "outage" | save ($inc_dir | path join "inc-002.json")
   let incidents = (list_incidents $inc_dir)
   assert equal ($incidents | length) 2 "gate4: 2 incident files"
   assert ("inc-001.json" in $incidents) "gate4: should find inc-001.json"

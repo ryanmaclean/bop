@@ -24,7 +24,7 @@
 def find_card_dir [root: string, id: string]: nothing -> string {
   mut card_dir = ""
   for state in [running pending done merged failed] {
-    let candidate = $"($root)/.cards/($state)/($id).bop"
+    let candidate = ($root | path join ".cards" $state $"($id).bop")
     if ($candidate | path exists) {
       $card_dir = $candidate
       break
@@ -38,20 +38,20 @@ def run_self_tests [] {
 
   # Create temp .cards/ structure with a known card
   let tmp = (mktemp -d)
-  let cards_root = $"($tmp)/.cards"
-  mkdir $"($cards_root)/pending"
-  mkdir $"($cards_root)/running"
-  mkdir $"($cards_root)/done"
-  mkdir $"($cards_root)/merged"
-  mkdir $"($cards_root)/failed"
+  let cards_root = ($tmp | path join ".cards")
+  mkdir ($cards_root | path join "pending")
+  mkdir ($cards_root | path join "running")
+  mkdir ($cards_root | path join "done")
+  mkdir ($cards_root | path join "merged")
+  mkdir ($cards_root | path join "failed")
 
   # Place a card in running/
   let test_id = "test-focus-card"
-  mkdir $"($cards_root)/running/($test_id).bop"
+  mkdir ($cards_root | path join "running" $"($test_id).bop")
 
   # Test: card found in running
   let found = (find_card_dir $tmp $test_id)
-  assert equal $found $"($cards_root)/running/($test_id).bop"
+  assert equal $found ($cards_root | path join "running" $"($test_id).bop")
 
   # Test: card not found
   let not_found = (find_card_dir $tmp "nonexistent")
@@ -59,16 +59,16 @@ def run_self_tests [] {
 
   # Test: card in done/ is found
   let done_id = "done-card"
-  mkdir $"($cards_root)/done/($done_id).bop"
+  mkdir ($cards_root | path join "done" $"($done_id).bop")
   let found_done = (find_card_dir $tmp $done_id)
-  assert equal $found_done $"($cards_root)/done/($done_id).bop"
+  assert equal $found_done ($cards_root | path join "done" $"($done_id).bop")
 
   # Test: search order — running before done
   let both_id = "both-card"
-  mkdir $"($cards_root)/running/($both_id).bop"
-  mkdir $"($cards_root)/done/($both_id).bop"
+  mkdir ($cards_root | path join "running" $"($both_id).bop")
+  mkdir ($cards_root | path join "done" $"($both_id).bop")
   let found_both = (find_card_dir $tmp $both_id)
-  assert equal $found_both $"($cards_root)/running/($both_id).bop"
+  assert equal $found_both ($cards_root | path join "running" $"($both_id).bop")
 
   # Cleanup
   rm -rf $tmp
@@ -82,7 +82,7 @@ def main [
   --test             # Identify each pane by writing its name into it
 ] {
   let root = ($env.FILE_PWD | path dirname)
-  let bop = $"($root)/target/debug/bop"
+  let bop = ($root | path join "target" "debug" "bop")
 
   let pane_skip = if "BOP_PANE_SKIP" in $env { $env.BOP_PANE_SKIP | into int } else { 1 }
 

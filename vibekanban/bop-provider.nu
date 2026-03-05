@@ -18,7 +18,7 @@ def main [
     exit 1
   }
 
-  let py_script = $"($env.FILE_PWD)/_bop_provider_impl.py"
+  let py_script = ($env.FILE_PWD | path join "_bop_provider_impl.py")
   ^python3 $py_script $cards_dir
 }
 
@@ -36,7 +36,7 @@ def run_tests [] {
 
   # Test: python script path construction
   let file_pwd = "/Users/studio/bop/vibekanban"
-  let py_script = $"($file_pwd)/_bop_provider_impl.py"
+  let py_script = ($file_pwd | path join "_bop_provider_impl.py")
   assert equal $py_script "/Users/studio/bop/vibekanban/_bop_provider_impl.py"
   assert ($py_script | str ends-with ".py") "should end with .py"
 

@@ -51,13 +51,13 @@ def main [
     print "╠══════════════════════════════════════════════════════════════╣"
 
     for team in $teams {
-      let cards_dir = $"($root)/.cards/($team.name)"
+      let cards_dir = ($root | path join ".cards" $team.name)
 
-      let n_pending = (count_cards $"($cards_dir)/pending")
-      let n_running = (count_cards $"($cards_dir)/running")
-      let n_done    = (count_cards $"($cards_dir)/done")
-      let n_merged  = (count_cards $"($cards_dir)/merged")
-      let n_failed  = (count_cards $"($cards_dir)/failed")
+      let n_pending = (count_cards ($cards_dir | path join "pending"))
+      let n_running = (count_cards ($cards_dir | path join "running"))
+      let n_done    = (count_cards ($cards_dir | path join "done"))
+      let n_merged  = (count_cards ($cards_dir | path join "merged"))
+      let n_failed  = (count_cards ($cards_dir | path join "failed"))
       let total = 5
 
       let bar = (build_progress_bar $n_merged $n_done $n_running $n_failed $total)
@@ -65,18 +65,18 @@ def main [
       print $"║  ($team.name | fill -w 18)  [($bar)] [($team.adapter)]"
       print $"║  p:($n_pending | fill -w 2) r:($n_running | fill -w 2) d:($n_done | fill -w 2) m:($n_merged | fill -w 2) f:($n_failed | fill -w 2)                                 ║"
 
-      let running_dir = $"($cards_dir)/running"
+      let running_dir = ($cards_dir | path join "running")
       if ($running_dir | path exists) {
         for card_path in (glob $"($running_dir)/*.bop") {
           if ($card_path | path type) != "dir" { continue }
           let card_name = ($card_path | path basename | str replace ".bop" "")
-          let pid_file = $"($card_path)/logs/pid"
+          let pid_file = ($card_path | path join "logs" "pid")
           let pid = if ($pid_file | path exists) {
             $" [(open --raw $pid_file | str trim)]"
           } else { "" }
           print $"║  ▶ ($card_name | fill -w 25)($pid | fill -w 32)║"
 
-          let stdout_file = $"($card_path)/logs/stdout.log"
+          let stdout_file = ($card_path | path join "logs" "stdout.log")
           if ($stdout_file | path exists) and ((ls $stdout_file | get size | first) > 0b) {
             let last = (open --raw $stdout_file | lines | last | str substring 0..54)
             print $"║    └ ($last | fill -w 56)║"
@@ -90,11 +90,11 @@ def main [
     # Totals
     mut td = 0; mut tr_ = 0; mut tp = 0; mut tf = 0
     for team in $teams {
-      let c = $"($root)/.cards/($team.name)"
-      $td  = $td  + (count_cards $"($c)/done")    + (count_cards $"($c)/merged")
-      $tr_ = $tr_ + (count_cards $"($c)/running")
-      $tp  = $tp  + (count_cards $"($c)/pending")
-      $tf  = $tf  + (count_cards $"($c)/failed")
+      let c = ($root | path join ".cards" $team.name)
+      $td  = $td  + (count_cards ($c | path join "done"))    + (count_cards ($c | path join "merged"))
+      $tr_ = $tr_ + (count_cards ($c | path join "running"))
+      $tp  = $tp  + (count_cards ($c | path join "pending"))
+      $tf  = $tf  + (count_cards ($c | path join "failed"))
     }
     print $"║  done:($td | fill -w 3)  running:($tr_ | fill -w 3)  pending:($tp | fill -w 3)  failed:($tf | fill -w 3)         ║"
     print "╚══════════════════════════════════════════════════════════════╝"
@@ -103,7 +103,7 @@ def main [
     # Done/merged summary
     for team in $teams {
       for state in [done merged] {
-        let state_dir = $"($root)/.cards/($team.name)/($state)"
+        let state_dir = ($root | path join ".cards" $team.name $state)
         if ($state_dir | path exists) {
           for card_path in (glob $"($state_dir)/*.bop") {
             if ($card_path | path type) != "dir" { continue }
@@ -131,11 +131,11 @@ def run_tests [] {
   assert equal $count_empty 0 "count_cards on empty dir should be 0"
 
   # Test: count_cards counts .bop directories
-  let test_dir = $"($tmp)/cards"
+  let test_dir = ($tmp | path join "cards")
   mkdir $test_dir
-  mkdir $"($test_dir)/card1.bop"
-  mkdir $"($test_dir)/card2.bop"
-  "not a dir" | save $"($test_dir)/card3.bop"
+  mkdir ($test_dir | path join "card1.bop")
+  mkdir ($test_dir | path join "card2.bop")
+  "not a dir" | save ($test_dir | path join "card3.bop")
   let count_bop = (count_cards $test_dir)
   assert equal $count_bop 2 "count_cards should count only .bop directories"
 

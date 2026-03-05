@@ -115,10 +115,10 @@ def main [
   if not $skip_checks {
     let bop_bin = if ("BOP_BIN" in $env) {
       $env.BOP_BIN
-    } else if ($"($root)/target/debug/bop" | path exists) {
-      $"($root)/target/debug/bop"
-    } else if ($"($root)/target/debug/jc" | path exists) {
-      $"($root)/target/debug/jc"
+    } else if (($root | path join "target" "debug" "bop") | path exists) {
+      ($root | path join "target" "debug" "bop")
+    } else if (($root | path join "target" "debug" "jc") | path exists) {
+      ($root | path join "target" "debug" "jc")
     } else {
       print -e "Missing bop/jc binary. Run: cargo build"
       exit 1

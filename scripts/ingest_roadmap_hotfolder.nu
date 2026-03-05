@@ -26,11 +26,11 @@ def supports_request_file [ext: string] {
 
 def id_exists_anywhere [cards_dir: string, id: string] {
   for state in ["pending" "running" "done" "merged" "failed"] {
-    let exact = $"($cards_dir)/($state)/($id).bop"
+    let exact = ($cards_dir | path join $state $"($id).bop")
     if ($exact | path exists) {
       return true
     }
-    let matches = (glob $"($cards_dir)/($state)/*-($id).bop")
+    let matches = (glob ($cards_dir | path join $state $"*-($id).bop"))
     if ($matches | length) > 0 {
       return true
     }
@@ -98,10 +98,10 @@ def write_spec_from_request [request_file: string, spec_file: string, id: string
 }
 
 def render_thumbnail_if_possible [root: string, card_dir: string] {
-  let renderer = $"($root)/scripts/render_card_thumbnail.swift"
-  let meta_file = $"($card_dir)/meta.json"
-  let ql_dir = $"($card_dir)/QuickLook"
-  let out_file = $"($ql_dir)/Thumbnail.png"
+  let renderer = ($root | path join "scripts" "render_card_thumbnail.swift")
+  let meta_file = ($card_dir | path join "meta.json")
+  let ql_dir = ($card_dir | path join "QuickLook")
+  let out_file = ($ql_dir | path join "Thumbnail.png")
 
   mkdir $ql_dir
   if ($renderer | path exists) and ($meta_file | path exists) {
@@ -112,7 +112,7 @@ def render_thumbnail_if_possible [root: string, card_dir: string] {
 def move_request [src: string, dst_dir: string] {
   let stamp = (date now | format date "%Y%m%dT%H%M%SZ")
   let name = ($src | path basename)
-  ^mv $src $"($dst_dir)/($stamp)-($name)"
+  ^mv $src ($dst_dir | path join $"($stamp)-($name)")
 }
 
 def process_request [
@@ -143,17 +143,17 @@ def process_request [
 
   let created = (date now | format date "%Y-%m-%dT%H:%M:%SZ")
   let card_name = $"🂠-($id).bop"
-  let final_card = $"($pending_dir)/($card_name)"
-  let temp_card = $"($pending_dir)/.($card_name).tmp.(random int 10000..99999)"
+  let final_card = ($pending_dir | path join $card_name)
+  let temp_card = ($pending_dir | path join $".($card_name).tmp.(random int 10000..99999)")
 
   if ($temp_card | path exists) {
     ^rm -rf $temp_card
   }
   clone_template $template_dir $temp_card
 
-  mkdir $"($temp_card)/logs" $"($temp_card)/output"
-  write_meta $"($template_dir)/meta.json" $"($temp_card)/meta.json" $id $created
-  write_spec_from_request $request_file $"($temp_card)/spec.md" $id $created
+  mkdir ($temp_card | path join "logs") ($temp_card | path join "output")
+  write_meta ($template_dir | path join "meta.json") ($temp_card | path join "meta.json") $id $created
+  write_spec_from_request $request_file ($temp_card | path join "spec.md") $id $created
   render_thumbnail_if_possible $root $temp_card
 
   if $dry_run {
@@ -198,16 +198,16 @@ def run_tests [] {
 
   # Test template path construction
   let cards = "/tmp/test-cards"
-  let tmpl = $"($cards)/templates/roadmap.bop"
+  let tmpl = ($cards | path join "templates" "roadmap.bop")
   assert equal $tmpl "/tmp/test-cards/templates/roadmap.bop" "template path construction"
 
   # Test pending dir construction
-  let pending = $"($cards)/pending"
+  let pending = ($cards | path join "pending")
   assert equal $pending "/tmp/test-cards/pending" "pending dir construction"
 
   # Test YAML parsing with temp file
   let tmp_dir = (mktemp -d)
-  let yaml_file = $"($tmp_dir)/test.yaml"
+  let yaml_file = ($tmp_dir | path join "test.yaml")
   "title: Test Roadmap\nitems:\n  - step one\n  - step two\n" | save $yaml_file
   let content = (open --raw $yaml_file)
   assert ($content | str contains "title: Test Roadmap") "YAML file readable"
@@ -236,15 +236,15 @@ def main [
     return
   }
   let root = ($env.FILE_PWD | path dirname)
-  let inbox_dir = ($inbox | default $"($root)/examples/roadmap-inbox/drop")
-  let cards = ($cards_dir | default $"($root)/.cards")
+  let inbox_dir = ($inbox | default ($root | path join "examples" "roadmap-inbox" "drop"))
+  let cards = ($cards_dir | default ($root | path join ".cards"))
   let inbox_parent = ($inbox_dir | path dirname)
-  let tmpl_dir = ($template_dir | default $"($cards)/templates/roadmap.bop")
-  let proc_dir = ($processed_dir | default $"($inbox_parent)/processed")
-  let fail_dir = ($failed_dir | default $"($inbox_parent)/failed")
-  let pending_dir = $"($cards)/pending"
-  let log_dir = $"($cards)/logs"
-  let log_file = $"($log_dir)/roadmap-hotfolder.log"
+  let tmpl_dir = ($template_dir | default ($cards | path join "templates" "roadmap.bop"))
+  let proc_dir = ($processed_dir | default ($inbox_parent | path join "processed"))
+  let fail_dir = ($failed_dir | default ($inbox_parent | path join "failed"))
+  let pending_dir = ($cards | path join "pending")
+  let log_dir = ($cards | path join "logs")
+  let log_file = ($log_dir | path join "roadmap-hotfolder.log")
 
   mkdir $inbox_dir $proc_dir $fail_dir $pending_dir $log_dir
 
@@ -252,12 +252,12 @@ def main [
     print --stderr $"missing template directory: ($tmpl_dir)"
     exit 1
   }
-  if not ($"($tmpl_dir)/meta.json" | path exists) {
+  if not (($tmpl_dir | path join "meta.json") | path exists) {
     print --stderr $"missing template meta.json in: ($tmpl_dir)"
     exit 1
   }
 
-  let requests = (glob $"($inbox_dir)/*" | where {|f| ($f | path type) == "file" })
+  let requests = (glob ($inbox_dir | path join "*") | where {|f| ($f | path type) == "file" })
   if ($requests | is-empty) {
     return
   }

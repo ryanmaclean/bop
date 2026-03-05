@@ -87,10 +87,10 @@ def main [
 
   let root = ($env.FILE_PWD | path dirname)
   let label = "sh.bop.roadmap-inbox"
-  let plist_path = $"($env.HOME)/Library/LaunchAgents/($label).plist"
-  let inbox_dir = ($inbox | default $"($root)/examples/roadmap-inbox/drop")
-  let cards = ($cards_dir | default $"($root)/.cards")
-  let script_path = $"($root)/scripts/ingest_roadmap_hotfolder.nu"
+  let plist_path = ($env.HOME | path join "Library" "LaunchAgents" $"($label).plist")
+  let inbox_dir = ($inbox | default ($root | path join "examples" "roadmap-inbox" "drop"))
+  let cards = ($cards_dir | default ($root | path join ".cards"))
+  let script_path = ($root | path join "scripts" "ingest_roadmap_hotfolder.nu")
   let uid = (^id -u | str trim)
   let service = $"gui/($uid)/($label)"
 
@@ -122,7 +122,7 @@ def main [
   }
 
   let inbox_parent = ($inbox_dir | path dirname)
-  mkdir $"($env.HOME)/Library/LaunchAgents" $inbox_dir $"($inbox_parent)/processed" $"($inbox_parent)/failed"
+  mkdir ($env.HOME | path join "Library" "LaunchAgents") $inbox_dir ($inbox_parent | path join "processed") ($inbox_parent | path join "failed")
 
   let plist_content = (build_plist $label $inbox_dir $script_path $cards)
 

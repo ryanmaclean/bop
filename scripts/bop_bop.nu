@@ -58,7 +58,7 @@ def main [
 
   let goal_text = ($goal | str join " ")
   let root = ($env.FILE_PWD | path dirname)
-  let bop = $"($root)/target/debug/bop"
+  let bop = ($root | path join "target" "debug" "bop")
 
   # Slugify goal -> card id
   let id_raw = (slugify $goal_text)
@@ -71,7 +71,7 @@ def main [
   # Locate the card
   mut card_dir = ""
   for state in [pending running done] {
-    let candidate = $"($root)/.cards/($state)/($id).bop"
+    let candidate = ($root | path join ".cards" $state $"($id).bop")
     if ($candidate | path exists) {
       $card_dir = $candidate
       break
@@ -84,10 +84,10 @@ def main [
   }
 
   # Write goal into spec.md
-  $"# ($goal_text)\n\nCreated by bop_bop.nu.\n" | save --append $"($card_dir)/spec.md"
+  $"# ($goal_text)\n\nCreated by bop_bop.nu.\n" | save --append ($card_dir | path join "spec.md")
 
   # Write zellij_session into meta.json
-  let meta_path = $"($card_dir)/meta.json"
+  let meta_path = ($card_dir | path join "meta.json")
   let meta = (open $meta_path | from json | upsert zellij_session $session | upsert zellij_pane "1")
   $meta | to json --indent 2 | save --force $meta_path
   print $"  zellij_session: ($session)"
@@ -95,23 +95,23 @@ def main [
   # Budget-aware agent routing
   # Cost order: ollama (free) → opencode ($) → codex ($) → claude ($$)
   mut provider = "mock"
-  mut adapter = $"($root)/adapters/mock.nu"
+  mut adapter = ($root | path join "adapters" "mock.nu")
 
   if (which ollama | length) > 0 {
     $provider = "ollama"
-    $adapter = $"($root)/adapters/ollama-local.nu"
+    $adapter = ($root | path join "adapters" "ollama-local.nu")
   }
   if (which opencode | length) > 0 {
     $provider = "opencode"
-    $adapter = $"($root)/adapters/opencode.nu"
+    $adapter = ($root | path join "adapters" "opencode.nu")
   }
   if (which codex | length) > 0 {
     $provider = "codex"
-    $adapter = $"($root)/adapters/codex.nu"
+    $adapter = ($root | path join "adapters" "codex.nu")
   }
   if (which claude | length) > 0 {
     $provider = "claude"
-    $adapter = $"($root)/adapters/claude.nu"
+    $adapter = ($root | path join "adapters" "claude.nu")
   }
 
   print $"  provider: ($provider)"
@@ -124,7 +124,7 @@ def main [
   if (which jj | length) > 0 {
     let jj_check = (do { ^jj root --repository $root } | complete)
     if $jj_check.exit_code == 0 {
-      let worktree_dir = $"($root)/.worktrees/($id)"
+      let worktree_dir = ($root | path join ".worktrees" $id)
       do { ^jj workspace add $worktree_dir } | complete | ignore
 
       let meta2 = (open $meta_path | from json
