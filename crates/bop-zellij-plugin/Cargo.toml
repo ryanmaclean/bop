@@ -1,7 +1,7 @@
 [workspace]
 
 [package]
-name = "jc-zellij-plugin"
+name = "bop-zellij-plugin"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"

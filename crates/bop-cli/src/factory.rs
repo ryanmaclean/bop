@@ -12,7 +12,7 @@ pub const FACTORY_LABELS: [(&str, &str); 2] = [
 ];
 
 pub fn zellij_plugin_src(repo_root: &Path) -> PathBuf {
-    repo_root.join("crates/jc-zellij-plugin/target/wasm32-wasip1/release/jc_zellij_plugin.wasm")
+    repo_root.join("crates/bop-zellij-plugin/target/wasm32-wasip1/release/bop_zellij_plugin.wasm")
 }
 
 pub fn zellij_plugin_dest() -> PathBuf {
@@ -197,7 +197,7 @@ pub fn cmd_factory_install(cards_root: &Path) -> anyhow::Result<()> {
         }
     } else {
         println!(
-            "  (zellij plugin wasm not built — skipping)\n  build with: cargo build --manifest-path crates/jc-zellij-plugin/Cargo.toml --target wasm32-wasip1 --release"
+            "  (zellij plugin wasm not built — skipping)\n  build with: cargo build --manifest-path crates/bop-zellij-plugin/Cargo.toml --target wasm32-wasip1 --release"
         );
     }
 

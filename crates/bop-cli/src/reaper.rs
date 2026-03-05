@@ -92,7 +92,7 @@ pub async fn reap_orphans(
 pub async fn read_pid(card_dir: &Path) -> anyhow::Result<Option<i32>> {
     let out = TokioCommand::new("xattr")
         .arg("-p")
-        .arg("com.yourorg.agent-pid")
+        .arg("sh.bop.agent-pid")
         .arg(card_dir)
         .output()
         .await;

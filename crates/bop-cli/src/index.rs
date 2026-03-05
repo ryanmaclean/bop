@@ -42,7 +42,7 @@ pub fn cmd_index(cards_root: &Path, print_flag: bool) -> anyhow::Result<()> {
         ("layouts/", "Zellij terminal layout files (bop.kdl)"),
         (
             "macos/",
-            "Xcode project for Quick Look extension (JobCardHost.app)",
+            "Xcode project for Quick Look extension (BopHost.app)",
         ),
         (
             "vibekanban/",
@@ -78,7 +78,7 @@ pub fn cmd_index(cards_root: &Path, print_flag: bool) -> anyhow::Result<()> {
             "Shortcuts: `make check` runs test + clippy + fmt",
         ),
         (
-            "crates/jc/src/main.rs",
+            "crates/bop-cli/src/main.rs",
             "CLI binary: all `bop` subcommands, dispatcher loop, merge-gate",
         ),
         (

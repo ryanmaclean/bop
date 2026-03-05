@@ -14,7 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
-pub enum JobCardError {
+pub enum BopError {
     #[error("invalid bop: {0}")]
     Invalid(String),
 }
@@ -107,7 +107,7 @@ pub struct Meta {
 
     /// Unicode playing-card glyph (U+1F0A0–U+1F0FF) used as the card's
     /// unique visual token across all surfaces (QL preview, zellij pane
-    /// title, `jc list` output, vibekanban board).
+    /// title, `bop list` output, vibekanban board).
     /// Suit encodes team: ♠=CLI ♥=Arch ♦=Quality ♣=Platform.
     /// Rank encodes priority: Ace=P1, King/Queen=P2, Jack/Knight=P3, 2-10=P4.
     /// Jokers (🃏🂿🃟) = wildcard/emergency. Trump cards = cross-team escalation.
@@ -275,27 +275,27 @@ fn is_false(value: &bool) -> bool {
 }
 
 impl Meta {
-    pub fn validate(&self) -> Result<(), JobCardError> {
+    pub fn validate(&self) -> Result<(), BopError> {
         if self.id.trim().is_empty() {
-            return Err(JobCardError::Invalid("meta.id is empty".to_string()));
+            return Err(BopError::Invalid("meta.id is empty".to_string()));
         }
         if self.stage.trim().is_empty() {
-            return Err(JobCardError::Invalid("meta.stage is empty".to_string()));
+            return Err(BopError::Invalid("meta.stage is empty".to_string()));
         }
         if let Some(mode) = self.workflow_mode.as_ref() {
             if mode.trim().is_empty() {
-                return Err(JobCardError::Invalid(
+                return Err(BopError::Invalid(
                     "meta.workflow_mode is empty".to_string(),
                 ));
             }
         }
         if self.step_index == Some(0) {
-            return Err(JobCardError::Invalid(
+            return Err(BopError::Invalid(
                 "meta.step_index must be >= 1".to_string(),
             ));
         }
         if self.step_index.is_some() && self.workflow_mode.is_none() {
-            return Err(JobCardError::Invalid(
+            return Err(BopError::Invalid(
                 "meta.step_index requires meta.workflow_mode".to_string(),
             ));
         }

@@ -1,5 +1,5 @@
-name: JobCard Wait
-description: Poll the JobCard API until a job completes. Fails the step if the job fails.
+name: Bop Wait
+description: Poll the Bop API until a job completes. Fails the step if the job fails.
 
 branding:
   icon: clock
@@ -7,7 +7,7 @@ branding:
 
 inputs:
   api-url:
-    description: Base URL of the JobCard API server (e.g. http://runner:8765)
+    description: Base URL of the Bop API server (e.g. http://runner:8765)
     required: true
   job-id:
     description: Job ID to wait for
@@ -46,7 +46,7 @@ runs:
             exit 1
           fi
 
-          HTTP_CODE=$(curl -s -o /tmp/jc-status.json -w "%{http_code}" \
+          HTTP_CODE=$(curl -s -o /tmp/bop-status.json -w "%{http_code}" \
             "$API_URL/jobs/$JOB_ID")
 
           if [ "$HTTP_CODE" != "200" ]; then
@@ -55,7 +55,7 @@ runs:
             continue
           fi
 
-          STATE=$(jq -r '.job.state' /tmp/jc-status.json)
+          STATE=$(jq -r '.job.state' /tmp/bop-status.json)
           echo "Job $JOB_ID state: $STATE"
 
           case "$STATE" in
@@ -65,7 +65,7 @@ runs:
               exit 0
               ;;
             failed)
-              REASON=$(jq -r '.job.failure_reason // "unknown"' /tmp/jc-status.json)
+              REASON=$(jq -r '.job.failure_reason // "unknown"' /tmp/bop-status.json)
               echo "state=failed" >> "$GITHUB_OUTPUT"
               echo "::error::Job $JOB_ID failed: $REASON"
               exit 1

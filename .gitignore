@@ -28,7 +28,7 @@
 
 # Logs
 *.log
-/tmp/jobcard-*.log
+/tmp/bop-*.log
 
 # Local agent worktrees / scratch
 .claude/

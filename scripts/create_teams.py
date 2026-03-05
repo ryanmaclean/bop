@@ -8,7 +8,7 @@ import json, os, shutil, subprocess, pathlib, datetime
 
 ROOT = pathlib.Path(str(pathlib.Path(__file__).parent.parent))
 ROADMAP = ROOT / ".auto-claude/roadmap/roadmap.json"
-JC = ROOT / "target/debug/jc"
+BOP = ROOT / "target/debug/bop"
 ADAPTERS = ROOT / "adapters"
 
 roadmap = json.loads(ROADMAP.read_text())
@@ -24,9 +24,9 @@ TEAMS = [
         "desc": "CLI Commands & UX",
         "cards": [
             # feature-1 split into 3
-            ("job-control-retry",  "feature-1", "Implement `jc retry <id>` command: move a failed card back to pending/, increment retry_count in meta.json, reset failure_reason."),
-            ("job-control-kill",   "feature-1", "Implement `jc kill <id>` command: read PID from logs/pid (and xattr), send SIGTERM, move running card to failed/."),
-            ("job-control-logs",   "feature-1", "Implement `jc logs <id>` command: stream stdout.log and stderr.log for a running or completed card."),
+            ("job-control-retry",  "feature-1", "Implement `bop retry <id>` command: move a failed card back to pending/, increment retry_count in meta.json, reset failure_reason."),
+            ("job-control-kill",   "feature-1", "Implement `bop kill <id>` command: read PID from logs/pid (and xattr), send SIGTERM, move running card to failed/."),
+            ("job-control-logs",   "feature-1", "Implement `bop logs <id>` command: stream stdout.log and stderr.log for a running or completed card."),
             ("shell-completions",  "feature-6", None),
             ("clean-command",      "feature-7", None),
         ],
@@ -60,9 +60,9 @@ TEAMS = [
         "adapter": "opencode",
         "desc": "Intelligence Layer",
         "cards": [
-            ("model-lookup-registry",   "feature-10", "Implement the model registry: read a .cards/models.json file defining available models with capabilities, pricing, and limits. Add `jc models list` CLI command."),
+            ("model-lookup-registry",   "feature-10", "Implement the model registry: read a .cards/models.json file defining available models with capabilities, pricing, and limits. Add `bop models list` CLI command."),
             ("model-lookup-capability", "feature-10", "Implement capability matching: given a job's stage and spec, score available models by proficiency. Store result as selected_model in meta.json before dispatch."),
-            ("model-lookup-cost",       "feature-10", "Implement cost tracking: after each run, record tokens_used and cost_usd in meta.json stages record. Add `jc costs report` command."),
+            ("model-lookup-cost",       "feature-10", "Implement cost tracking: after each run, record tokens_used and cost_usd in meta.json stages record. Add `bop costs report` command."),
             ("fsevents-watcher",        "feature-13", None),
             ("cross-job-context",       "feature-17", None),
         ],
@@ -157,7 +157,7 @@ for team in TEAMS:
 
         (card_dir / "spec.md").write_text(build_spec(feature_id, override_desc))
         (card_dir / "prompt.md").write_text(
-            "You are working inside a Rust Cargo workspace (bop-core + jc crates).\n"
+            "You are working inside a Rust Cargo workspace (bop-core + bop-cli crates).\n"
             "The project root is your working directory.\n\n"
             "{{spec}}\n\n"
             "Acceptance criteria:\n{{acceptance_criteria}}\n"

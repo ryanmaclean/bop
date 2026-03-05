@@ -17,7 +17,7 @@ def main [
     prompt_file: string = "",
     stdout_log: string = "",
     stderr_log: string = "",
-    _memory_out?: string,  # memory output file path; read via JOBCARD_MEMORY_OUT env if needed
+    _memory_out?: string,  # memory output file path; read via BOP_MEMORY_OUT env if needed
     --test  # Run self-tests
 ] {
     if $test {

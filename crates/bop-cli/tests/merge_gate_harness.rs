@@ -26,7 +26,7 @@ fn build_jc() {
     assert!(status.success());
 }
 
-fn jc_bin() -> PathBuf {
+fn bop_bin() -> PathBuf {
     repo_root().join("target").join("debug").join("bop")
 }
 
@@ -57,7 +57,7 @@ fn merge_gate_moves_passing_card_to_merged() {
     let td = tempfile::tempdir().unwrap();
     let cards = td.path().join(".cards");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "init"])
         .status()
         .unwrap();
@@ -65,7 +65,7 @@ fn merge_gate_moves_passing_card_to_merged() {
 
     write_card(&cards, "mg1", &["exit 0"]);
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),
@@ -86,7 +86,7 @@ fn merge_gate_moves_failing_card_to_failed_and_writes_report() {
     let td = tempfile::tempdir().unwrap();
     let cards = td.path().join(".cards");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "init"])
         .status()
         .unwrap();
@@ -94,7 +94,7 @@ fn merge_gate_moves_failing_card_to_failed_and_writes_report() {
 
     write_card(&cards, "mg2", &["exit 1"]);
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),
@@ -117,7 +117,7 @@ fn merge_gate_jj_squash_workspace_forgotten_after_merge() {
     // used in the merge gate exist with the correct signatures.
     //
     // Full end-to-end jj merge gate integration requires a running jj repo,
-    // a real card directory structure, and the jc binary — covered by manual
+    // a real card directory structure, and the bop binary — covered by manual
     // testing. This test guards against signature regressions.
     fn _type_check() {
         let p = std::path::Path::new("");
@@ -139,7 +139,7 @@ fn merge_gate_no_workspace_card_moves_to_merged() {
     let td = tempfile::tempdir().unwrap();
     let cards = td.path().join(".cards");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "init"])
         .status()
         .unwrap();
@@ -148,7 +148,7 @@ fn merge_gate_no_workspace_card_moves_to_merged() {
     // Write a card with passing acceptance criteria and NO workspace/ subdirectory.
     write_card(&cards, "mg3", &["exit 0"]);
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),

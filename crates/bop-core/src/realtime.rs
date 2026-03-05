@@ -1,4 +1,4 @@
-//! Real-time data feed integration for JobCard.
+//! Real-time data feed integration for bop.
 //!
 //! Provides types and utilities for ingesting, validating, and monitoring
 //! real-time data streams from IoT sensors, GPS devices, and HTTP endpoints.

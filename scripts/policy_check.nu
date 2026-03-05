@@ -255,8 +255,8 @@ for p in sorted(set(changed_paths)):
 # Rule 2: CLI command churn requires decision record.
 cli_change_requires_decision = bool(policy.get("decision_required_if_cli_change", True))
 cli_subcommand_change = False
-if any(p == "crates/jc/src/main.rs" or p.endswith("/crates/jc/src/main.rs") for p in changed_paths):
-    patch = run(diff_base_cmd + ["--", "crates/jc/src/main.rs"], cwd=git_ctx).stdout
+if any(p == "crates/bop-cli/src/main.rs" or p.endswith("/crates/bop-cli/src/main.rs") for p in changed_paths):
+    patch = run(diff_base_cmd + ["--", "crates/bop-cli/src/main.rs"], cwd=git_ctx).stdout
     for line in patch.splitlines():
         if not line.startswith("+") or line.startswith("+++"):
             continue

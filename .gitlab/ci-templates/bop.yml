@@ -1,0 +1,225 @@
+# Bop GitLab CI Template
+#
+# Usage: include this template in your .gitlab-ci.yml:
+#
+#   include:
+#     - project: 'your-org/bop'
+#       file: '.gitlab/ci-templates/bop.yml'
+#
+# Then use the hidden jobs as extends targets:
+#
+#   create-ai-job:
+#     extends: .bop-create
+#     variables:
+#       BOP_TEMPLATE: implement
+#       BOP_SPEC: "Add OAuth2 login to the user service"
+#
+# Prerequisites:
+#   - A self-hosted GitLab runner with the Bop daemon running
+#   - BOP_API_URL CI/CD variable set to http://<runner-host>:8765
+#   - jq and curl available on the runner image
+
+# ── Variables ─────────────────────────────────────────────────────────────────
+
+variables:
+  BOP_API_URL:
+    value: "http://127.0.0.1:8765"
+    description: "Base URL of the Bop REST API server"
+  BOP_POLL_INTERVAL:
+    value: "15"
+    description: "Seconds between status polls"
+  BOP_TIMEOUT_MINUTES:
+    value: "60"
+    description: "Maximum minutes to wait for job completion"
+
+# ── Hidden job: create ────────────────────────────────────────────────────────
+
+.bop-create:
+  # Variables to set in the extending job:
+  #   BOP_TEMPLATE        (required) template name, e.g. "implement"
+  #   BOP_JOB_ID          (optional) override job ID; auto-generated if unset
+  #   BOP_SPEC            (optional) spec text written to spec.md
+  #   BOP_ACCEPTANCE_JSON (optional) JSON array of acceptance criteria strings
+  variables:
+    BOP_TEMPLATE: implement
+    BOP_JOB_ID: ""
+    BOP_SPEC: ""
+    BOP_ACCEPTANCE_JSON: "[]"
+  script:
+    - |
+      if [ -z "$BOP_JOB_ID" ]; then
+        BOP_JOB_ID="ci-${CI_PIPELINE_ID}-${CI_JOB_ID}"
+      fi
+      export BOP_JOB_ID
+
+      PAYLOAD=$(jq -n \
+        --arg template "$BOP_TEMPLATE" \
+        --arg id       "$BOP_JOB_ID" \
+        --arg spec     "$BOP_SPEC" \
+        --argjson ac   "$BOP_ACCEPTANCE_JSON" \
+        '{template:$template, id:$id, spec:$spec, acceptance_criteria:$ac}')
+
+      HTTP_CODE=$(curl -sf -o /tmp/bop-create.json -w "%{http_code}" \
+        -X POST "${BOP_API_URL}/jobs" \
+        -H "Content-Type: application/json" \
+        -d "$PAYLOAD")
+
+      cat /tmp/bop-create.json
+
+      if [ "$HTTP_CODE" != "201" ]; then
+        echo "ERROR: Bop API returned HTTP $HTTP_CODE"
+        exit 1
+      fi
+
+      echo "BOP_JOB_ID=$BOP_JOB_ID" >> bop.env
+      echo "Created job: $BOP_JOB_ID"
+  artifacts:
+    reports:
+      dotenv: bop.env
+
+# ── Hidden job: wait ──────────────────────────────────────────────────────────
+
+.bop-wait:
+  # Depends on a prior .bop-create job that exports BOP_JOB_ID via dotenv.
+  script:
+    - |
+      DEADLINE=$(( $(date +%s) + BOP_TIMEOUT_MINUTES * 60 ))
+      echo "Waiting for job: $BOP_JOB_ID"
+
+      while true; do
+        NOW=$(date +%s)
+        if [ "$NOW" -ge "$DEADLINE" ]; then
+          echo "ERROR: Timed out after ${BOP_TIMEOUT_MINUTES}m waiting for $BOP_JOB_ID"
+          exit 1
+        fi
+
+        HTTP_CODE=$(curl -sf -o /tmp/bop-status.json -w "%{http_code}" \
+          "${BOP_API_URL}/jobs/${BOP_JOB_ID}")
+
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "WARNING: Status poll returned HTTP $HTTP_CODE — retrying"
+          sleep "$BOP_POLL_INTERVAL"
+          continue
+        fi
+
+        STATE=$(jq -r '.job.state' /tmp/bop-status.json)
+        echo "Job $BOP_JOB_ID state: $STATE"
+
+        case "$STATE" in
+          done|merged)
+            echo "Job completed successfully (state: $STATE)"
+            exit 0
+            ;;
+          failed)
+            REASON=$(jq -r '.job.failure_reason // "unknown"' /tmp/bop-status.json)
+            echo "ERROR: Job $BOP_JOB_ID failed: $REASON"
+            exit 1
+            ;;
+          pending|running)
+            sleep "$BOP_POLL_INTERVAL"
+            ;;
+          *)
+            echo "WARNING: Unexpected state '$STATE' — retrying"
+            sleep "$BOP_POLL_INTERVAL"
+            ;;
+        esac
+      done
+
+# ── Hidden job: get output ────────────────────────────────────────────────────
+
+.bop-output:
+  # Depends on a prior .bop-create job that exports BOP_JOB_ID via dotenv.
+  # Writes output files to $BOP_OUTPUT_DIR (default: bop-output/).
+  variables:
+    BOP_OUTPUT_DIR: bop-output
+  script:
+    - |
+      mkdir -p "$BOP_OUTPUT_DIR"
+
+      HTTP_CODE=$(curl -sf -o /tmp/bop-output.json -w "%{http_code}" \
+        "${BOP_API_URL}/jobs/${BOP_JOB_ID}/output")
+
+      if [ "$HTTP_CODE" != "200" ]; then
+        echo "ERROR: Output API returned HTTP $HTTP_CODE"
+        cat /tmp/bop-output.json
+        exit 1
+      fi
+
+      jq -r '.files | to_entries[] | "\(.key)\t\(.value)"' /tmp/bop-output.json \
+        | while IFS=$'\t' read -r name content; do
+            dir=$(dirname "$BOP_OUTPUT_DIR/$name")
+            mkdir -p "$dir"
+            printf '%s' "$content" > "$BOP_OUTPUT_DIR/$name"
+            echo "Wrote: $BOP_OUTPUT_DIR/$name"
+          done
+
+      echo "Output files written to $BOP_OUTPUT_DIR"
+  artifacts:
+    paths:
+      - bop-output/
+    expire_in: 7 days
+
+# ── Convenience combined job ──────────────────────────────────────────────────
+
+.bop-run:
+  # All-in-one: create, wait, then fetch output in a single job.
+  variables:
+    BOP_TEMPLATE: implement
+    BOP_JOB_ID: ""
+    BOP_SPEC: ""
+    BOP_ACCEPTANCE_JSON: "[]"
+    BOP_OUTPUT_DIR: bop-output
+  script:
+    - |
+      # 1. Create
+      if [ -z "$BOP_JOB_ID" ]; then
+        BOP_JOB_ID="ci-${CI_PIPELINE_ID}-${CI_JOB_ID}"
+      fi
+
+      PAYLOAD=$(jq -n \
+        --arg template "$BOP_TEMPLATE" \
+        --arg id       "$BOP_JOB_ID" \
+        --arg spec     "$BOP_SPEC" \
+        --argjson ac   "$BOP_ACCEPTANCE_JSON" \
+        '{template:$template, id:$id, spec:$spec, acceptance_criteria:$ac}')
+
+      HTTP_CODE=$(curl -sf -o /tmp/bop-create.json -w "%{http_code}" \
+        -X POST "${BOP_API_URL}/jobs" \
+        -H "Content-Type: application/json" \
+        -d "$PAYLOAD")
+
+      if [ "$HTTP_CODE" != "201" ]; then
+        echo "ERROR: Create returned HTTP $HTTP_CODE"; cat /tmp/bop-create.json; exit 1
+      fi
+      echo "Created job: $BOP_JOB_ID"
+
+      # 2. Wait
+      DEADLINE=$(( $(date +%s) + BOP_TIMEOUT_MINUTES * 60 ))
+      while true; do
+        [ "$(date +%s)" -ge "$DEADLINE" ] && echo "ERROR: timeout" && exit 1
+        HTTP_CODE=$(curl -sf -o /tmp/bop-status.json -w "%{http_code}" \
+          "${BOP_API_URL}/jobs/${BOP_JOB_ID}")
+        STATE=$(jq -r '.job.state' /tmp/bop-status.json 2>/dev/null || echo "unknown")
+        echo "State: $STATE"
+        case "$STATE" in
+          done|merged) break ;;
+          failed)
+            REASON=$(jq -r '.job.failure_reason // "unknown"' /tmp/bop-status.json)
+            echo "ERROR: Job failed: $REASON"; exit 1 ;;
+          *) sleep "$BOP_POLL_INTERVAL" ;;
+        esac
+      done
+
+      # 3. Fetch output
+      mkdir -p "$BOP_OUTPUT_DIR"
+      curl -sf "${BOP_API_URL}/jobs/${BOP_JOB_ID}/output" \
+        | jq -r '.files | to_entries[] | "\(.key)\t\(.value)"' \
+        | while IFS=$'\t' read -r name content; do
+            mkdir -p "$(dirname "$BOP_OUTPUT_DIR/$name")"
+            printf '%s' "$content" > "$BOP_OUTPUT_DIR/$name"
+            echo "Wrote: $BOP_OUTPUT_DIR/$name"
+          done
+  artifacts:
+    paths:
+      - bop-output/
+    expire_in: 7 days

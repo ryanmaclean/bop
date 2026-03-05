@@ -119,12 +119,12 @@ Generated OpenAPI 3.0 specification for all endpoints.
 
 Three reusable composite actions are provided in `.github/actions/`.
 
-### `jobcard-create`
+### `bop-create`
 
 Creates a job and outputs its ID.
 
 ```yaml
-- uses: ./.github/actions/jobcard-create
+- uses: ./.github/actions/bop-create
   id: create
   with:
     api-url: http://127.0.0.1:8765
@@ -134,12 +134,12 @@ Creates a job and outputs its ID.
 # outputs: steps.create.outputs.job-id
 ```
 
-### `jobcard-wait`
+### `bop-wait`
 
 Polls until the job completes. Fails the CI step if the job fails.
 
 ```yaml
-- uses: ./.github/actions/jobcard-wait
+- uses: ./.github/actions/bop-wait
   with:
     api-url: http://127.0.0.1:8765
     job-id: ${{ steps.create.outputs.job-id }}
@@ -148,17 +148,17 @@ Polls until the job completes. Fails the CI step if the job fails.
 # outputs: steps.wait.outputs.state (done|failed|merged)
 ```
 
-### `jobcard-output`
+### `bop-output`
 
 Fetches output files and uploads them as a workflow artifact.
 
 ```yaml
-- uses: ./.github/actions/jobcard-output
+- uses: ./.github/actions/bop-output
   with:
     api-url: http://127.0.0.1:8765
     job-id: ${{ steps.create.outputs.job-id }}
     output-dir: ai-output
-# Uploads artifact: jobcard-output-<job-id>
+# Uploads artifact: bop-output-<job-id>
 ```
 
 ### Full example workflow
@@ -174,50 +174,50 @@ See `.github/workflows/ai-coding-job.yml` for a complete workflow that:
 
 ## GitLab CI
 
-Include the template from `.gitlab/ci-templates/jobcard.yml` and extend the hidden jobs:
+Include the template from `.gitlab/ci-templates/bop.yml` and extend the hidden jobs:
 
 ```yaml
 include:
-  - local: '.gitlab/ci-templates/jobcard.yml'
+  - local: '.gitlab/ci-templates/bop.yml'
 
 variables:
-  JOBCARD_API_URL: http://127.0.0.1:8765
+  BOP_API_URL: http://127.0.0.1:8765
 
 # Option 1: Separate create / wait / output stages
 create-job:
   stage: create
-  extends: .jobcard-create
+  extends: .bop-create
   variables:
-    JOBCARD_TEMPLATE: implement
-    JOBCARD_SPEC: "Implement feature X"
-    JOBCARD_ACCEPTANCE_JSON: '["Tests pass"]'
+    BOP_TEMPLATE: implement
+    BOP_SPEC: "Implement feature X"
+    BOP_ACCEPTANCE_JSON: '["Tests pass"]'
 
 wait-for-job:
   stage: wait
-  extends: .jobcard-wait
+  extends: .bop-wait
   needs: [create-job]
 
 fetch-output:
   stage: output
-  extends: .jobcard-output
+  extends: .bop-output
   needs: [wait-for-job]
 
 # Option 2: All-in-one job
 ai-coding:
   stage: deploy
-  extends: .jobcard-run
+  extends: .bop-run
   variables:
-    JOBCARD_TEMPLATE: implement
-    JOBCARD_SPEC: "Implement feature X"
+    BOP_TEMPLATE: implement
+    BOP_SPEC: "Implement feature X"
 ```
 
 ### CI/CD Variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `JOBCARD_API_URL` | `http://127.0.0.1:8765` | bop API server URL |
-| `JOBCARD_POLL_INTERVAL` | `15` | Seconds between status polls |
-| `JOBCARD_TIMEOUT_MINUTES` | `60` | Maximum wait time |
+| `BOP_API_URL` | `http://127.0.0.1:8765` | bop API server URL |
+| `BOP_POLL_INTERVAL` | `15` | Seconds between status polls |
+| `BOP_TIMEOUT_MINUTES` | `60` | Maximum wait time |
 
 ---
 
@@ -235,4 +235,4 @@ ai-coding:
 1. Register a GitLab Runner with the `shell` executor on your machine
 2. Ensure `bop`, `jq`, and `curl` are available in the runner's PATH
 3. Start `bop serve` and `bop dispatcher` as background services
-4. Set `JOBCARD_API_URL` in your GitLab CI/CD variables
+4. Set `BOP_API_URL` in your GitLab CI/CD variables

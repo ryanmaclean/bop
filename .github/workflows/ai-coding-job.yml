@@ -1,7 +1,7 @@
 name: AI Coding Job
 
 # Trigger an AI coding job whenever a PR is labeled "ai-implement".
-# The job runs on a self-hosted runner that has the JobCard daemon running.
+# The job runs on a self-hosted runner that has the Bop daemon running.
 # On completion, output files are uploaded as a workflow artifact.
 
 on:
@@ -11,7 +11,7 @@ on:
 jobs:
   ai-coding:
     if: github.event.label.name == 'ai-implement'
-    runs-on: self-hosted  # Must be the runner with jc daemon + jc serve
+    runs-on: self-hosted  # Must be the runner with bop daemon + bop serve
 
     steps:
       - name: Checkout
@@ -33,9 +33,9 @@ jobs:
             echo "SPEC_EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Create JobCard job
+      - name: Create Bop job
         id: create
-        uses: ./.github/actions/jobcard-create
+        uses: ./.github/actions/bop-create
         with:
           api-url: http://127.0.0.1:8765
           template: implement
@@ -43,14 +43,14 @@ jobs:
           acceptance-criteria: '["Tests pass","Linter clean","PR description updated"]'
 
       - name: Wait for completion
-        uses: ./.github/actions/jobcard-wait
+        uses: ./.github/actions/bop-wait
         with:
           api-url: http://127.0.0.1:8765
           job-id: ${{ steps.create.outputs.job-id }}
           timeout-minutes: 45
 
       - name: Retrieve output
-        uses: ./.github/actions/jobcard-output
+        uses: ./.github/actions/bop-output
         with:
           api-url: http://127.0.0.1:8765
           job-id: ${{ steps.create.outputs.job-id }}

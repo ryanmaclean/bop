@@ -40,7 +40,7 @@ fn build_jc() {
     assert!(status.success());
 }
 
-fn jc_bin() -> PathBuf {
+fn bop_bin() -> PathBuf {
     repo_root().join("target").join("debug").join("bop")
 }
 
@@ -112,7 +112,7 @@ fn dispatcher_moves_success_to_done() {
     let td = tempfile::tempdir().unwrap();
     let cards = td.path().join(".cards");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "init"])
         .status()
         .unwrap();
@@ -122,7 +122,7 @@ fn dispatcher_moves_success_to_done() {
 
     write_template(&cards, "implement");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),
@@ -134,7 +134,7 @@ fn dispatcher_moves_success_to_done() {
         .unwrap();
     assert!(status.success());
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .env("MOCK_EXIT", "0")
         .args([
             "--cards-dir",
@@ -164,7 +164,7 @@ fn dispatcher_rate_limit_requeues_to_pending() {
     let td = tempfile::tempdir().unwrap();
     let cards = td.path().join(".cards");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "init"])
         .status()
         .unwrap();
@@ -174,7 +174,7 @@ fn dispatcher_rate_limit_requeues_to_pending() {
 
     write_template(&cards, "implement");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),
@@ -186,7 +186,7 @@ fn dispatcher_rate_limit_requeues_to_pending() {
         .unwrap();
     assert!(status.success());
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .env("MOCK_EXIT", "75")
         .args([
             "--cards-dir",
@@ -216,7 +216,7 @@ fn dispatcher_rate_limit_sets_cooldown_and_rotates_chain() {
     let td = tempfile::tempdir().unwrap();
     let cards = td.path().join(".cards");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "init"])
         .status()
         .unwrap();
@@ -225,7 +225,7 @@ fn dispatcher_rate_limit_sets_cooldown_and_rotates_chain() {
     write_providers(&cards);
     write_template(&cards, "implement");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),
@@ -237,7 +237,7 @@ fn dispatcher_rate_limit_sets_cooldown_and_rotates_chain() {
         .unwrap();
     assert!(status.success());
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .env("MOCK_EXIT", "75")
         .args([
             "--cards-dir",
@@ -278,7 +278,7 @@ fn dispatcher_relative_adapter_path_works() {
     // Use absolute paths in providers.json so the adapter shell script itself
     // is found, but pass a *relative* adapter path to the dispatcher CLI to
     // exercise the relative→absolute conversion in run_card.
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "init"])
         .status()
         .unwrap();
@@ -287,7 +287,7 @@ fn dispatcher_relative_adapter_path_works() {
     write_providers(&cards);
     write_template(&cards, "implement");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),
@@ -300,7 +300,7 @@ fn dispatcher_relative_adapter_path_works() {
     assert!(status.success());
 
     // Run the dispatcher from repo_root() so that "adapters/mock.nu" resolves.
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .env("MOCK_EXIT", "0")
         .args([
             "--cards-dir",
@@ -340,7 +340,7 @@ fn dispatcher_qa_prefers_different_provider_than_implement() {
     let td = tempfile::tempdir().unwrap();
     let cards = td.path().join(".cards");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "init"])
         .status()
         .unwrap();
@@ -359,13 +359,13 @@ fn dispatcher_qa_prefers_different_provider_than_implement() {
     fs::write(tdir.join("spec.md"), "").unwrap();
     fs::write(tdir.join("prompt.md"), "{{spec}}\n").unwrap();
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "new", "qa", "job4"])
         .status()
         .unwrap();
     assert!(status.success());
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .env("MOCK_EXIT", "0")
         .args([
             "--cards-dir",
@@ -392,7 +392,7 @@ fn dispatcher_reaps_stale_lease_without_dead_pid() {
     let td = tempfile::tempdir().unwrap();
     let cards = td.path().join(".cards");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "init"])
         .status()
         .unwrap();
@@ -400,7 +400,7 @@ fn dispatcher_reaps_stale_lease_without_dead_pid() {
 
     write_running_card_with_stale_lease(&cards, "lease-stale");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),
@@ -435,7 +435,7 @@ fn dispatcher_quarantines_invalid_pending_meta_to_failed() {
     let td = tempfile::tempdir().unwrap();
     let cards = td.path().join(".cards");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "init"])
         .status()
         .unwrap();
@@ -443,7 +443,7 @@ fn dispatcher_quarantines_invalid_pending_meta_to_failed() {
 
     write_invalid_pending_card(&cards, "bad-meta");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),
@@ -479,7 +479,7 @@ fn dispatcher_fails_when_live_lock_exists() {
     let td = tempfile::tempdir().unwrap();
     let cards = td.path().join(".cards");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "init"])
         .status()
         .unwrap();
@@ -496,7 +496,7 @@ fn dispatcher_fails_when_live_lock_exists() {
     )
     .unwrap();
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),
@@ -520,7 +520,7 @@ fn dispatcher_reclaims_stale_lock_and_runs() {
     let td = tempfile::tempdir().unwrap();
     let cards = td.path().join(".cards");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "init"])
         .status()
         .unwrap();
@@ -528,7 +528,7 @@ fn dispatcher_reclaims_stale_lock_and_runs() {
 
     write_providers(&cards);
     write_template(&cards, "implement");
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),
@@ -548,7 +548,7 @@ fn dispatcher_reclaims_stale_lock_and_runs() {
     )
     .unwrap();
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .env("MOCK_EXIT", "0")
         .args([
             "--cards-dir",
@@ -571,7 +571,7 @@ fn dispatcher_emits_lineage_events() {
     let td = tempfile::tempdir().unwrap();
     let cards = td.path().join(".cards");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "init"])
         .status()
         .unwrap();
@@ -583,7 +583,7 @@ fn dispatcher_emits_lineage_events() {
     // Enable lineage via hooks.toml
     fs::write(cards.join("hooks.toml"), "").unwrap();
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),
@@ -595,7 +595,7 @@ fn dispatcher_emits_lineage_events() {
         .unwrap();
     assert!(status.success());
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .env("MOCK_EXIT", "0")
         .args([
             "--cards-dir",

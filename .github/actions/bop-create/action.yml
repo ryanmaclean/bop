@@ -1,5 +1,5 @@
-name: JobCard Create
-description: Create a JobCard job via the REST API and output the job ID.
+name: Bop Create
+description: Create a Bop job via the REST API and output the job ID.
 
 branding:
   icon: zap
@@ -7,7 +7,7 @@ branding:
 
 inputs:
   api-url:
-    description: Base URL of the JobCard API server (e.g. http://runner:8765)
+    description: Base URL of the Bop API server (e.g. http://runner:8765)
     required: true
   template:
     description: Template name to use (must exist in .cards/templates/)
@@ -59,18 +59,18 @@ runs:
           --argjson ac '${{ inputs.acceptance-criteria }}' \
           '{template: $template, id: $id, spec: $spec, acceptance_criteria: $ac}')
 
-        HTTP_CODE=$(curl -s -o /tmp/jc-create-response.json -w "%{http_code}" \
+        HTTP_CODE=$(curl -s -o /tmp/bop-create-response.json -w "%{http_code}" \
           -X POST "${{ inputs.api-url }}/jobs" \
           -H "Content-Type: application/json" \
           -d "$PAYLOAD")
 
-        cat /tmp/jc-create-response.json
+        cat /tmp/bop-create-response.json
 
         if [ "$HTTP_CODE" != "201" ]; then
-          echo "::error::JobCard API returned HTTP $HTTP_CODE"
+          echo "::error::Bop API returned HTTP $HTTP_CODE"
           exit 1
         fi
 
-        CREATED_ID=$(jq -r '.job.id // .id' /tmp/jc-create-response.json)
+        CREATED_ID=$(jq -r '.job.id // .id' /tmp/bop-create-response.json)
         echo "job-id=$CREATED_ID" >> "$GITHUB_OUTPUT"
         echo "Created job: $CREATED_ID"

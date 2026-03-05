@@ -1,7 +1,7 @@
 # Roadmap Hot Folder (Sample)
 
 Drop request files into [`drop/`](./drop) and the launchd watcher can auto-create
-`🂠-*.jobcard` roadmap cards in `.cards/pending/`.
+`🂠-*.bop` roadmap cards in `.cards/pending/`.
 
 ## Supported file types
 

@@ -4,7 +4,7 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key>
-  <string>com.yourorg.jobcard.template-implement</string>
+  <string>sh.bop.template-implement</string>
   <key>CFBundleName</key>
   <string>implement</string>
   <key>CFBundlePackageType</key>

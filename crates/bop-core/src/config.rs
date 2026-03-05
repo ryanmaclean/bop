@@ -71,14 +71,14 @@ pub fn load_config() -> anyhow::Result<Config> {
     Ok(merge_configs(global, project))
 }
 
-/// Read config from a specific path (used by `jc config get/set`).
+/// Read config from a specific path (used by `bop config get/set`).
 pub fn read_config_file(path: &Path) -> anyhow::Result<Config> {
     let yaml = std::fs::read_to_string(path)
         .with_context(|| format!("cannot read config: {}", path.display()))?;
     parse_config(&yaml).with_context(|| format!("invalid config at {}", path.display()))
 }
 
-/// Write config to a specific path (used by `jc config set`).
+/// Write config to a specific path (used by `bop config set`).
 pub fn write_config_file(path: &Path, cfg: &Config) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)

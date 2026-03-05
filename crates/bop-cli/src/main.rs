@@ -318,7 +318,7 @@ enum MetaAction {
 }
 
 fn resolve_config_path() -> PathBuf {
-    if let Ok(p) = std::env::var("JOBCARD_CONFIG") {
+    if let Ok(p) = std::env::var("BOP_CONFIG") {
         return PathBuf::from(p);
     }
     bop_core::config::project_config_path()

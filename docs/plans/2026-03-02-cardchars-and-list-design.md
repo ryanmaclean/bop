@@ -4,7 +4,7 @@
 
 **Goal:** Auto-assign unique playing-card glyphs to every new card and surface them via `bop list`.
 
-**Architecture:** New `cardchars.rs` module in `jobcard-core` with a Team enum, const lookup tables for 4 suits x 14 ranks, and a `next_glyph()` function that scans existing cards to avoid collisions. The CLI wires this into `create_card()` and adds a `bop list` subcommand.
+**Architecture:** New `cardchars.rs` module in `bop-core` with a Team enum, const lookup tables for 4 suits x 14 ranks, and a `next_glyph()` function that scans existing cards to avoid collisions. The CLI wires this into `create_card()` and adds a `bop list` subcommand.
 
 **Tech Stack:** Rust, serde, clap (existing workspace deps)
 
@@ -17,11 +17,11 @@ Serde silently drops it on deserialize and loses it on re-serialize. Fix this fi
 so the rest of the work has a field to write to.
 
 **Files:**
-- Modify: `crates/jobcard-core/src/lib.rs:69-196` (Meta struct)
+- Modify: `crates/bop-core/src/lib.rs:69-196` (Meta struct)
 
 **Step 1: Write the failing test**
 
-Add to the `tests` module in `crates/jobcard-core/src/lib.rs`:
+Add to the `tests` module in `crates/bop-core/src/lib.rs`:
 
 ```rust
 #[test]
@@ -43,7 +43,7 @@ fn meta_token_field_round_trips() {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cargo test -p jobcard-core meta_token_field_round_trips`
+Run: `cargo test -p bop-core meta_token_field_round_trips`
 Expected: FAIL — `Meta` has no field named `token`
 
 **Step 3: Write minimal implementation**
@@ -64,7 +64,7 @@ also works (it uses explicit field listing, so add `token: None,` there).
 
 **Step 4: Run test to verify it passes**
 
-Run: `cargo test -p jobcard-core meta_token_field_round_trips`
+Run: `cargo test -p bop-core meta_token_field_round_trips`
 Expected: PASS
 
 **Step 5: Run full suite**
@@ -75,7 +75,7 @@ Expected: All existing tests still pass
 **Step 6: Commit**
 
 ```
-git add crates/jobcard-core/src/lib.rs
+git add crates/bop-core/src/lib.rs
 git commit -m "feat: add token field to Meta struct
 
 Existing meta.json files contain a token field that was silently
@@ -87,12 +87,12 @@ dropped on deserialize. Now it round-trips correctly."
 ### Task 2: Create `cardchars.rs` — Team enum and lookup tables
 
 **Files:**
-- Create: `crates/jobcard-core/src/cardchars.rs`
-- Modify: `crates/jobcard-core/src/lib.rs:1-3` (add `pub mod cardchars;`)
+- Create: `crates/bop-core/src/cardchars.rs`
+- Modify: `crates/bop-core/src/lib.rs:1-3` (add `pub mod cardchars;`)
 
 **Step 1: Write the failing tests**
 
-Create `crates/jobcard-core/src/cardchars.rs` with tests only:
+Create `crates/bop-core/src/cardchars.rs` with tests only:
 
 ```rust
 use std::collections::HashSet;
@@ -156,15 +156,15 @@ mod tests {
 
     #[test]
     fn team_from_path_detects_team_dirs() {
-        assert_eq!(team_from_path(Path::new("/x/.cards/team-cli/pending/foo.jobcard")), Team::Cli);
-        assert_eq!(team_from_path(Path::new("/x/.cards/team-arch/pending/foo.jobcard")), Team::Arch);
-        assert_eq!(team_from_path(Path::new("/x/.cards/team-quality/pending/foo.jobcard")), Team::Quality);
-        assert_eq!(team_from_path(Path::new("/x/.cards/team-platform/pending/foo.jobcard")), Team::Platform);
+        assert_eq!(team_from_path(Path::new("/x/.cards/team-cli/pending/foo.bop")), Team::Cli);
+        assert_eq!(team_from_path(Path::new("/x/.cards/team-arch/pending/foo.bop")), Team::Arch);
+        assert_eq!(team_from_path(Path::new("/x/.cards/team-quality/pending/foo.bop")), Team::Quality);
+        assert_eq!(team_from_path(Path::new("/x/.cards/team-platform/pending/foo.bop")), Team::Platform);
     }
 
     #[test]
     fn team_from_path_defaults_to_cli() {
-        assert_eq!(team_from_path(Path::new("/x/.cards/pending/foo.jobcard")), Team::Cli);
+        assert_eq!(team_from_path(Path::new("/x/.cards/pending/foo.bop")), Team::Cli);
     }
 
     #[test]
@@ -183,7 +183,7 @@ mod tests {
 
 **Step 2: Add module declaration**
 
-In `crates/jobcard-core/src/lib.rs`, line 1, add:
+In `crates/bop-core/src/lib.rs`, line 1, add:
 
 ```rust
 pub mod cardchars;
@@ -191,12 +191,12 @@ pub mod cardchars;
 
 **Step 3: Run tests to verify they fail**
 
-Run: `cargo test -p jobcard-core cardchars`
+Run: `cargo test -p bop-core -- cardchars`
 Expected: FAIL — functions not defined
 
 **Step 4: Write the implementation**
 
-Fill in `crates/jobcard-core/src/cardchars.rs` above the tests:
+Fill in `crates/bop-core/src/cardchars.rs` above the tests:
 
 ```rust
 use std::collections::HashSet;
@@ -274,7 +274,7 @@ pub fn team_from_path(card_path: &Path) -> Team {
 
 /// Scan all card directories under `cards_root` and collect glyph chars in use.
 ///
-/// Reads meta.json from every `.jobcard` dir found in any state directory
+/// Reads meta.json from every `.bop` dir found in any state directory
 /// (pending, running, done, failed) and in team-*/state/ paths.
 pub fn collect_used_glyphs(cards_root: &Path) -> HashSet<char> {
     let mut used = HashSet::new();
@@ -284,11 +284,11 @@ pub fn collect_used_glyphs(cards_root: &Path) -> HashSet<char> {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let p = entry.path();
-                if p.is_dir() && p.extension().and_then(|e| e.to_str()) == Some("jobcard") {
-                    // "extension" won't work for ".jobcard" dirs — check file_name
+                if p.is_dir() && p.extension().and_then(|e| e.to_str()) == Some("bop") {
+                    // "extension" won't work for ".bop" dirs — check file_name
                 }
                 let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if p.is_dir() && name.ends_with(".jobcard") {
+                if p.is_dir() && name.ends_with(".bop") {
                     if let Ok(meta) = crate::read_meta(&p) {
                         if let Some(g) = &meta.glyph {
                             if let Some(ch) = g.chars().next() {
@@ -325,18 +325,18 @@ pub fn collect_used_glyphs(cards_root: &Path) -> HashSet<char> {
 
 **Step 5: Run tests to verify they pass**
 
-Run: `cargo test -p jobcard-core cardchars`
+Run: `cargo test -p bop-core -- cardchars`
 Expected: All 9 tests PASS
 
 **Step 6: Run clippy**
 
-Run: `cargo clippy -p jobcard-core -- -D warnings`
+Run: `cargo clippy -p bop-core -- -D warnings`
 Expected: No warnings
 
 **Step 7: Commit**
 
 ```
-git add crates/jobcard-core/src/cardchars.rs crates/jobcard-core/src/lib.rs
+git add crates/bop-core/src/cardchars.rs crates/bop-core/src/lib.rs
 git commit -m "feat: add cardchars module with Team enum and glyph lookup
 
 Sequential assignment of playing-card glyphs per team/suit.
@@ -349,9 +349,9 @@ Spades=CLI, Hearts=Arch, Diamonds=Quality, Clubs=Platform.
 ### Task 3: Wire auto-assign into `create_card()`
 
 **Files:**
-- Modify: `crates/jc/src/main.rs:30-36` (Command::New — add --team flag)
-- Modify: `crates/jc/src/main.rs:935-1035` (create_card function)
-- Modify: `crates/jc/src/main.rs:2060-2062` (Command::New match arm)
+- Modify: `crates/bop-cli/src/main.rs:30-36` (Command::New — add --team flag)
+- Modify: `crates/bop-cli/src/main.rs:935-1035` (create_card function)
+- Modify: `crates/bop-cli/src/main.rs:2060-2062` (Command::New match arm)
 
 **Step 1: Add `--team` to `Command::New`**
 
@@ -400,7 +400,7 @@ After `meta.failure_reason = None;` (line ~1018), before `write_meta`, add:
 ```rust
     // Auto-assign glyph + token if not already set
     if meta.glyph.is_none() {
-        use jobcard_core::cardchars::{self, Team};
+        use bop_core::cardchars::{self, Team};
         let team = match team_override {
             Some("cli") => Team::Cli,
             Some("arch") => Team::Arch,
@@ -426,7 +426,7 @@ Also update the other `create_card` call site — search for any other callers.
 
 **Step 4: Update other callers of create_card**
 
-Run: `grep -n 'create_card(' crates/jc/src/main.rs` to find all call sites.
+Run: `grep -n 'create_card(' crates/bop-cli/src/main.rs` to find all call sites.
 Each needs the new `team_override` param (pass `None` for internal callers like
 stage-advance).
 
@@ -434,7 +434,7 @@ stage-advance).
 
 Line ~963 currently uses:
 ```rust
-    let card_dir = cards_dir.join("pending").join(format!("🂠-{}.jobcard", id));
+    let card_dir = cards_dir.join("pending").join(format!("🂠-{}.bop", id));
 ```
 
 After glyph assignment, rename the card dir to use the assigned glyph instead
@@ -444,7 +444,7 @@ initial name and rename after meta write:
 ```rust
     // Rename card dir from placeholder to glyph-prefixed
     if let Some(ref g) = meta.glyph {
-        let new_name = format!("{}-{}.jobcard", g, id);
+        let new_name = format!("{}-{}.bop", g, id);
         let new_dir = card_dir.parent().unwrap().join(&new_name);
         if !new_dir.exists() {
             std::fs::rename(&card_dir, &new_dir)?;
@@ -466,7 +466,7 @@ Expected: No warnings
 **Step 8: Commit**
 
 ```
-git add crates/jc/src/main.rs
+git add crates/bop-cli/src/main.rs
 git commit -m "feat: auto-assign glyph+token on card creation
 
 New cards get a unique playing-card glyph based on team (suit)
@@ -479,7 +479,7 @@ Card directory is renamed from placeholder to glyph prefix."
 ### Task 4: Add `bop list` subcommand
 
 **Files:**
-- Modify: `crates/jc/src/main.rs` (add Command::List, impl list_cards fn)
+- Modify: `crates/bop-cli/src/main.rs` (add Command::List, impl list_cards fn)
 
 **Step 1: Add `Command::List` variant**
 
@@ -527,12 +527,12 @@ fn print_state_group(dir: &Path, state: &str, is_team: bool) -> anyhow::Result<(
         return Ok(());
     }
 
-    let mut cards: Vec<(String, jobcard_core::Meta)> = Vec::new();
+    let mut cards: Vec<(String, bop_core::Meta)> = Vec::new();
     if let Ok(entries) = fs::read_dir(&state_dir) {
         for entry in entries.flatten() {
             let p = entry.path();
             if p.is_dir() {
-                if let Ok(meta) = jobcard_core::read_meta(&p) {
+                if let Ok(meta) = bop_core::read_meta(&p) {
                     cards.push((p.to_string_lossy().to_string(), meta));
                 }
             }
@@ -583,7 +583,7 @@ Expected: Renders existing cards with their glyphs
 **Step 5: Commit**
 
 ```
-git add crates/jc/src/main.rs
+git add crates/bop-cli/src/main.rs
 git commit -m "feat: add bop list command
 
 Shows cards grouped by state with glyph, token, id, stage,
@@ -596,7 +596,7 @@ Includes team-* subdirectories."
 ### Task 5: Replace `print_status_summary` with rich output
 
 **Files:**
-- Modify: `crates/jc/src/main.rs:2008-2017` (`print_status_summary` function)
+- Modify: `crates/bop-cli/src/main.rs:2008-2017` (`print_status_summary` function)
 
 **Step 1: Replace the function body**
 
@@ -617,7 +617,7 @@ Expected: Shows the same rich listing as `bop list`
 **Step 3: Commit**
 
 ```
-git add crates/jc/src/main.rs
+git add crates/bop-cli/src/main.rs
 git commit -m "feat: bop status (no-arg) now shows rich card listing
 
 Replaces bare state counts with the same glyph+progress output

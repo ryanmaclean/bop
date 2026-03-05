@@ -2,12 +2,12 @@
 
 ## What was done
 
-Updated `cmd_inspect` in `crates/jc/src/main.rs` to display a formatted runs
+Updated `cmd_inspect` in `crates/bop-cli/src/main.rs` to display a formatted runs
 table matching the spec.
 
 ### Changes
 
-**File:** `crates/jc/src/main.rs` — `cmd_inspect` function (~line 5246)
+**File:** `crates/bop-cli/src/main.rs` — `cmd_inspect` function (~line 5246)
 
 Replaced the conditional `if !meta.runs.is_empty()` block with an
 unconditional runs table section:

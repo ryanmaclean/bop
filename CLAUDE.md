@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Skills
 
 Four skills provide orientation for this repo — invoke before working:
-- `jobcard-system` — what `bop` is, card lifecycle, state machine
+- `bop-system` — what `bop` is, card lifecycle, state machine
 - `vibekanban` — Quick Look cards, Zellij plugin, glyph system, SwiftUI card anatomy
 - `unicode-glyphs` — playing card encoding, BMP/SMP safety, font recommendations
 - `bop-team` — dogfood rule: every unit of work on bop = a bop card
@@ -74,7 +74,7 @@ Each card is a `<id>.card/` directory bundle containing `meta.json`, `spec.md`, 
 
 1. **`bop new <template> <id>`** — COW-clones a template from `.cards/templates/` into `.cards/pending/` using APFS `cp -c` (macOS) or `--reflink=auto` (Linux), then writes `meta.json`.
 
-2. **Dispatcher loop** — polls `pending/`, moves cards to `running/`, selects a provider from `.cards/providers.json` (respecting cooldowns), spawns the adapter Nushell script, writes PID to `logs/pid` and as xattr `com.yourorg.agent-pid`, then moves the card to `done/` (exit 0), back to `pending/` (exit 75 = rate-limited), or `failed/`.
+2. **Dispatcher loop** — polls `pending/`, moves cards to `running/`, selects a provider from `.cards/providers.json` (respecting cooldowns), spawns the adapter Nushell script, writes PID to `logs/pid` and as xattr `sh.bop.agent-pid`, then moves the card to `done/` (exit 0), back to `pending/` (exit 75 = rate-limited), or `failed/`.
 
 3. **Provider failover** — each `Meta` has a `provider_chain: Vec<String>`. On rate-limit (exit 75), the chain rotates (front→back) and a 300s cooldown is set on that provider in `providers.json`. For QA stage, the dispatcher avoids reusing the same provider that ran `implement`.
 

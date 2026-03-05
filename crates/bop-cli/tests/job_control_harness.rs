@@ -21,7 +21,7 @@ fn build_jc() {
     assert!(status.success());
 }
 
-fn jc_bin() -> PathBuf {
+fn bop_bin() -> PathBuf {
     repo_root().join("target").join("debug").join("bop")
 }
 
@@ -74,7 +74,7 @@ fn make_failed_card_with_running_stage(cards: &Path, id: &str) -> PathBuf {
 }
 
 fn init_cards(cards: &Path) {
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "init"])
         .status()
         .unwrap();
@@ -91,7 +91,7 @@ fn meta_set_updates_workflow_fields() {
     init_cards(&cards);
     make_card(&cards, "pending", "m1");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),
@@ -125,7 +125,7 @@ fn meta_set_clear_workflow_mode_also_clears_step_index() {
     init_cards(&cards);
     make_card(&cards, "pending", "m2");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),
@@ -141,7 +141,7 @@ fn meta_set_clear_workflow_mode_also_clears_step_index() {
         .unwrap();
     assert!(status.success());
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),
@@ -178,7 +178,7 @@ fn meta_set_rejects_step_index_without_workflow_mode() {
     init_cards(&cards);
     make_card(&cards, "pending", "m3");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),
@@ -206,7 +206,7 @@ fn retry_moves_failed_card_to_pending() {
     init_cards(&cards);
     make_failed_card(&cards, "r1", 0, "some_error");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "retry", "r1"])
         .status()
         .unwrap();
@@ -230,7 +230,7 @@ fn retry_increments_retry_count_and_clears_failure_reason() {
     init_cards(&cards);
     make_failed_card(&cards, "r2", 2, "transient_error");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "retry", "r2"])
         .status()
         .unwrap();
@@ -263,7 +263,7 @@ fn retry_normalizes_stale_running_stage_to_pending() {
     init_cards(&cards);
     make_failed_card_with_running_stage(&cards, "r2b");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "retry", "r2b"])
         .status()
         .unwrap();
@@ -302,7 +302,7 @@ fn retry_fails_when_card_not_found() {
     let cards = td.path().join(".cards");
     init_cards(&cards);
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),
@@ -325,7 +325,7 @@ fn retry_fails_when_card_is_pending() {
     init_cards(&cards);
     make_card(&cards, "pending", "r3");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "retry", "r3"])
         .status()
         .unwrap();
@@ -343,7 +343,7 @@ fn retry_fails_when_card_is_running() {
     init_cards(&cards);
     make_card(&cards, "running", "r4");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "retry", "r4"])
         .status()
         .unwrap();
@@ -360,7 +360,7 @@ fn kill_fails_when_card_not_running() {
     init_cards(&cards);
     make_card(&cards, "failed", "k1");
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "kill", "k1"])
         .status()
         .unwrap();
@@ -374,7 +374,7 @@ fn kill_fails_when_card_not_found() {
     let cards = td.path().join(".cards");
     init_cards(&cards);
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "kill", "nosuchcard"])
         .status()
         .unwrap();
@@ -405,7 +405,7 @@ fn kill_sends_sigterm_and_moves_to_failed() {
     fs::create_dir_all(card_dir.join("logs")).unwrap();
     fs::write(card_dir.join("logs").join("pid"), pid.to_string()).unwrap();
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "kill", "k2"])
         .status()
         .unwrap();
@@ -457,7 +457,7 @@ fn kill_handles_stale_pid_and_moves_to_failed() {
     fs::create_dir_all(card_dir.join("logs")).unwrap();
     fs::write(card_dir.join("logs").join("pid"), pid.to_string()).unwrap();
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "kill", "k3"])
         .status()
         .unwrap();
@@ -495,7 +495,7 @@ fn logs_prints_existing_stdout_and_stderr() {
     fs::write(card_dir.join("logs").join("stdout.log"), "hello stdout\n").unwrap();
     fs::write(card_dir.join("logs").join("stderr.log"), "hello stderr\n").unwrap();
 
-    let out = Command::new(jc_bin())
+    let out = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "logs", "l1"])
         .output()
         .unwrap();
@@ -517,7 +517,7 @@ fn logs_fails_when_card_not_found() {
     let cards = td.path().join(".cards");
     init_cards(&cards);
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "logs", "nosuchcard"])
         .status()
         .unwrap();
@@ -539,7 +539,7 @@ fn inspect_shows_meta_and_spec() {
 
     fs::write(card_dir.join("logs").join("stdout.log"), "output line 1\n").unwrap();
 
-    let out = Command::new(jc_bin())
+    let out = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "inspect", "i1"])
         .output()
         .unwrap();
@@ -562,7 +562,7 @@ fn inspect_fails_when_card_not_found() {
     let cards = td.path().join(".cards");
     init_cards(&cards);
 
-    let status = Command::new(jc_bin())
+    let status = Command::new(bop_bin())
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),

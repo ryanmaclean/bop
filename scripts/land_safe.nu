@@ -117,10 +117,8 @@ def main [
       $env.BOP_BIN
     } else if (($root | path join "target" "debug" "bop") | path exists) {
       ($root | path join "target" "debug" "bop")
-    } else if (($root | path join "target" "debug" "jc") | path exists) {
-      ($root | path join "target" "debug" "jc")
     } else {
-      print -e "Missing bop/jc binary. Run: cargo build"
+      print -e "Missing bop binary. Run: cargo build"
       exit 1
     }
 

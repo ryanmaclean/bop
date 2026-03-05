@@ -607,8 +607,8 @@ pub async fn run_card(
         .arg(&stdout_log)
         .arg(&stderr_log)
         .arg(&memory_out_file)
-        .env("JOBCARD_MEMORY_OUT", &memory_out_file)
-        .env("JOBCARD_MEMORY_NAMESPACE", &memory_namespace)
+        .env("BOP_MEMORY_OUT", &memory_out_file)
+        .env("BOP_MEMORY_NAMESPACE", &memory_namespace)
         .env("CARGO_TARGET_DIR", &target_dir)
         .envs(provider_env)
         // Card identity — lets any agent orient itself
@@ -636,7 +636,7 @@ pub async fn run_card(
     let _ = fs::write(card_dir.join("logs").join("pid"), &pid_str);
     let _ = TokioCommand::new("xattr")
         .arg("-w")
-        .arg("com.yourorg.agent-pid")
+        .arg("sh.bop.agent-pid")
         .arg(&pid_str)
         .arg(card_dir)
         .status()

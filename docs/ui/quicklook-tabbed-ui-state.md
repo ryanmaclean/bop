@@ -1,10 +1,10 @@
 # QuickLook Tabbed UI State
 
 ## Architecture & Overview
-The current QuickLook extension (`macos/bop/PreviewViewController.swift`) is built using SwiftUI embedded in an `NSViewController` via `NSHostingView`. It provides a rich, multi-tab interface for `.jobcard` bundles.
+The current QuickLook extension (`macos/bop/PreviewViewController.swift`) is built using SwiftUI embedded in an `NSViewController` via `NSHostingView`. It provides a rich, multi-tab interface for `.bop` bundles.
 
 ### Data Model (`meta.json`)
-The UI parses `meta.json` from the `.jobcard` bundle into a `JobCardMeta` struct. Key fields:
+The UI parses `meta.json` from the `.bop` bundle into a `BopMeta` struct. Key fields:
 - `id`, `title`, `description`, `stage`, `priority`, `created`
 - `labels`: Array of `MetaLabel` (name, kind)
 - `progress`: Int percentage
@@ -26,7 +26,7 @@ The UI parses `meta.json` from the `.jobcard` bundle into a `JobCardMeta` struct
   - `Overview`: Labels, Priority, Description, Stage Pipeline, Acceptance Criteria.
   - `Subtasks`: Done/Total count, percentage, list of subtasks with checkmarks.
   - `Logs`: Reads `logs/stdout.log`, displays last 100 lines in a dark terminal-like block.
-  - `Files`: Enumerates top-level files in the `.jobcard` bundle (ignoring `logs`, `output`, `worktree`), displays with system icons.
+  - `Files`: Enumerates top-level files in the `.bop` bundle (ignoring `logs`, `output`, `worktree`), displays with system icons.
 - **Footer**: Creation time, Stop button (if running).
 
 ### Interactivity Requirements
@@ -41,13 +41,13 @@ class EventHostingView<Content: View>: NSHostingView<Content> {
 
 ### Distribution & Build Requirements
 To distribute a build that others can use:
-1. **App Wrapper**: The `JobCardHost.app` must be built. It contains the QuickLook extension `.appex`.
+1. **App Wrapper**: The `BopDeck.app` must be built. It contains the QuickLook extension `.appex`.
 2. **Registration**: Users will need to register the app with LaunchServices and pluginkit:
-   `/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f -R -trusted /Applications/JobCardHost.app`
-   `pluginkit -e use -i com.yourorg.JobCardHost.QuickLook`
-3. **UTI Definition**: The `Info.plist` defines the `.jobcard` document type as a package (`com.apple.package`) so macOS treats the directory as a single file.
+   `/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f -R -trusted /Applications/BopDeck.app`
+   `pluginkit -e use -i sh.bop.ql`
+3. **UTI Definition**: The `Info.plist` defines the `.bop` document type as a package (`com.apple.package`) so macOS treats the directory as a single file.
 4. **File Hooks / Interactivity**: 
-   - Moving cards around is handled natively by macOS Finder (moving the `.jobcard` bundle between directories).
+   - Moving cards around is handled natively by macOS Finder (moving the `.bop` bundle between directories).
    - Planning/Updating is done via editing files inside the bundle (e.g., `meta.json`). QuickLook will render whatever is currently on disk.
 
 ## Source Backup

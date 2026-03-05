@@ -1,7 +1,7 @@
 use clap::Parser;
 
 #[derive(Parser, Debug)]
-#[command(name = "jc-dispatcher")]
+#[command(name = "bop-dispatcher")]
 struct Cli {
     /// Path to the .cards directory
     cards_dir: String,

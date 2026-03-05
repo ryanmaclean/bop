@@ -2,15 +2,15 @@ use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
 
 #[derive(Default)]
-struct JobCardPlugin {
+struct BopPlugin {
     /// team_name → (running, pending, done_or_merged, failed)
     counts: BTreeMap<String, (usize, usize, usize, usize)>,
     cards_dir: String,
 }
 
-register_plugin!(JobCardPlugin);
+register_plugin!(BopPlugin);
 
-impl ZellijPlugin for JobCardPlugin {
+impl ZellijPlugin for BopPlugin {
     fn load(&mut self, configuration: BTreeMap<String, String>) {
         self.cards_dir = configuration
             .get("cards_dir")
@@ -72,7 +72,7 @@ impl ZellijPlugin for JobCardPlugin {
     }
 }
 
-impl JobCardPlugin {
+impl BopPlugin {
     fn refresh_counts(&mut self) {
         self.counts.clear();
         let base = std::path::Path::new(&self.cards_dir);

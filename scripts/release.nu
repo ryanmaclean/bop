@@ -53,7 +53,7 @@ def main [
 
   mut ver = $version
   if ($ver | is-empty) {
-    $ver = (extract_version (open --raw ($root | path join "crates" "jc" "Cargo.toml")))
+    $ver = (extract_version (open --raw ($root | path join "crates" "bop-cli" "Cargo.toml")))
   }
 
   let dist = ($root | path join "dist" $"bop-($ver)-macos")
