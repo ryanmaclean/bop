@@ -294,6 +294,9 @@ enum PolicyAction {
         /// Check staged changes in the current git index.
         #[arg(long)]
         staged: bool,
+        /// Print JSON result.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -462,8 +465,8 @@ async fn main() -> anyhow::Result<()> {
             ),
         },
         Command::Policy { action } => match action {
-            PolicyAction::Check { id, staged } => {
-                policy::cmd_policy_check(&root, id.as_deref(), staged)
+            PolicyAction::Check { id, staged, json } => {
+                policy::cmd_policy_check(&root, id.as_deref(), staged, json)
             }
         },
         Command::Doctor => doctor::cmd_doctor(&root),
