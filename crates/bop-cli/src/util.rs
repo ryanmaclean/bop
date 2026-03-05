@@ -300,3 +300,60 @@ mod tests {
         assert!(result.is_none());
     }
 }
+
+// ── bop:// URL encoding ───────────────────────────────────────────────────────
+
+#[allow(dead_code)]
+fn push_pct_encoded_byte(out: &mut String, byte: u8) {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    out.push('%');
+    out.push(char::from(HEX[(byte >> 4) as usize]));
+    out.push(char::from(HEX[(byte & 0x0F) as usize]));
+}
+
+/// Percent-encode one URL path segment for bop://card/<id>/<action>.
+/// Unreserved chars (RFC 3986) pass through; everything else is %-encoded.
+#[allow(dead_code)]
+fn encode_bop_path_segment(segment: &str) -> String {
+    let mut out = String::with_capacity(segment.len());
+    for &byte in segment.as_bytes() {
+        let is_unreserved =
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~');
+        if is_unreserved {
+            out.push(byte as char);
+        } else {
+            push_pct_encoded_byte(&mut out, byte);
+        }
+    }
+    out
+}
+
+/// Build a `bop://card/<id>/<action>` URL with percent-encoded path segments.
+/// Safe for card IDs containing emoji, spaces, or Unicode (e.g. `🂠-feat auth`).
+#[allow(dead_code)]
+pub fn bop_card_url(card_id: &str, action: &str) -> String {
+    format!(
+        "bop://card/{}/{}",
+        encode_bop_path_segment(card_id),
+        encode_bop_path_segment(action),
+    )
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::*;
+
+    #[test]
+    fn bop_card_url_percent_encodes_emoji_and_spaces() {
+        let url = bop_card_url("🂠-feat auth", "session");
+        assert!(!url.contains(' '), "spaces must be encoded");
+        assert!(url.starts_with("bop://card/"), "must use bop scheme");
+        assert!(url.contains("session"), "action must appear");
+    }
+
+    #[test]
+    fn bop_card_url_passes_unreserved_chars() {
+        let url = bop_card_url("my-card.bop", "logs");
+        assert_eq!(url, "bop://card/my-card.bop/logs");
+    }
+}
