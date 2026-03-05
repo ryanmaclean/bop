@@ -351,12 +351,7 @@ pub fn count_running_cards(cards_dir: &Path) -> usize {
     fs::read_dir(&running)
         .map(|d| {
             d.filter_map(Result::ok)
-                .filter(|e| {
-                    e.path()
-                        .extension()
-                        .map(|x| x == "bop")
-                        .unwrap_or(false)
-                })
+                .filter(|e| e.path().extension().map(|x| x == "bop").unwrap_or(false))
                 .count()
         })
         .unwrap_or(0)

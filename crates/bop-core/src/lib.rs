@@ -100,9 +100,24 @@ pub struct RunRecord {
     pub note: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+fn default_meta_version() -> u32 {
+    1
+}
+fn is_version_one(v: &u32) -> bool {
+    *v == 1
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Meta {
     pub id: String,
+    /// Schema version for forward-compatible migration.
+    /// Absent in old cards → deserialized as 1 (current version).
+    /// Increment when making breaking changes to Meta layout.
+    #[serde(
+        default = "default_meta_version",
+        skip_serializing_if = "is_version_one"
+    )]
+    pub meta_version: u32,
     pub created: DateTime<Utc>,
 
     /// Unicode playing-card glyph (U+1F0A0–U+1F0FF) used as the card's
@@ -274,6 +289,59 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+impl Default for Meta {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            meta_version: 1,
+            created: DateTime::<Utc>::default(),
+            glyph: None,
+            token: None,
+            title: None,
+            description: None,
+            labels: Vec::new(),
+            progress: None,
+            subtasks: Vec::new(),
+            agent_type: None,
+            stage: String::new(),
+            card_type: None,
+            metadata_source: None,
+            metadata_key: None,
+            workflow_mode: None,
+            step_index: None,
+            priority: None,
+            timeout_seconds: None,
+            provider_chain: Vec::new(),
+            stages: BTreeMap::new(),
+            acceptance_criteria: Vec::new(),
+            worktree_branch: None,
+            template_namespace: None,
+            vcs_engine: None,
+            workspace_name: None,
+            workspace_path: None,
+            change_ref: None,
+            policy_scope: Vec::new(),
+            decision_required: false,
+            decision_path: None,
+            depends_on: Vec::new(),
+            spawn_to: None,
+            policy_result: None,
+            retry_count: None,
+            failure_reason: None,
+            validation_summary: None,
+            poker_round: None,
+            estimates: BTreeMap::new(),
+            zellij_session: None,
+            zellij_pane: None,
+            stage_chain: Vec::new(),
+            stage_models: BTreeMap::new(),
+            stage_providers: BTreeMap::new(),
+            stage_budgets: BTreeMap::new(),
+            runs: Vec::new(),
+        }
+    }
+}
+
 impl Meta {
     pub fn validate(&self) -> Result<(), BopError> {
         if self.id.trim().is_empty() {
@@ -284,9 +352,7 @@ impl Meta {
         }
         if let Some(mode) = self.workflow_mode.as_ref() {
             if mode.trim().is_empty() {
-                return Err(BopError::Invalid(
-                    "meta.workflow_mode is empty".to_string(),
-                ));
+                return Err(BopError::Invalid("meta.workflow_mode is empty".to_string()));
             }
         }
         if self.step_index == Some(0) {
@@ -697,6 +763,35 @@ pub fn render_prompt(template: &str, ctx: &PromptContext) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn meta_version_defaults_to_1_on_old_json() {
+        // Old card JSON with no meta_version field
+        let json = r#"{"id":"test","created":"2026-01-01T00:00:00Z","stage":"spec"}"#;
+        let meta: Meta = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.meta_version, 1);
+    }
+
+    #[test]
+    fn meta_version_round_trips() {
+        let json = r#"{"id":"t","created":"2026-01-01T00:00:00Z","stage":"spec","meta_version":2}"#;
+        let meta: Meta = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.meta_version, 2);
+        let serialized = serde_json::to_string(&meta).unwrap();
+        assert!(serialized.contains("\"meta_version\":2"));
+    }
+
+    #[test]
+    fn meta_version_1_omitted_from_serialized_json() {
+        let json = r#"{"id":"t","created":"2026-01-01T00:00:00Z","stage":"spec"}"#;
+        let meta: Meta = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.meta_version, 1);
+        let serialized = serde_json::to_string(&meta).unwrap();
+        assert!(
+            !serialized.contains("meta_version"),
+            "meta_version:1 must be omitted to keep old card files stable"
+        );
+    }
 
     #[test]
     fn render_prompt_replaces_memory_placeholder() {

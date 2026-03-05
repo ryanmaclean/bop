@@ -1,6 +1,6 @@
 use anyhow::Context;
-use clap::{Parser, Subcommand, ValueEnum};
 use bop_core::VcsEngine as CoreVcsEngine;
+use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;

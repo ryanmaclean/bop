@@ -140,12 +140,7 @@ pub fn cmd_doctor(cards_root: &Path) -> anyhow::Result<()> {
             .map(|rd| {
                 rd.filter(|e| {
                     e.as_ref()
-                        .map(|e| {
-                            e.path()
-                                .extension()
-                                .map(|x| x == "bop")
-                                .unwrap_or(false)
-                        })
+                        .map(|e| e.path().extension().map(|x| x == "bop").unwrap_or(false))
                         .unwrap_or(false)
                 })
                 .count()
@@ -164,12 +159,7 @@ pub fn cmd_doctor(cards_root: &Path) -> anyhow::Result<()> {
         if let Ok(entries) = fs::read_dir(&pending_dir) {
             for entry in entries.flatten() {
                 let card_dir = entry.path();
-                if card_dir
-                    .extension()
-                    .map(|e| e == "bop")
-                    .unwrap_or(false)
-                    && card_dir.is_dir()
-                {
+                if card_dir.extension().map(|e| e == "bop").unwrap_or(false) && card_dir.is_dir() {
                     let meta_path = card_dir.join("meta.json");
                     let Ok(meta) = bop_core::read_meta(&card_dir) else {
                         continue;

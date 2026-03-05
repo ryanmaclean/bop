@@ -58,9 +58,7 @@ fn write_providers(cards: &Path) {
 }
 
 fn write_template(cards: &Path, template: &str) {
-    let tdir = cards
-        .join("templates")
-        .join(format!("{}.bop", template));
+    let tdir = cards.join("templates").join(format!("{}.bop", template));
     fs::create_dir_all(tdir.join("logs")).unwrap();
     fs::create_dir_all(tdir.join("output")).unwrap();
     fs::write(tdir.join("meta.json"), "{\"id\":\"t\",\"created\":\"2026-03-01T00:00:00Z\",\"stage\":\"implement\",\"provider_chain\":[\"mock\",\"mock2\"],\"stages\":{},\"acceptance_criteria\":[]}").unwrap();

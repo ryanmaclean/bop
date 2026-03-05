@@ -359,10 +359,7 @@ mod tests {
         cmd_poker_submit(td.path(), "test-card", Some("\u{1F0A5}"), Some("alice")).unwrap();
         cmd_poker_consensus(td.path(), "test-card", "\u{1F0A5}").unwrap();
         // Card got renamed to {glyph}-test-card.bop
-        let new_card = td
-            .path()
-            .join("pending")
-            .join("\u{1F0A5}-test-card.bop");
+        let new_card = td.path().join("pending").join("\u{1F0A5}-test-card.bop");
         assert!(new_card.exists());
         let meta = bop_core::read_meta(&new_card).unwrap();
         assert_eq!(meta.glyph.as_deref(), Some("\u{1F0A5}"));

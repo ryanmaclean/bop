@@ -1,6 +1,6 @@
 use anyhow::Context;
-use chrono::Utc;
 use bop_core::{write_meta, Meta, StageStatus};
+use chrono::Utc;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tokio::process::Command as TokioCommand;
@@ -18,6 +18,7 @@ pub fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
 
         let meta = Meta {
             id: "template-implement".to_string(),
+            meta_version: 1,
             created: Utc::now(),
             agent_type: None,
             stage: "implement".to_string(),
@@ -109,11 +110,10 @@ pub fn create_card(
         anyhow::bail!("template not found: {}", template);
     }
 
-    let card_dir = cards_dir.join("pending").join(format!(
-        "{}-{}.bop",
-        bop_core::cardchars::CARD_BACK,
-        id
-    ));
+    let card_dir =
+        cards_dir
+            .join("pending")
+            .join(format!("{}-{}.bop", bop_core::cardchars::CARD_BACK, id));
     if card_dir.exists() {
         anyhow::bail!("card already exists: {}", id);
     }
@@ -126,6 +126,7 @@ pub fn create_card(
 
     let mut meta = bop_core::read_meta(&card_dir).unwrap_or_else(|_| Meta {
         id: id.to_string(),
+        meta_version: 1,
         created: Utc::now(),
         agent_type: None,
         stage: "spec".to_string(),
@@ -1331,6 +1332,7 @@ stage: plan
 
         let meta = Meta {
             id: id.to_string(),
+            meta_version: 1,
             created: Utc::now(),
             stage: "implement".to_string(),
             retry_count: Some(1),
@@ -1522,6 +1524,7 @@ stage: plan
 
         let mut meta = Meta {
             id: "approve-me".to_string(),
+            meta_version: 1,
             created: Utc::now(),
             stage: "spec".to_string(),
             decision_required: true,
@@ -1596,6 +1599,7 @@ stage: plan
 
         let meta = Meta {
             id: "approve-unblock".to_string(),
+            meta_version: 1,
             created: Utc::now(),
             stage: "spec".to_string(),
             decision_required: true,
@@ -1664,6 +1668,7 @@ stage: plan
 
         let parent_meta = Meta {
             id: "parent".to_string(),
+            meta_version: 1,
             created: Utc::now(),
             stage: "done".to_string(),
             spawn_to: None,
@@ -1801,10 +1806,7 @@ stage: plan
             .unwrap()
             .filter_map(|e| e.ok())
             .filter(|e| {
-                e.path().is_dir()
-                    && e.file_name()
-                        .to_str()
-                        .is_some_and(|n| n.ends_with(".bop"))
+                e.path().is_dir() && e.file_name().to_str().is_some_and(|n| n.ends_with(".bop"))
             })
             .count();
         assert_eq!(count, 1);
@@ -1863,6 +1865,7 @@ stage: plan
 
         let meta = Meta {
             id: "meta-wm".to_string(),
+            meta_version: 1,
             created: Utc::now(),
             stage: "spec".to_string(),
             workflow_mode: None,
@@ -1927,6 +1930,7 @@ stage: plan
 
         let meta = Meta {
             id: "meta-si".to_string(),
+            meta_version: 1,
             created: Utc::now(),
             stage: "spec".to_string(),
             workflow_mode: Some("default-feature".to_string()),

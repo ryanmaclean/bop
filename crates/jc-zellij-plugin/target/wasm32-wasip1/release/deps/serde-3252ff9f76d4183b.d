@@ -1,0 +1,14 @@
+/Users/studio/gtfs/crates/jc-zellij-plugin/target/wasm32-wasip1/release/deps/serde-3252ff9f76d4183b.d: /Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/studio/gtfs/crates/jc-zellij-plugin/target/wasm32-wasip1/release/build/serde-a268ca820634ed2d/out/private.rs
+
+/Users/studio/gtfs/crates/jc-zellij-plugin/target/wasm32-wasip1/release/deps/libserde-3252ff9f76d4183b.rlib: /Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/studio/gtfs/crates/jc-zellij-plugin/target/wasm32-wasip1/release/build/serde-a268ca820634ed2d/out/private.rs
+
+/Users/studio/gtfs/crates/jc-zellij-plugin/target/wasm32-wasip1/release/deps/libserde-3252ff9f76d4183b.rmeta: /Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/studio/gtfs/crates/jc-zellij-plugin/target/wasm32-wasip1/release/build/serde-a268ca820634ed2d/out/private.rs
+
+/Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/Users/studio/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/Users/studio/gtfs/crates/jc-zellij-plugin/target/wasm32-wasip1/release/build/serde-a268ca820634ed2d/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/studio/gtfs/crates/jc-zellij-plugin/target/wasm32-wasip1/release/build/serde-a268ca820634ed2d/out

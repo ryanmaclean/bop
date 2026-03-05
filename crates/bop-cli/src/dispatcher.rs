@@ -1,6 +1,6 @@
 use anyhow::Context;
-use chrono::Utc;
 use bop_core::{write_meta, Meta, RunRecord};
+use chrono::Utc;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -46,19 +46,18 @@ pub async fn run_dispatcher(
 
     loop {
         let mut lineage_events: Vec<bop_core::lineage::RunEvent> = Vec::new();
-        let mut record =
-            |meta: &bop_core::Meta, from: &str, to: &str, card_dir: Option<&Path>| {
-                if lineage_enabled {
-                    let et = bop_core::lineage::event_type_for(from, to);
-                    lineage_events.push(bop_core::lineage::build_run_event_with_dir(
-                        et, meta, from, to, card_dir,
-                    ));
-                }
-                // Write iCalendar VTODO projection into the card bundle
-                if let Some(dir) = card_dir {
-                    bop_core::lineage::write_ics(dir, meta, to);
-                }
-            };
+        let mut record = |meta: &bop_core::Meta, from: &str, to: &str, card_dir: Option<&Path>| {
+            if lineage_enabled {
+                let et = bop_core::lineage::event_type_for(from, to);
+                lineage_events.push(bop_core::lineage::build_run_event_with_dir(
+                    et, meta, from, to, card_dir,
+                ));
+            }
+            // Write iCalendar VTODO projection into the card bundle
+            if let Some(dir) = card_dir {
+                bop_core::lineage::write_ics(dir, meta, to);
+            }
+        };
 
         if !no_reap && last_reap.elapsed() >= Duration::from_millis(reap_ms) {
             reaper::reap_orphans(
