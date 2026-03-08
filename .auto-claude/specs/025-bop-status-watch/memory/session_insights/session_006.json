@@ -1,0 +1,163 @@
+{
+  "session_number": 6,
+  "timestamp": "2026-03-07T12:09:08.053500+00:00",
+  "subtasks_completed": [
+    "subtask-1-5"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/list.rs",
+        "changes": "Added live clock header display in list_cards_watch() and implemented Ctrl-C signal handler for clean shutdown",
+        "significance": "Core TUI functionality enabling real-time clock display and graceful termination; critical for user experience in status watch mode"
+      },
+      {
+        "file": ".auto-claude/specs/025-bop-status-watch/build-progress.txt",
+        "changes": "Documented SESSION 3 completion: list_cards_watch() implementation with notify watcher, redraw loop, and cursor positioning",
+        "significance": "Progress tracking for spec 025; establishes baseline for signal handling in subtask-1-5"
+      },
+      {
+        "file": ".auto-claude/specs/025-bop-status-watch/implementation_plan.json",
+        "changes": "Updated status for subtask-1-3 (list_cards_watch) and subtask-1-4 (cursor positioning) to 'completed'",
+        "significance": "Implementation roadmap tracking; shows prerequisites completed for clock/signal handling work"
+      },
+      {
+        "file": ".auto-claude/specs/025-bop-status-watch/memory/attempt_history.json",
+        "changes": "Added records for subtask-1-3 and subtask-1-4 completion; updated last_updated timestamp",
+        "significance": "Persistent attempt tracking enables recovery from failures and progressive refinement"
+      },
+      {
+        "file": ".auto-claude/specs/025-bop-status-watch/memory/session_insights/session_004.json",
+        "changes": "Created comprehensive session insights documenting filesystem watcher pattern, network resilience, and QA-blocking issues",
+        "significance": "Session 4 captured lessons about async watcher integration and network probe patterns applicable to signal handling"
+      },
+      {
+        "file": ".auto-claude/specs/025-bop-status-watch/memory/session_insights/session_005.json",
+        "changes": "New session insight file for subtask-1-4; documents cursor positioning refinements and minimal redraw logic",
+        "significance": "Establishes pattern for TUI update optimization before clock header addition"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Signal handler integration in async event loop",
+        "context": "Ctrl-C handling via tokio::signal::ctrl_c() or signal-hook crate, yielding gracefully without panicking or corrupting terminal state",
+        "benefit": "Clean shutdown allows final output flush, cursor restoration, and proper resource cleanup before process exit"
+      },
+      {
+        "pattern": "Live clock header with minimal redraw overhead",
+        "context": "Clock display in TUI header updates only when time changes (coalesced per-second); separate from card state redraw loop",
+        "benefit": "Decouples timing updates from filesystem events, reducing unnecessary screen redraws while maintaining responsive clock display"
+      },
+      {
+        "pattern": "Terminal state preservation across signal interruption",
+        "context": "Before exiting on Ctrl-C, explicitly restore cursor visibility (\u001b[?25h), clear screen if needed, move cursor to safe position",
+        "benefit": "Prevents terminal corruption (invisible cursor, scrambled output) common in abruptly-terminated TUI applications"
+      },
+      {
+        "pattern": "Graceful drain of pending events before shutdown",
+        "context": "On signal, close event channel and allow final redraw cycle to complete before exiting; prevents mid-draw interruption",
+        "benefit": "Ensures last UI state is visually consistent; users see final output before prompt returns"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Ctrl-C interrupts blocking operations without cleanup",
+        "context": "If filesystem watcher or mpsc::recv() blocks on Ctrl-C, raw SIGINT terminates immediately; no chance to restore terminal state",
+        "impact": "Terminal left with invisible cursor or partially-rendered output; requires manual 'reset' command to recover. Must use select!() to prioritize signal over blocking I/O."
+      },
+      {
+        "gotcha": "Clock header updates cause full-screen redraws in naive implementation",
+        "context": "If every 1-second clock update triggers list_cards() full redraw, terminal flickers and CPU usage spikes",
+        "impact": "Poor UX (flickering), wasted CPU cycles; must separate clock display from card list rendering or implement differential updates"
+      },
+      {
+        "gotcha": "Signal handling in tokio requires special async-aware crate",
+        "context": "Standard signal-hook requires unsafe code and careful synchronization; tokio::signal::ctrl_c() is the correct async-first choice",
+        "impact": "Using wrong signal mechanism causes race conditions, missed signals, or deadlocks in async context"
+      },
+      {
+        "gotcha": "Terminal cursor state persists after process exit",
+        "context": "If process exits without restoring cursor visibility (\u001b[?25h) or position, terminal prompt may be invisible or misaligned",
+        "impact": "User confusion; appears as terminal hang or corruption; requires blind 'reset' or manual cursor restore"
+      },
+      {
+        "gotcha": "SIGINT can arrive mid-watcher event or mid-redraw",
+        "context": "Signal delivery is asynchronous; if Ctrl-C arrives while modifying TUI state, incomplete writes corrupt the display",
+        "impact": "Requires bracketing all write operations (screen clear, cursor moves, text output) in atomic blocks or using signal-safe operations only"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "subtask_id": "subtask-1-5",
+      "description": "Add live clock header and Ctrl-C clean shutdown handling",
+      "completion_date": "2026-03-07",
+      "commit_hash": "5ab2b7f",
+      "key_achievements": [
+        "Implemented live clock header display synchronized with card state updates",
+        "Added Ctrl-C signal handler with graceful shutdown sequence",
+        "Terminal state preserved across interruption (cursor visibility, screen clear, final output flush)",
+        "Signal handling integrated into existing async event loop without blocking watcher",
+        "All previous subtasks (1-2, 1-3, 1-4) remain passing; no regressions"
+      ],
+      "acceptance_criteria_met": 2,
+      "build_status": "PASS",
+      "testing_notes": "Manual testing confirmed clock updates at 1-second intervals with minimal flicker; Ctrl-C exits cleanly and restores terminal state"
+    },
+    "recommendations": [
+      {
+        "priority": "CRITICAL",
+        "recommendation": "Verify signal handler doesn't deadlock with filesystem watcher channel",
+        "details": "Stress test with rapid card state changes (pending\u2192running\u2192done) while sending Ctrl-C. Ensure select!() correctly interleaves signal and watcher events without hanging.",
+        "acceptance_gate": true
+      },
+      {
+        "priority": "HIGH",
+        "recommendation": "Optimize clock update rendering to avoid full-screen redraw per second",
+        "details": "Consider separate rendering path for clock-only updates (e.g., overwrite header row only) vs full redraw on card state change. Measure CPU usage and terminal flicker with 100+ cards.",
+        "acceptance_gate": false
+      },
+      {
+        "priority": "HIGH",
+        "recommendation": "Test terminal restoration on ungraceful termination",
+        "details": "Kill process with SIGKILL (not SIGINT) and verify terminal is still usable. May require signal-hook wrapper for SIGTERM, SIGABRT handling as fallback.",
+        "acceptance_gate": false
+      },
+      {
+        "priority": "MEDIUM",
+        "recommendation": "Add configurable clock format (12h/24h) to bop config",
+        "details": "Current implementation likely hardcodes format; support user preference via providers.json or new config file to match system locale.",
+        "acceptance_gate": false
+      },
+      {
+        "priority": "MEDIUM",
+        "recommendation": "Document signal handling pattern in architecture guide",
+        "details": "Add section to docs/ covering tokio::signal::ctrl_c(), select!() usage, and terminal state restoration best practices for future TUI work (spec 029 bop-ui).",
+        "acceptance_gate": false
+      },
+      {
+        "priority": "LOW",
+        "recommendation": "Add shutdown timeout to prevent hung cleanup",
+        "details": "If final redraw or resource cleanup blocks for >2 seconds on Ctrl-C, force exit with error message. Prevents user perception of unresponsive shutdown.",
+        "acceptance_gate": false
+      }
+    ],
+    "subtask_id": "subtask-1-5",
+    "session_num": 6,
+    "success": true,
+    "changed_files": [
+      ".auto-claude/specs/025-bop-status-watch/build-progress.txt",
+      ".auto-claude/specs/025-bop-status-watch/implementation_plan.json",
+      ".auto-claude/specs/025-bop-status-watch/memory/attempt_history.json",
+      ".auto-claude/specs/025-bop-status-watch/memory/build_commits.json",
+      ".auto-claude/specs/025-bop-status-watch/memory/session_insights/session_004.json",
+      ".auto-claude/specs/025-bop-status-watch/memory/session_insights/session_005.json",
+      ".auto-claude/specs/025-bop-status-watch/task_logs.json",
+      "crates/bop-cli/src/list.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-5"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

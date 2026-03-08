@@ -1,0 +1,263 @@
+{
+  "ui_ux_improvements": [
+    {
+      "id": "uiux-001",
+      "type": "ui_ux_improvements",
+      "title": "Add spinner for long-running dispatcher operations",
+      "description": "Display an animated spinner with status updates while dispatcher processes cards, showing current card ID and elapsed time",
+      "rationale": "Dispatcher can run for minutes without feedback, leaving users uncertain if it's working. Real-time progress indication improves perceived performance and confidence.",
+      "category": "performance",
+      "affected_components": [
+        "crates/bop-cli/src/dispatcher.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Dispatcher runs silently with no output until completion. Users have no indication of progress during long-running card processing.",
+      "proposed_change": "Add indicatif crate spinner that shows: '⠋ Processing card-123 (2m 34s elapsed)'. Update spinner state as cards transition through stages.",
+      "user_benefit": "Users can see that bop is actively working and track progress, reducing anxiety during long operations. Elapsed time helps estimate remaining work.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-002",
+      "type": "ui_ux_improvements",
+      "title": "Color-code card states in list output",
+      "description": "Apply consistent ANSI colors to state column in 'bop list' output matching the Gantt chart color scheme",
+      "rationale": "List command shows states as plain text. Colors provide instant visual scanning and consistency with other commands (gantt uses colors).",
+      "category": "visual",
+      "affected_components": [
+        "crates/bop-cli/src/list.rs"
+      ],
+      "screenshots": [],
+      "current_state": "List output shows state as plain text header like 'pending (3)'. No color differentiation between states.",
+      "proposed_change": "Apply state_ansi() colors (already defined in gantt.rs): pending=blue, running=amber, done=green, failed=red, merged=violet. Colorize both state headers and individual card rows.",
+      "user_benefit": "Users can instantly identify card states at a glance without reading text. Improves scanning speed when reviewing many cards.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-003",
+      "type": "ui_ux_improvements",
+      "title": "Add confirmation prompt for destructive commands",
+      "description": "Require user confirmation before executing 'bop kill' and 'bop clean' without --force flag",
+      "rationale": "Kill terminates running work, clean deletes cards permanently. No confirmation risks accidental data loss. Industry standard for destructive CLI operations.",
+      "category": "usability",
+      "affected_components": [
+        "crates/bop-cli/src/cards.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Both 'bop kill' and 'bop clean' execute immediately with no confirmation. 'bop clean --dry-run' exists but requires explicit opt-in.",
+      "proposed_change": "Add dialoguer crate for confirmation prompts. Show: 'Kill card-123? This will terminate the running agent and move to failed/. [y/N]'. Add --force/-f flag to skip prompt for automation.",
+      "user_benefit": "Prevents accidental data loss from typos or misunderstanding command effects. Gives users a moment to reconsider destructive operations.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-004",
+      "type": "ui_ux_improvements",
+      "title": "Improve error messages with actionable suggestions",
+      "description": "Enhance error messages with 'Try: <command>' suggestions for common failure cases",
+      "rationale": "Current errors like 'card not found' don't guide users on next steps. Adding suggestions reduces support burden and improves self-service.",
+      "category": "usability",
+      "affected_components": [
+        "crates/bop-cli/src/cards.rs",
+        "crates/bop-cli/src/paths.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Errors use anyhow with context but lack actionable guidance. Example: 'card not found: xyz' with no suggestion to list cards or check spelling.",
+      "proposed_change": "Add suggestions to common errors: 'card not found: xyz\\n  Try: bop list --state all | grep xyz' or 'no open round for card-123\\n  Try: bop poker open card-123'",
+      "user_benefit": "Users learn correct workflows through error messages. Reduces frustration and documentation lookups for common mistakes.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-005",
+      "type": "ui_ux_improvements",
+      "title": "Add fuzzy-finding for card IDs",
+      "description": "Implement 'did you mean?' suggestions when card ID not found, using fuzzy matching against existing cards",
+      "rationale": "Card IDs can be long (32+ chars). Typos are common. Fuzzy matching helps users quickly find the correct ID without re-listing.",
+      "category": "usability",
+      "affected_components": [
+        "crates/bop-cli/src/paths.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Card ID mismatches fail with 'card not found: <id>'. No suggestions or partial matches offered.",
+      "proposed_change": "Use strsim crate to find similar IDs (Levenshtein distance < 3) and suggest: 'card not found: card-abc\\n  Did you mean:\\n    • card-123\\n    • card-456'",
+      "user_benefit": "Users recover from typos instantly without re-running 'bop list'. Reduces friction in common workflows.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-006",
+      "type": "ui_ux_improvements",
+      "title": "Enhance progress bars with inline percentages and colors",
+      "description": "Upgrade progress bars in list output to use rich Unicode blocks with inline percentage and color gradients",
+      "rationale": "Current progress bars use basic ▓/░ blocks without percentage text. Users must count blocks to understand progress.",
+      "category": "visual",
+      "affected_components": [
+        "crates/bop-cli/src/list.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Progress bar in list.rs line 80-92: uses 8-char bar with ▓/░ blocks, percentage displayed separately: '████░░░░ 45%'",
+      "proposed_change": "Use Unicode box-drawing for partial blocks (▏▎▍▌▋▊▉█) to show sub-percentage precision. Display inline: '█████▌ 68%' with gradient from yellow→green based on completion.",
+      "user_benefit": "More accurate progress visualization at a glance. Color gradient provides instant understanding of how far along work is.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-007",
+      "type": "ui_ux_improvements",
+      "title": "Add summary statistics to status output",
+      "description": "Display aggregate stats (total cards, success rate, avg duration) at bottom of 'bop status' output",
+      "rationale": "Status shows individual cards but no overview metrics. Users need to mentally calculate totals and trends.",
+      "category": "usability",
+      "affected_components": [
+        "crates/bop-cli/src/doctor.rs",
+        "crates/bop-cli/src/list.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Status (via list_cards) shows cards grouped by state with count per group. No totals, success rates, or trends displayed.",
+      "proposed_change": "Add footer after list output: '\\n═══ Summary ═══\\nTotal: 47 cards | Active: 12 | Success rate: 85% (40/47) | Avg time: 3m 42s'",
+      "user_benefit": "Users get instant project health overview without manual counting or external tools. Helps track overall progress and quality.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-008",
+      "type": "ui_ux_improvements",
+      "title": "Improve inspect output with visual hierarchy",
+      "description": "Replace plain section headers in inspect output with styled headers, indentation, and better spacing",
+      "rationale": "Inspect dumps meta JSON, spec, and logs with minimal formatting. Sections blend together, hard to scan for specific info.",
+      "category": "visual",
+      "affected_components": [
+        "crates/bop-cli/src/inspect.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Inspect output uses plain '=== meta (state) ===' headers with no indentation or visual separation. JSON blob appears flat.",
+      "proposed_change": "Use box-drawing characters: '┌─ meta (running) ─┐' for headers, indent content by 2 spaces, add blank lines between sections. Use dim color for metadata fields.",
+      "user_benefit": "Users can quickly scan to find relevant section (meta, spec, logs) without reading everything. Improved readability for long outputs.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-009",
+      "type": "ui_ux_improvements",
+      "title": "Add table formatting library for consistent alignment",
+      "description": "Replace manual printf-style formatting with comfy-table crate for all tabular output",
+      "rationale": "Current tables use manual spacing (line 90 list.rs) which breaks with varying content widths. Glyphs, long IDs, and Unicode can misalign columns.",
+      "category": "visual",
+      "affected_components": [
+        "crates/bop-cli/src/list.rs",
+        "crates/bop-cli/src/inspect.rs",
+        "crates/bop-cli/src/doctor.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Tables use printf-style formatting with fixed widths. List.rs line 89-92 truncates IDs to 32 chars but doesn't account for multi-byte glyphs.",
+      "proposed_change": "Use comfy-table crate with auto-width calculation, proper Unicode width handling, and consistent borders. Define shared table style for bop aesthetic.",
+      "user_benefit": "Clean, properly aligned tables even with emoji, Unicode glyphs, and varying content lengths. Professional appearance.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-010",
+      "type": "ui_ux_improvements",
+      "title": "Add elapsed time to logs --follow mode",
+      "description": "Display elapsed time ticker in logs --follow mode showing how long the stream has been running",
+      "rationale": "Follow mode loops indefinitely with no indication of time spent watching. Users lose track of how long they've been waiting.",
+      "category": "usability",
+      "affected_components": [
+        "crates/bop-cli/src/logs.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Logs --follow (line 44-86) polls every 200ms and streams output, but shows no elapsed time or status indicator.",
+      "proposed_change": "Add header line that updates in-place: '╭─ Watching card-123 logs (0m 34s) ─╮' using \\r for in-place updates. Clear on exit.",
+      "user_benefit": "Users know how long they've been waiting, helping decide when to interrupt. Confirms that follow mode is active and working.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-011",
+      "type": "ui_ux_improvements",
+      "title": "Enhance log colorization with structured log parsing",
+      "description": "Parse JSON logs and colorize fields (timestamp, level, message) separately for better readability",
+      "rationale": "Current colorization (logs.rs line 91-118) uses keyword matching which misses structured logs. JSON logs appear as monotone text.",
+      "category": "visual",
+      "affected_components": [
+        "crates/bop-cli/src/logs.rs"
+      ],
+      "screenshots": [],
+      "current_state": "colorize_log_line() searches for keywords like 'ERROR' or 'WARN'. JSON-formatted logs don't get colorized properly.",
+      "proposed_change": "Detect JSON lines, parse them, and colorize components: dim timestamp, bright level, normal message. Fall back to keyword matching for plain text.",
+      "user_benefit": "Structured logs become readable with instant level identification. Particularly useful for claude/codex adapter outputs.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-012",
+      "type": "ui_ux_improvements",
+      "title": "Add truncation indicators for long outputs",
+      "description": "Show '... (25 more lines)' indicators when output is truncated, with hint to use --full flag",
+      "rationale": "Inspect truncates logs to 20 lines (line 52-56) with no indication that content was omitted. Users don't know if they're seeing everything.",
+      "category": "usability",
+      "affected_components": [
+        "crates/bop-cli/src/inspect.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Inspect shows 'last 20 lines' in header but doesn't show how many lines were skipped or how to view full logs.",
+      "proposed_change": "Add footer after truncated output: '... (142 more lines hidden)\\n  View full: bop logs <id>' to guide users to complete output.",
+      "user_benefit": "Users understand output is truncated and know exactly how to view more. Reduces confusion about missing information.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-013",
+      "type": "ui_ux_improvements",
+      "title": "Add success messages with next-step guidance",
+      "description": "Enhance success messages to include suggested next commands and status information",
+      "rationale": "Success messages like 'Approved card-123' are terse. Users don't know what happens next or what command to run.",
+      "category": "usability",
+      "affected_components": [
+        "crates/bop-cli/src/cards.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Success messages are single-line println statements (e.g., cards.rs line 825: 'Approved {}'). No context or next steps.",
+      "proposed_change": "Expand to: '✓ Approved card-123\\n  Status: Ready for merge-gate\\n  Next: bop merge-gate --once' with color-coded checkmark.",
+      "user_benefit": "Users understand workflow progression and learn the command sequence through usage. Reduces cognitive load.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-014",
+      "type": "ui_ux_improvements",
+      "title": "Add interactive card selector for ambiguous IDs",
+      "description": "When multiple cards match a partial ID, show interactive selector instead of error",
+      "rationale": "Users often provide partial IDs expecting autocomplete. Currently fails with 'card not found' even if prefix matches multiple cards.",
+      "category": "interaction",
+      "affected_components": [
+        "crates/bop-cli/src/paths.rs"
+      ],
+      "screenshots": [],
+      "current_state": "find_card() searches all state dirs but requires exact ID match. No partial matching or selection UI.",
+      "proposed_change": "If ID matches multiple cards as prefix, use dialoguer Select to show: 'Multiple matches:\\n  > card-123-foo\\n    card-123-bar\\nUse ↑↓ arrows, Enter to select'",
+      "user_benefit": "Users can specify partial IDs and select interactively, much faster than copy-pasting full IDs. Reduces typing friction.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-015",
+      "type": "ui_ux_improvements",
+      "title": "Add visual separator between state groups in list output",
+      "description": "Insert colored separator lines between state groups (pending/running/done) for visual clarity",
+      "rationale": "List output runs state groups together with only blank line separation (line 94). With many cards, states blend together.",
+      "category": "visual",
+      "affected_components": [
+        "crates/bop-cli/src/list.rs"
+      ],
+      "screenshots": [],
+      "current_state": "State groups separated by single blank line (println!() at line 94). Headers blend into card rows with minimal distinction.",
+      "proposed_change": "Add colored separator using box-drawing: '─────────────────' in dim color between groups. Make state headers bold.",
+      "user_benefit": "Clear visual boundaries help users quickly locate cards in specific states. Improves scannability of long outputs.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    }
+  ]
+}

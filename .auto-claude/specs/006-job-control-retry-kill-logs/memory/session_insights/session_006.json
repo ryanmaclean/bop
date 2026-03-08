@@ -1,0 +1,174 @@
+{
+  "session_number": 6,
+  "timestamp": "2026-03-05T19:40:31.922703+00:00",
+  "subtasks_completed": [
+    "subtask-1-5"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": ".auto-claude/specs/006-job-control-retry-kill-logs/test-parallelism-notes.md",
+        "type": "documentation",
+        "purpose": "Document known test flakiness and parallelism issues",
+        "key_findings": [
+          "Tests exhibit flaky behavior with default parallelism across multiple test suites",
+          "Root cause: cargo build process file lock contention and resource contention",
+          "Solution: single-threaded execution with --jobs 1 --test-threads=1",
+          "All 428 tests pass in single-threaded mode"
+        ]
+      },
+      {
+        "file": "crates/bop-cli/src/memory.rs",
+        "type": "source_code",
+        "changes": "Fixed clippy warnings in test module",
+        "modifications": [
+          "Converted runtime assertions to const blocks in default_memory_ttl_is_reasonable test",
+          "Moved ONE_YEAR calculation to const declaration"
+        ]
+      },
+      {
+        "file": "crates/bop-cli/src/merge_gate.rs",
+        "type": "source_code",
+        "changes": "Major refactoring for clippy compliance and indentation",
+        "modifications": [
+          "Fixed incorrect extension filter: 'jobcard' \u2192 'bop'",
+          "Corrected indentation for 232+ lines in inner loops and conditionals",
+          "Improved struct initialization and field handling"
+        ]
+      },
+      {
+        "file": "crates/bop-cli/src/providers.rs",
+        "type": "source_code",
+        "changes": "Removed unused variable and fixed initialization pattern",
+        "modifications": [
+          "Changed to struct initialization instead of field reassignment",
+          "Removed clippy warnings"
+        ]
+      },
+      {
+        "file": "crates/bop-cli/tests/merge_gate_harness.rs",
+        "type": "test_code",
+        "changes": "Removed unused code and fixed parameter types",
+        "modifications": [
+          "Removed unused run() function causing clippy warning",
+          "Changed &PathBuf to &Path in write_card() parameter"
+        ]
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Test Parallelism Race Conditions",
+        "description": "Test suite exhibits intermittent failures when run with default parallelism; different tests fail on different runs",
+        "cause": "Cargo build file lock contention, process spawning timing dependencies, temporary directory cleanup overlap",
+        "mitigation": "Run tests single-threaded with --jobs 1 --test-threads=1"
+      },
+      {
+        "pattern": "Clippy Warning Accumulation",
+        "description": "Multiple modules contained clippy warnings: const assertions, parameter type hints, unused code",
+        "modules_affected": [
+          "memory.rs",
+          "merge_gate.rs",
+          "providers.rs",
+          "merge_gate_harness.rs"
+        ],
+        "resolution_strategy": "Systematic cleanup across all affected modules"
+      },
+      {
+        "pattern": "Indentation Debt",
+        "description": "merge_gate.rs had significant indentation inconsistencies in nested loops and conditionals",
+        "scope": "232+ lines required re-indentation",
+        "impact": "Code readability and clippy compliance"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Test File Extension Mismatch",
+        "location": "merge_gate.rs line filtering",
+        "problem": "Extension check used 'jobcard' instead of 'bop'",
+        "impact": "Would fail to properly filter card directories",
+        "resolution": "Corrected to 'bop'"
+      },
+      {
+        "issue": "Parallel Test Execution Instability",
+        "scope": "Full test harness (dispatcher, job_control, merge_gate)",
+        "symptom": "Different test failures on different runs (non-deterministic)",
+        "root_cause": "Multiple cargo build processes competing for package cache locks",
+        "acceptable_workaround": "Tests reliable in single-threaded execution"
+      },
+      {
+        "issue": "Parameter Type Convention",
+        "location": "merge_gate_harness.rs write_card()",
+        "problem": "Used &PathBuf instead of &Path",
+        "clippy_impact": "Triggered lint warning",
+        "best_practice": "Accept &Path for borrowed path data"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "objective": "Ensure make check passes (or document acceptable failures)",
+      "results": {
+        "clippy": "\u2705 Passes with -D warnings",
+        "rustfmt": "\u2705 Passes",
+        "tests_total": 428,
+        "tests_passing": 428,
+        "execution_mode": "Single-threaded (--jobs 1 --test-threads=1)",
+        "breakdown": {
+          "unit_tests": 305,
+          "dispatcher_harness": 10,
+          "job_control_harness": 17,
+          "merge_gate_harness": 4,
+          "bop_core_tests": 91,
+          "doc_tests": 1
+        }
+      },
+      "documentation_approach": "Rather than force parallel test stability, documented the known flakiness as acceptable for CI environments",
+      "commits": 2,
+      "files_modified": 5
+    },
+    "recommendations": [
+      {
+        "category": "Test Infrastructure",
+        "item": "Update Makefile for Stability",
+        "suggestion": "Consider updating `make check` target to use `cargo test --jobs 1 -- --test-threads=1` for deterministic CI runs",
+        "priority": "Medium",
+        "rationale": "Trades build time for test reliability; suitable for CI pipelines"
+      },
+      {
+        "category": "Code Quality",
+        "item": "Accept Test Flakiness as Known Issue",
+        "suggestion": "Document that parallel test execution has acceptable race conditions; single-threaded mode is stable",
+        "priority": "Low",
+        "rationale": "Tests are logically sound; parallelism issue is infrastructure-level"
+      },
+      {
+        "category": "Development Workflow",
+        "item": "Local Development Guidance",
+        "suggestion": "Add note to contributing docs: run `cargo test --jobs 1 -- --test-threads=1` locally for reliable results",
+        "priority": "Low",
+        "rationale": "Prevents developer confusion about intermittent failures"
+      },
+      {
+        "category": "Code Maintenance",
+        "item": "Regular Clippy Audits",
+        "suggestion": "Schedule periodic clippy runs to catch warnings before they accumulate",
+        "priority": "Low",
+        "rationale": "Prevents similar accumulation in future; many warnings were trivial to fix"
+      }
+    ],
+    "subtask_id": "subtask-1-5",
+    "session_num": 6,
+    "success": true,
+    "changed_files": [
+      ".auto-claude/specs/006-job-control-retry-kill-logs/test-parallelism-notes.md",
+      "crates/bop-cli/src/memory.rs",
+      "crates/bop-cli/src/merge_gate.rs",
+      "crates/bop-cli/src/providers.rs",
+      "crates/bop-cli/tests/merge_gate_harness.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-5"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

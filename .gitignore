@@ -41,7 +41,6 @@ build.log
 
 # Agent workspaces (jj/git worktrees)
 .workspaces/
-.auto-claude/
 
 # Finder custom icons (contain \r in filename)
 Icon?
@@ -52,3 +51,18 @@ Icon?
 
 # Stale card scratch
 🂠-*.md
+
+# Zellij plugin build artifacts (too large for jj snapshot)
+crates/jc-zellij-plugin/target/
+
+# Auto-Claude ephemeral lock file
+.auto-claude/dispatch-lock.json
+
+# Auto Claude generated files
+.auto-claude-security.json
+.auto-claude-status
+.claude_settings.json
+.security-key
+logs/security/
+crates/jc-zellij-plugin/target/ echo .auto-claude/dispatch-lock.json ./target/debug/bop index
+crates/jc-zellij-plugin/target/ echo .auto-claude/dispatch-lock.json ./target/debug/bop index

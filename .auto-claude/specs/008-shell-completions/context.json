@@ -1,0 +1,25 @@
+{
+  "files_to_modify": {
+    "bop-cli": [
+      "crates/bop-cli/src/main.rs"
+    ]
+  },
+  "files_to_reference": [
+    "crates/bop-cli/src/main.rs"
+  ],
+  "patterns": {
+    "command_pattern": "Commands are defined as enum variants under the Command enum using clap's derive macros",
+    "dispatch_pattern": "Command dispatch happens in main() using a match statement on cli.cmd",
+    "clap_usage": "Uses clap v4 with derive feature for CLI argument parsing"
+  },
+  "existing_implementations": {
+    "description": "GenerateCompletion command already exists (line 151-154 in main.rs) that generates shell completions using clap_complete. The task is to rename it to 'Completions' for a simpler command name.",
+    "relevant_files": [
+      "crates/bop-cli/src/main.rs",
+      "crates/bop-cli/Cargo.toml"
+    ],
+    "current_command": "bop generate-completion <shell>",
+    "desired_command": "bop completions <shell>",
+    "dependencies_present": "clap_complete = \"4\" is already in Cargo.toml workspace dependencies"
+  }
+}

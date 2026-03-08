@@ -1,0 +1,72 @@
+{
+  "files_to_modify": {
+    "bop-cli": [
+      "crates/bop-cli/Cargo.toml",
+      "crates/bop-cli/src/main.rs"
+    ]
+  },
+  "files_to_create": {
+    "bop-cli": [
+      "crates/bop-cli/src/ui/mod.rs",
+      "crates/bop-cli/src/ui/app.rs",
+      "crates/bop-cli/src/ui/event.rs",
+      "crates/bop-cli/src/ui/input.rs",
+      "crates/bop-cli/src/ui/widgets/mod.rs",
+      "crates/bop-cli/src/ui/widgets/header.rs",
+      "crates/bop-cli/src/ui/widgets/kanban.rs",
+      "crates/bop-cli/src/ui/widgets/footer.rs",
+      "crates/bop-cli/src/ui/widgets/detail.rs",
+      "crates/bop-cli/src/ui/widgets/action.rs",
+      "crates/bop-cli/src/ui/widgets/logtail.rs",
+      "crates/bop-cli/src/ui/widgets/filter.rs",
+      "crates/bop-cli/src/ui/widgets/newcard.rs"
+    ]
+  },
+  "files_to_reference": [
+    "crates/bop-cli/src/render/mod.rs",
+    "crates/bop-cli/src/render/full.rs",
+    "crates/bop-cli/src/render/truecolor.rs",
+    "crates/bop-cli/src/list.rs",
+    "crates/bop-cli/src/logs.rs",
+    "crates/bop-cli/src/providers.rs",
+    "crates/bop-cli/src/paths.rs",
+    "crates/bop-cli/src/cards.rs",
+    "crates/bop-cli/src/colors.rs",
+    "crates/bop-cli/src/termcaps.rs",
+    "crates/bop-core/src/lib.rs"
+  ],
+  "patterns": {
+    "cli_subcommand": "Clap #[derive(Subcommand)] enum in main.rs; each command variant maps to a handler function in its own module",
+    "card_data_contract": "CardView struct (render/mod.rs) is the view model — renderers and UI never read filesystem directly; use from_meta(&Meta, state) to convert",
+    "event_loop": "list_cards_watch() uses notify-debouncer-mini + tokio::sync::mpsc::unbounded_channel + tokio::select! for async event multiplexing",
+    "filesystem_state_machine": "Card state determined by directory: pending/running/done/failed/merged; fs::rename is the atomic transition",
+    "progressive_rendering": "CardRenderer trait with 5 levels (Dumb→TrueColor); TermCaps::detect() re-queried every frame",
+    "log_streaming": "logs.rs cmd_logs() uses seek-based polling with 200ms sleep; reads bytes, colorizes per-line",
+    "card_collection": "list.rs collect_card_views() iterates state_dir entries, filters .bop extension, calls read_meta + from_meta",
+    "provider_reading": "providers.rs read_providers() returns ProvidersFile with BTreeMap<String,Provider>; has cooldown_until_epoch_s for rate-limit detection",
+    "singleton_lock": "lock.rs acquire_watch_lock() uses mkdir-atomicity pattern for process-level singleton guard",
+    "test_setup": "tempfile::tempdir() → ensure_cards_layout() → create card dirs → write meta.json; tests never need real filesystem"
+  },
+  "existing_implementations": {
+    "card_view_already_exists": "render/mod.rs CardView has all fields needed for TUI: id, state, glyph, token, title, stage, priority, progress, provider, elapsed_s, phase_name, phase_frac, failure_reason, exit_code",
+    "stats_already_exists": "render/mod.rs Stats has total, by_state HashMap, avg_duration_s, success_rate_pct",
+    "from_meta_already_exists": "render/mod.rs from_meta() converts Meta→CardView; phase_name/phase_frac set to defaults, caller enriches afterward",
+    "notify_watcher_pattern": "list.rs sets up notify-debouncer-mini with 100ms debounce, filters .bop events, sends through mpsc channel",
+    "log_follow_pattern": "logs.rs opens stdout.log/stderr.log, seeks to position, reads new bytes in 200ms poll loop",
+    "provider_cooldown": "providers.rs has cooldown_until_epoch_s field for rate-limit detection — basis for meter bar coloring",
+    "find_card_helpers": "paths.rs find_card(), find_card_in_state(), card_exists_in() — reusable for TUI card movement"
+  },
+  "technology_decisions": {
+    "tui_framework": "ratatui 0.29 (MIT) — double-buffer diff rendering built-in",
+    "terminal_backend": "crossterm 0.28 (MIT) — alternate screen, raw mode, events, mouse",
+    "fuzzy_matcher": "nucleo 0.5 (MIT) — helix's fuzzy matcher, <1ms on 10k items",
+    "snapshot_testing": "insta crate for regression tests on rendered output",
+    "async_runtime": "tokio (already in workspace) — used for event loop, timers, signals"
+  },
+  "key_constraints": {
+    "no_new_databases": "HARD RULE — no SQLite, no Dolt, no JSON config files beyond existing ones",
+    "subshell_key": "! not Ctrl+O — Zellij intercepts Ctrl+O for Session mode",
+    "vcs": "jj (Jujutsu) not plain git — all workspace operations use jj commands",
+    "safe_card_moves": "Shift+H/L only allows safe moves: done→pending, failed→pending; pending→running not allowed from TUI"
+  }
+}

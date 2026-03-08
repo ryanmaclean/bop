@@ -1,0 +1,258 @@
+{
+  "feature": "Ollama and OpenCode providers for bop providers command",
+  "workflow_type": "feature",
+  "workflow_rationale": "Adding two new provider implementations (Ollama local/cloud + OpenCode) to the existing providers module. Follows the same trait pattern as existing Claude/Codex/Gemini providers. Single Rust crate, no multi-service complexity.",
+  "phases": [
+    {
+      "id": "phase-1-snapshot-extension",
+      "name": "Extend ProviderSnapshot and Table Display",
+      "type": "implementation",
+      "description": "Add loaded_models field to ProviderSnapshot for Ollama's custom JSON output, and update the table renderer to display model names for non-quota providers.",
+      "depends_on": [],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Add loaded_models: Option<Vec<String>> field to ProviderSnapshot struct with serde skip_serializing_if. Update print_providers_table to display loaded model names when primary_pct is None. When loaded_models is Some and non-empty, show comma-separated model names after the dash columns; show '(idle)' when the vec is empty. Add primary_label/secondary_label display in the table header by using the snapshot's label fields instead of hardcoded '5h'/'7d'. Ensure existing tests still pass.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/providers/mod.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/providers/mod.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop providers::tests && cargo clippy -p bop -- -D warnings 2>&1 | tail -5",
+            "expected": "All existing tests pass, clippy clean"
+          },
+          "status": "completed",
+          "notes": "Added loaded_models: Option<Vec<String>> field to ProviderSnapshot struct with serde skip_serializing_if. Updated print_providers_table to display loaded model names when primary_pct is None. When loaded_models is Some and non-empty, show comma-separated model names; show '(idle)' when empty. Added dynamic primary_label/secondary_label display in table header. All existing tests pass and clippy is clean.",
+          "updated_at": "2026-03-08T06:32:42.892767+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-2-ollama",
+      "name": "Ollama Provider (Local + Cloud)",
+      "type": "implementation",
+      "description": "Create OllamaLocalProvider and OllamaCloudProvider implementing the Provider trait. Local mode detects via TCP port check on 11434, fetches loaded models from /api/ps. Cloud mode detects via OLLAMA_API_KEY env var or ~/.ollama/config.json, fetches with Bearer auth.",
+      "depends_on": [
+        "phase-1-snapshot-extension"
+      ],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-2-1",
+          "description": "Create crates/bop-cli/src/providers/ollama.rs with OllamaLocalProvider. detect(): use std::net::TcpStream::connect_timeout to localhost:11434 with 500ms timeout. fetch(): GET http://localhost:11434/api/ps, parse {models:[{name, size_vram, expires_at}]}, compute loaded model names, find earliest expires_at for reset_at, return ProviderSnapshot with provider='ollama-local', display_name='Ollama (local)', primary_pct=None, source='http', loaded_models=parsed model names. Handle empty models list as '(idle)'. Add parse_ps_response() as a separate testable function. Add unit tests for: parse_ps_response with models, parse_ps_response with empty models, parse_ps_response with expires_at, parse_ps_response with malformed JSON.",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [
+            "crates/bop-cli/src/providers/ollama.rs"
+          ],
+          "patterns_from": [
+            "crates/bop-cli/src/providers/claude.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop providers::ollama -- --nocapture 2>&1 | tail -20",
+            "expected": "All ollama unit tests pass"
+          },
+          "status": "completed",
+          "notes": "Created crates/bop-cli/src/providers/ollama.rs with OllamaLocalProvider. Implemented detect() using TcpStream::connect_timeout to localhost:11434 with 500ms timeout. Implemented fetch() with GET http://localhost:11434/api/ps, parsing {models:[{name, size_vram, expires_at}]} response. Added parse_ps_response() as a separate testable function. Computed loaded model names and earliest expires_at for reset_at. Returns ProviderSnapshot with provider='ollama-local', display_name='Ollama (local)', primary_pct=None, source='http', loaded_models=parsed model names. Handles empty models list correctly. Added 4 unit tests: parse_ps_response with models, parse_ps_response with empty models, parse_ps_response with expires_at, parse_ps_response with malformed JSON. Registered OllamaLocalProvider in all_providers(). All tests pass.",
+          "updated_at": "2026-03-08T06:36:01.093759+00:00"
+        },
+        {
+          "id": "subtask-2-2",
+          "description": "Add OllamaCloudProvider to ollama.rs. detect(): check OLLAMA_API_KEY env var OR read ~/.ollama/config.json for api_key field. fetch(): GET https://ollama.com/api/ps with Authorization: Bearer <api_key>, parse same response shape as local. Return ProviderSnapshot with provider='ollama-cloud', display_name='Ollama (cloud)', source='http'. Add read_cloud_credentials() as a separate testable function. Add unit tests for: detect with env var set, detect with config file, detect with neither, cloud credentials parsing.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/providers/ollama.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/providers/claude.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop providers::ollama -- --nocapture 2>&1 | tail -20",
+            "expected": "All ollama unit tests pass (local + cloud)"
+          },
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "phase-3-opencode",
+      "name": "OpenCode Provider",
+      "type": "implementation",
+      "description": "Create OpenCodeProvider implementing the Provider trait. Detects via TCP port check on 4096, fetches session list and most recent session details for token/cost data.",
+      "depends_on": [
+        "phase-1-snapshot-extension"
+      ],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-3-1",
+          "description": "Create crates/bop-cli/src/providers/opencode.rs with OpenCodeProvider. detect(): use std::net::TcpStream::connect_timeout to localhost:4096 with 500ms timeout. fetch(): GET http://localhost:4096/session to list sessions, find most recently updated session, GET http://localhost:4096/session/:id for details, extract tokens_used and cost_usd from session metadata if present. Return ProviderSnapshot with provider='opencode', display_name='opencode', primary_pct=None, source='http'. Add parse_sessions_response() and parse_session_detail() as separate testable functions. Add unit tests for: parse with sessions, parse with empty sessions, parse session detail with tokens/cost, parse session detail without tokens/cost, malformed JSON.",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [
+            "crates/bop-cli/src/providers/opencode.rs"
+          ],
+          "patterns_from": [
+            "crates/bop-cli/src/providers/claude.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop providers::opencode -- --nocapture 2>&1 | tail -20",
+            "expected": "All opencode unit tests pass"
+          },
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "phase-4-registration",
+      "name": "Registration and Integration",
+      "type": "integration",
+      "description": "Register Ollama and OpenCode providers in the module system and all_providers() registry. Run full verification suite.",
+      "depends_on": [
+        "phase-2-ollama",
+        "phase-3-opencode"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-4-1",
+          "description": "Add 'pub mod ollama;' and 'pub mod opencode;' declarations to mod.rs. Register OllamaLocalProvider, OllamaCloudProvider, and OpenCodeProvider in all_providers() function. Ensure the ordering is: claude, codex, gemini, ollama-local, ollama-cloud, opencode.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/providers/mod.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/providers/mod.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo build -p bop 2>&1 | tail -5",
+            "expected": "Build succeeds with no errors"
+          },
+          "status": "pending"
+        },
+        {
+          "id": "subtask-4-2",
+          "description": "Run full verification: cargo test -p bop (all provider tests including new ones), cargo clippy -p bop -- -D warnings (no warnings), cargo fmt -p bop --check (formatting clean). Verify JSON output shape with: ./target/debug/bop providers --json (should include all registered providers). Fix any compilation, lint, or format issues.",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop && cargo clippy -p bop -- -D warnings && cargo fmt -p bop --check",
+            "expected": "All tests pass, clippy clean, fmt clean"
+          },
+          "status": "pending"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_phases": 4,
+    "total_subtasks": 6,
+    "services_involved": [
+      "bop-cli"
+    ],
+    "parallelism": {
+      "max_parallel_phases": 2,
+      "parallel_groups": [
+        {
+          "phases": [
+            "phase-2-ollama",
+            "phase-3-opencode"
+          ],
+          "reason": "Both depend only on phase-1-snapshot-extension, modify different files (ollama.rs vs opencode.rs)"
+        }
+      ],
+      "recommended_workers": 1,
+      "speedup_estimate": "Phases 2+3 could run in parallel but share mod.rs registration, so sequential is safer"
+    },
+    "startup_command": "source .auto-claude/.venv/bin/activate && python .auto-claude/run.py --spec 032 --parallel 1"
+  },
+  "verification_strategy": {
+    "risk_level": "low",
+    "skip_validation": false,
+    "test_creation_phase": "inline_with_implementation",
+    "test_types_required": [
+      "unit"
+    ],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      "cargo build -p bop succeeds",
+      "cargo test -p bop providers::ollama passes",
+      "cargo test -p bop providers::opencode passes",
+      "cargo clippy -p bop -- -D warnings is clean",
+      "cargo fmt -p bop --check is clean",
+      "./target/debug/bop providers --json includes all provider types in output schema"
+    ],
+    "verification_steps": [
+      {
+        "name": "Unit Tests (all providers)",
+        "command": "cargo test -p bop",
+        "expected_outcome": "All tests pass including new ollama and opencode tests",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Clippy Lint",
+        "command": "cargo clippy -p bop -- -D warnings",
+        "expected_outcome": "No warnings",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Format Check",
+        "command": "cargo fmt -p bop --check",
+        "expected_outcome": "No formatting issues",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      }
+    ],
+    "reasoning": "Low risk — adding new provider files following existing patterns. No changes to core dispatch logic. Unit tests verify JSON parsing without network calls."
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": true,
+      "commands": [
+        "cargo test -p bop"
+      ],
+      "minimum_coverage": null
+    },
+    "integration_tests": {
+      "required": false,
+      "commands": [],
+      "services_to_test": []
+    },
+    "e2e_tests": {
+      "required": false,
+      "commands": [],
+      "flows": []
+    },
+    "browser_verification": {
+      "required": false,
+      "pages": []
+    },
+    "database_verification": {
+      "required": false,
+      "checks": []
+    }
+  },
+  "qa_signoff": null,
+  "last_updated": "2026-03-08T06:36:01.093768+00:00"
+}

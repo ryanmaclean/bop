@@ -1,0 +1,137 @@
+=== AUTO-BUILD PROGRESS ===
+
+Project: bop (Rust workspace: bop-core + bop-cli)
+Spec: 014-make-check-clean-install-hooks-linux
+Workspace: [managed by orchestrator]
+Started: 2024-03-06
+
+Workflow Type: simple
+Rationale: This is a verification and documentation task. Previous agents (Wave 6, commit 3f3f219)
+have already implemented the install-hooks feature with full Linux systemd support. The current
+task is to verify that make check passes with zero clippy warnings, verify the install_hooks_linux
+implementation is complete, and document the results in output/result.md.
+
+Background:
+- Commit 3f3f219: "feat: Wave 6 — bop serve HTTP endpoint + Linux install-hooks + codex dispatch mode"
+- Multiple auto-claude subtask commits built the feature incrementally
+- Commit e7d1bd1: Most recent - "auto-claude: subtask-2-4 - Run make check (test + clippy + fmt)"
+- Current state: make check passes with ZERO warnings (verified 2024-03-06)
+
+Session 1 (Planner):
+- Created context.json documenting existing implementation status
+- Created implementation_plan.json with 2 phases, 3 subtasks
+- Created init.sh for environment setup
+- Verified current state: all functionality is already complete
+
+Phase Summary:
+- Phase 1 (Verification): 2 subtasks
+  - subtask-1-1: Run make check to verify tests, clippy, and format all pass
+  - subtask-1-2: Verify install_hooks_linux implementation completeness
+- Phase 2 (Documentation): 1 subtask
+  - subtask-2-1: Write output/result.md summarizing verification results
+
+Services Involved:
+- bop: Main Rust workspace (bop-core + bop-cli crates)
+
+Implementation Status (Pre-Verified):
+✅ install_hooks_linux function exists (factory.rs:359-415)
+✅ Writes .service and .path files to ~/.config/systemd/user/
+✅ Runs systemctl --user daemon-reload
+✅ Runs systemctl --user enable for both units
+✅ Runs systemctl --user start for both units
+✅ --uninstall flag implemented (factory.rs:639-674)
+✅ Stops both units
+✅ Disables both units
+✅ Removes both files
+✅ Runs daemon-reload after cleanup
+✅ make check passes (cargo test + cargo clippy + cargo fmt --check)
+✅ Zero clippy warnings
+
+Parallelism Analysis:
+- Max parallel phases: 1
+- Recommended workers: 1
+- Sequential workflow: Verify first, then document
+
+Files to Reference:
+- crates/bop-cli/src/factory.rs (lines 359-415: install, 639-674: uninstall)
+- crates/bop-cli/src/main.rs (lines 248-252: command def, 373-379: wrapper)
+- Makefile (make check definition)
+
+Files to Create:
+- output/result.md (verification summary)
+
+=== STARTUP COMMAND ===
+
+To continue building this spec, run:
+
+  source .auto-claude/.venv/bin/activate && python .auto-claude/backend/run.py --spec 014 --direct
+
+Expected Work:
+- Minimal: verify existing implementation and document results
+- No code changes expected
+- Estimated time: <10 minutes
+
+=== END SESSION 1 ===
+
+Session 2 (Coder - subtask-1-1):
+- Task: Run make check to verify tests, clippy, and format all pass
+- Executed: make check
+- Results:
+  ✅ All tests passed (446 tests total across all test suites)
+  ✅ Clippy completed with zero warnings (-D warnings flag passed)
+  ✅ Format check passed (cargo fmt --check)
+- Status: COMPLETED
+- Next: subtask-1-2 (Verify install_hooks_linux implementation completeness)
+
+=== END SESSION 2 ===
+
+## Subtask 1-2: Verify install_hooks_linux implementation - COMPLETE ✓
+
+### Installation Function (lines 359-415)
+Verified `cmd_factory_install_linux()` in factory.rs:
+
+✅ Requirement 1: .service and .path files written to ~/.config/systemd/user/
+   - Lines 365-368: Writes .service file via generate_systemd_service()
+   - Lines 371-374: Writes .path file via generate_systemd_path()
+   - Both files written to systemd_user_dir() = ~/.config/systemd/user
+
+✅ Requirement 2: daemon-reload is called
+   - Lines 378-384: Executes systemctl --user daemon-reload
+   - Includes error handling with stderr output on failure
+
+✅ Requirement 3: enable is called for both units
+   - Lines 392-400: Loops through both .service and .path units
+   - Executes systemctl --user enable for each
+   - Includes error handling with stderr output on failure
+
+✅ Requirement 4: start is called for both units
+   - Lines 402-410: Loops through both .service and .path units
+   - Executes systemctl --user start for each
+   - Includes error handling with stderr output on failure
+
+### Uninstallation Function (lines 639-674)
+Verified --uninstall path for Linux:
+
+✅ Requirement 1: stops both units
+   - Lines 648-650: Executes systemctl --user stop for .path and .service
+   - Uses best-effort pattern (ignores errors via let _)
+
+✅ Requirement 2: disables both units
+   - Lines 651-653: Executes systemctl --user disable for .path and .service
+   - Uses best-effort pattern (ignores errors via let _)
+
+✅ Requirement 3: removes both files
+   - Lines 657-664: Removes .service file if exists
+   - Removes .path file if exists
+   - Includes user feedback messages
+
+✅ Requirement 4: runs daemon-reload
+   - Lines 672-674: Executes systemctl --user daemon-reload
+   - Uses best-effort pattern (ignores errors via let _)
+
+### Conclusion
+The install_hooks_linux implementation is COMPLETE and correct. All 8 requirements are met:
+- 4/4 install operations implemented correctly with error handling
+- 4/4 uninstall operations implemented correctly with graceful error handling
+
+Status: VERIFIED AND COMPLETE ✓

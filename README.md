@@ -1,5 +1,7 @@
 # bop — Heterogeneous Agent Orchestrator
 
+![CI](https://github.com/ryanmaclean/bop/actions/workflows/ci.yml/badge.svg)
+
 A pluggable job system for parallel AI coding agents. The filesystem IS the state machine: directory bundles (`.bop`) are navigable in Finder with Quick Look previews. No database. `mv` = state transition.
 
 Reliability guards:
@@ -79,6 +81,11 @@ bop poker submit <id> -n <who> <glyph>   # Submit estimate
 bop poker reveal <id>         # Flip all estimates
 bop poker consensus <id> <g>  # Lock consensus estimate
 bop policy check --staged     # Anti-slop gates on staged changes
+bop providers                 # Show AI provider quota/usage table (Claude, Codex, Gemini, Ollama…)
+bop providers --watch         # Live-refresh quota display every 30s
+bop bridge listen             # Start session state bridge daemon (~/.bop/bridge.sock)
+bop bridge emit --cli claude --event stage-change --stage in-progress
+bop bridge install --target claude  # Hook Claude Code to emit bridge events automatically
 bop doctor                    # Verify local tooling
 ```
 
@@ -127,14 +134,110 @@ Exit 75 = rate-limited (triggers provider rotation). Available: `claude`, `codex
 Template cloning on macOS prefers `ditto --clone` (APFS COW), with `cp -c` fallback.
 Terminal-state card compression uses `ditto --hfsCompression` (macOS only).
 
+## Provider Quota (`bop providers`)
+
+`bop providers` auto-detects installed AI CLIs and shows live quota/usage:
+
+```
+Provider     Primary  Secondary  Reset        Source
+Claude Code  ▓▓▓▓▓░░   ▓▓░░░░░   5h 23m       oauth
+Codex        ▓▓▓░░░░   —         —            rpc
+Gemini       ▓░░░░░░   ▓▓░░░░░   2d 11h       oauth
+Ollama       local     —         —             http
+```
+
+Credentials are read from their native locations (`~/.claude/.credentials.json`,
+Keychain, `~/.config/opencode/`, etc.) — no configuration needed.
+
+## Session State Bridge (`bop bridge`)
+
+`bop bridge` maps live AI session events to BopDeck's notch display and card
+stage history. Cards move through five visible stages:
+
+```
+planning → in-progress → human-review → ai-review → done
+```
+
+### Install once (Claude Code)
+
+```sh
+bop bridge install --target claude
+```
+
+This writes hooks into `~/.claude/settings.json`. After that, every Claude Code
+session automatically emits `SessionStart`, `ToolStart`, `ToolDone`, and
+`SessionEnd` events to the bridge socket — no per-card setup needed.
+
+### How agent sessions use it
+
+Agents running inside bop cards are instructed (via `.cards/system_context.md`)
+to call stage-change events at natural transition points:
+
+```sh
+# Agent starts implementation:
+bop bridge emit --cli claude --event stage-change --stage in-progress
+
+# Agent finishes, awaiting human review:
+bop bridge emit --cli claude --event stage-change --stage human-review
+```
+
+These calls are **fire-and-forget**: if the bridge daemon isn't running they
+exit 0 silently and never block the agent's actual work.
+
+### Multi-CLI coverage
+
+| CLI | Integration method |
+|-----|-------------------|
+| Claude Code | Hook system (`~/.claude/settings.json`) — automatic after `bop bridge install` |
+| opencode | `bop bridge opencode` subscribes to SSE bus (`localhost:4096/event`) |
+| Goose | SSE adapter (spec 035) |
+| Gemini CLI | ACP ndjson adapter (spec 035) |
+| Aider / Crush | Log file tail (spec 035) |
+| Ollama | REST poll (spec 035) |
+
+Events are appended to `~/.bop/bridge-events.jsonl` and streamed to BopDeck
+via `~/.bop/bridge.sock`.
+
 ## BopDeck.app
 
-The macOS companion app provides:
-- **Quick Look** — preview `.card` bundles in Finder (thumbnail + full preview)
-- **Notch overlay** — live card status in the menu bar area
-- **`bop://` URL scheme** — deep link to cards
+BopDeck is a macOS companion app built in `macos/`. It has two surfaces:
 
-The Quick Look extension (`BopDeckQL.appex`) is embedded in `BopDeck.app` and declares the `sh.bop.card` UTI.
+### Quick Look extension — fully implemented
+
+Press **Space** on any `.card` bundle in Finder to get a rich preview:
+
+- **Overview tab** — glyph, stage pipeline (Spec → Plan → Code → QA with ✓), labels, description, acceptance criteria, created/elapsed time
+- **Subtasks tab** — progress bar + checklist from `meta.json`
+- **Plan tab** — Auto-Claude `implementation_plan.json` phases and subtasks, collapsible
+- **Logs tab** — live log tail (last 30 lines, auto-refreshes every 2s with pulsing indicator)
+- **Files tab** — bundle file listing
+- **Action buttons** — "Attach Session" (opens Zellij), "Tail Logs", "Stop", "Open Spec" — all via `bop://` deep links
+
+### `bop://` URL scheme — fully implemented
+
+`BopDeck.app` handles `bop://card/<id>/<action>` URLs:
+
+| URL | Action |
+|-----|--------|
+| `bop://card/<id>/session` | `zellij attach <session>` in Ghostty/Terminal |
+| `bop://card/<id>/tail` | `bop logs <id> --follow` |
+| `bop://card/<id>/logs` | `bop logs <id>` |
+| `bop://card/<id>/stop` | `bop kill <id>` |
+| `bop://card/<id>/spec` | Open `spec.md` in default editor |
+
+Card lookup searches all state dirs (`running/`, `pending/`, `done/`, `merged/`, `failed/`) for the card. The Zellij session name is read from `meta.json` `zellij_session` field.
+
+### Main window — stub (planned)
+
+`ContentView.swift` is currently a placeholder. A kanban board view and notch overlay showing live card counts and bridge events are planned but not yet implemented.
+
+Build and deploy:
+```sh
+xcodebuild -project macos/macos.xcodeproj -scheme JobCardHost -configuration Debug build
+# Then copy to /Applications/ and re-register the QL extension:
+lsregister -f /Applications/JobCardHost.app
+qlmanage -r && qlmanage -r cache
+```
 
 ## Zellij Integration
 

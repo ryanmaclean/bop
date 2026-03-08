@@ -1,0 +1,6 @@
+---
+source: crates/bop-cli/src/ui/mod.rs
+assertion_line: 515
+expression: stable
+---
+bop · HH:MM:SS · ████ ████ ████ · ▁▂▃▄▅▆▇█ 7/hr

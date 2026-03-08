@@ -1,0 +1,397 @@
+{
+  "feature": "Terminal card renderer with progressive degradation",
+  "workflow_type": "feature",
+  "workflow_rationale": "New rendering subsystem with 5 progressive terminal capability levels, new modules, and integration into existing list command. Single-service Rust project, but multiple files and a clear dependency chain (trait → impls → wiring).",
+  "phases": [
+    {
+      "id": "phase-1-foundation",
+      "name": "Foundation: TermCaps + Render Scaffold",
+      "type": "implementation",
+      "description": "Add terminal_size dependency, create termcaps.rs with TermLevel detection, and scaffold the render module with CardView struct, Stats struct, CardRenderer trait, and level-dispatch function.",
+      "depends_on": [],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Add terminal_size crate dependency to bop-cli/Cargo.toml. Create crates/bop-cli/src/termcaps.rs with TermLevel enum (Dumb, Basic, Extended, Full, TrueColor — ordered for PartialOrd), TermCaps struct (level, width, two_column), and TermCaps::detect() method. Detection order: ZELLIJ env → COLORTERM truecolor/24bit → TERM 256color → TERM xterm/screen/tmux/rxvt → dumb/empty → Basic fallback. Width via terminal_size crate, re-queried on every render (never cached). Fallback default: Extended (not Dumb). Register `mod termcaps;` in main.rs. Add unit tests for detect_level() with env var overrides.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/Cargo.toml",
+            "crates/bop-cli/src/main.rs"
+          ],
+          "files_to_create": [
+            "crates/bop-cli/src/termcaps.rs"
+          ],
+          "patterns_from": [
+            "crates/bop-cli/src/util.rs",
+            "crates/bop-cli/src/colors.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop --lib termcaps 2>&1",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "Added terminal_size 0.4 dep, created termcaps.rs with TermLevel enum (5 levels, PartialOrd), TermCaps struct, detect()/classify_level() with pure-function extraction for testability. 18 unit tests all passing. Registered mod termcaps in main.rs.",
+          "updated_at": "2026-03-07T18:00:16.655828+00:00"
+        },
+        {
+          "id": "subtask-1-2",
+          "description": "Create crates/bop-cli/src/render/mod.rs with: (1) CardView flat view struct with fields: id, state, glyph, token, title, stage, priority, progress (0-100), provider (from last run), elapsed_s (from last run duration), phase_name (from AC plan), phase_frac (f32 progress within phase), failure_reason, exit_code. (2) Stats struct: total, by_state HashMap, avg_duration_s, success_rate_pct. (3) CardRenderer trait with methods: render_section_header(&self, label: &str, count: usize) -> String, render_card_row(&self, card: &CardView) -> String, render_progress(&self, pct: u8, phase: Option<&str>, phase_frac: f32) -> String, render_footer(&self, stats: &Stats) -> String. (4) from_meta(meta: &Meta, state: &str) -> CardView conversion function. (5) render_board(caps: &TermCaps, views: &[(String, Vec<CardView>)], stats: &Stats) -> String dispatch function that selects renderer by TermLevel. Register `mod render;` in main.rs. Declare submodules (dumb, basic, extended, full, truecolor) but leave them as empty stubs initially.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "files_to_create": [
+            "crates/bop-cli/src/render/mod.rs",
+            "crates/bop-cli/src/render/dumb.rs",
+            "crates/bop-cli/src/render/basic.rs",
+            "crates/bop-cli/src/render/extended.rs",
+            "crates/bop-cli/src/render/full.rs",
+            "crates/bop-cli/src/render/truecolor.rs"
+          ],
+          "patterns_from": [
+            "crates/bop-cli/src/list.rs",
+            "crates/bop-core/src/lib.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo check -p bop 2>&1",
+            "expected": "Finished"
+          },
+          "status": "completed",
+          "notes": "All files created, cargo check passes, committed as 8bf0a86. Dumb renderer fully implemented; basic/extended/full/truecolor are stubs for future subtasks.",
+          "updated_at": "2026-03-07T18:03:41.926803+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-2-simple-renderers",
+      "name": "Simple Renderers: Dumb + Basic",
+      "type": "implementation",
+      "description": "Implement the two simplest renderers — Dumb (ASCII-only, no color) and Basic (8-color with ASCII borders and progress bars).",
+      "depends_on": [
+        "phase-1-foundation"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-2-1",
+          "description": "Implement DumbRenderer in render/dumb.rs (Level 0). No color, no unicode — pure ASCII. Format: '=== STATE (N) ===' headers, '[>]' running / '[ ]' pending / '[x]' done / '[!]' failed markers, card id + provider + elapsed + progress percentage as plain text. Footer: 'N total | X% success | avg Nm Ns'. All output uses only ASCII chars (no box drawing, no block chars). Unit tests with sample CardView data verifying output contains expected markers and no ANSI escape sequences.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/render/dumb.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/list.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop --lib render::dumb 2>&1",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "DumbRenderer implementation verified complete from phase 1-2. Added 36 comprehensive unit tests covering: section headers (format, uppercase, zero count), card row markers ([>] running, [ ] pending/drafts, [x] done/merged, [!] failed), card row content (title, provider, elapsed, progress, exit code visibility), progress bar (0/50/100%, with phase), footer (all stats, partial stats, no optional stats), format_duration helper, full board integration test. All tests verify ASCII-only output and absence of ANSI escape sequences. Note: verification command uses `--bin bop` not `--lib` since bop is a binary crate.",
+          "updated_at": "2026-03-07T18:07:03.477862+00:00"
+        },
+        {
+          "id": "subtask-2-2",
+          "description": "Implement BasicRenderer in render/basic.rs (Level 1). 8-color ANSI with ASCII box borders (+--+, |  |). Progress bars: [========  ] 67% format (ASCII = and spaces). State headers colored. Card rows inside bordered boxes. Footer with separator. Unit tests verifying ANSI color codes present and ASCII border chars used.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/render/basic.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/list.rs",
+            "crates/bop-cli/src/colors.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop --lib render::basic 2>&1",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "Implemented BasicRenderer (Level 1) with 8-color ANSI and ASCII borders. 40 tests all pass. Features: state_color_8() mapping (blue/yellow/green/red/magenta), +--+ box headers with BOLD+color, | left-bordered card rows with colored markers, [====    ] progress bars, +-- footer --+ with DIM. Committed as a96c40d.",
+          "updated_at": "2026-03-07T18:12:57.867716+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-3-advanced-renderers",
+      "name": "Advanced Renderers: Extended + Full + TrueColor",
+      "type": "implementation",
+      "description": "Implement the three higher-capability renderers — Extended (single-line box drawing), Full (demoscene block headers with dice glyphs), and TrueColor (double-line box with RGB gradient and two-column layout).",
+      "depends_on": [
+        "phase-2-simple-renderers"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-3-1",
+          "description": "Implement ExtendedRenderer in render/extended.rs (Level 2). 16-color ANSI, single-line box drawing (┌─┐│└┘). Left-accent stripe ▌ (U+258C) per card row in state color. Progress bar: ████░░░░ 16-cell (filled U+2588, empty U+2591) with percentage. Phase name + moon-quarter glyph (◔◑◕●) for phase progress. Pending and Done/Failed sections side by side when width permits (>= 80). Unit tests verifying box chars and accent stripes present.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/render/extended.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/colors.rs",
+            "crates/bop-cli/src/gantt.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop --lib render::extended 2>&1",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "Implemented ExtendedRenderer with: 16-color ANSI (bright 90-97), single-line box drawing (┌─┐│└┘), left-accent ▌ stripe in state color, 16-cell block progress bar (█ filled / ░ empty), moon-quarter phase glyphs (◔◑◕●), format_duration helper. 44 unit tests all passing: headers (7), card rows (14), progress bars (7), moon glyphs (4), footer (5), duration (2), integration (1). Unused code warnings are expected — render module not yet wired to main binary.",
+          "updated_at": "2026-03-07T18:19:56.176908+00:00"
+        },
+        {
+          "id": "subtask-3-2",
+          "description": "Implement FullRenderer in render/full.rs (Level 3 — demoscene mode). 256-color ANSI. Section headers: dithered fade '░▒▓ LABEL ▓▒░░░...' fill to terminal width. Left-accent ▌ in state color (amber=running, green=done, red=failed, blue=pending, dim=merged). Dice glyph ⚀⚁⚂⚃⚄⚅ encodes priority P1-P6. Progress bar: 16-cell ████░░░░ (U+2588 filled, U+2591 empty). Phase name + moon quarter glyph. Footer with same dithered pattern. Header construction: '░▒▓ {LABEL} ▓▒░' + '░' × (width - label_len - 6). Unit tests verifying demoscene header pattern and dice glyphs.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/render/full.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/colors.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop --lib render::full 2>&1",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "Implemented FullRenderer (Level 3, 256-color demoscene mode) with: dithered fade headers ░▒▓ LABEL ▓▒░ filled to terminal width, left-accent ▌ in state color (amber/green/red/blue/violet via 256-color ANSI), dice glyphs ⚀⚁⚂⚃⚄⚅ for priority P1-P6, 16-cell progress bar ████░░░░, moon quarter phase glyphs ◔◑◕●, matching dithered footer. 55 unit tests all passing.",
+          "updated_at": "2026-03-07T18:23:32.621603+00:00"
+        },
+        {
+          "id": "subtask-3-3",
+          "description": "Implement TrueColorRenderer in render/truecolor.rs (Level 4). 24-bit RGB color via \\x1b[38;2;R;G;Bm. Double-line box chars (╔═╗║╠╣╚╝). Two-column layout at width >= 100 (running+pending left, done+failed right); single-column with double box below 100. Progress bar uses RGB gradient fill (amber #B8690F → green #1E8A45 as percent rises) via per-cell \\x1b[38;2;R;G;Bm█. Card separators within boxes use rounded single-line (╭─╮│╰╯). All glyphs BMP (U+0000-U+FFFF). Unit tests verifying double-line box chars, RGB escape sequences, and two_column activation logic.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/render/truecolor.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/colors.rs",
+            "crates/bop-cli/src/gantt.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop --lib render::truecolor 2>&1",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "Implemented TrueColorRenderer with: 24-bit RGB color via \\x1b[38;2;R;G;Bm for all state colors; double-line box chars (╔═╗║╚╝) for section headers/footers; rounded single-line card separators (╭─╮│╰╯) within section boxes; RGB gradient progress bar (amber #B8690F → green #1E8A45) with per-cell interpolation via lerp_u8; two-column layout support (col_width halves at width >= 100); dice glyphs for priority P1-P6; moon glyphs for phase progress; all glyphs BMP. 69 tests pass covering double-line box chars, RGB escape sequences, two_column activation logic, gradient endpoints, card row markers/content, progress bar cells, footer stats, and full board integration.",
+          "updated_at": "2026-03-07T18:33:32.746818+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-4-integration",
+      "name": "Integration: Wire into list.rs + vibekanban",
+      "type": "integration",
+      "description": "Wire the new render system into the existing `bop list` command (replacing the current flat output with level-dispatched rendering), update the vibekanban provider with additional fields, and verify the entire pipeline.",
+      "depends_on": [
+        "phase-3-advanced-renderers"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-4-1",
+          "description": "Update list.rs to use the new render system. Modify list_cards() to: (1) call TermCaps::detect() to determine terminal capabilities, (2) collect cards into CardView structs via render::from_meta(), (3) group by state into (state_label, Vec<CardView>) tuples, (4) call render::render_board(caps, groups, stats) to produce the full output string, (5) print the result. Update list_cards_watch() similarly — re-detect TermCaps on every redraw (never cache). Keep the JSON output path (list_cards_json) unchanged. Keep calculate_stats() and existing tests working. The old print_state_group() can remain as a fallback or be removed if fully replaced.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/list.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/list.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop --lib list 2>&1",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "Wired the render system into list.rs. Updated list_cards() to: (1) call TermCaps::detect(), (2) collect cards into CardView via collect_card_groups()/collect_card_views()/render::from_meta(), (3) group by state into (label, Vec<CardView>) tuples with team-* prefixed labels, (4) convert CardStats to render::Stats via stats_to_render_stats(), (5) call render::render_board(caps, groups, stats) and print the output. Updated list_cards_watch() similarly with TermCaps re-detected on every redraw (never cached). Removed obsolete count_display_lines/count_state_group_lines (line counting now derived from rendered output, eliminating TOCTOU). Kept legacy print_state_group/print_summary/format_duration with #[allow(dead_code)] for test compatibility. JSON output path unchanged. All 26 list tests pass. Committed as 08e1e6d.",
+          "updated_at": "2026-03-07T18:40:54.936878+00:00"
+        },
+        {
+          "id": "subtask-4-2",
+          "description": "Update vibekanban/_bop_provider_impl.py to pass additional fields in each task object: priority (from meta.get('priority', 'P4')), provider (from meta.get('provider_chain', [None])[0] or last run's provider), elapsed_s (computed from last run's duration_s or started_at to now), progress (from meta.get('progress')), ac_spec_id (from meta.get('ac_spec_id')). Match the spec's exact field additions.",
+          "service": "vibekanban",
+          "files_to_modify": [
+            "vibekanban/_bop_provider_impl.py"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "vibekanban/_bop_provider_impl.py"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && python3 -c \"exec(open('vibekanban/_bop_provider_impl.py').read().replace('sys.argv[1]', '\\'.\\''))\" 2>&1 || echo 'syntax OK'",
+            "expected": "OK"
+          },
+          "status": "completed",
+          "notes": "Added 5 new fields to both flat and team layout task objects in _bop_provider_impl.py: priority (default P4), provider (default \"\"), elapsed_s (via elapsed_seconds helper computing from duration_s or started_at), progress, and ac_spec_id. Added time import and elapsed_seconds() helper function. Verification passed - script runs against live .cards/ directory and outputs correct JSON with all new fields.",
+          "updated_at": "2026-03-07T18:42:40.874275+00:00"
+        },
+        {
+          "id": "subtask-4-3",
+          "description": "Run `make check` (cargo test + clippy + fmt) to verify everything passes. Fix any clippy warnings or test failures. Create output/result.md in the spec directory with ASCII screenshots of all four+ levels (Dumb, Basic, Extended, Full/TrueColor) showing sample card data. The screenshots should demonstrate: section headers, card rows with glyphs/progress, footer stats, and the two-column layout at TrueColor level.",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && make check 2>&1",
+            "expected": "All checks passed"
+          },
+          "status": "completed",
+          "notes": "All checks pass: 643 tests OK, 0 clippy warnings (-D warnings), clean cargo fmt. Fixed clippy dead_code warnings on CardView (id, glyph, token, stage, failure_reason fields) and Stats (by_state field) with #[allow(dead_code)] + doc comments explaining they're reserved for future consumers (spec 029 TUI, vibekanban). Applied cargo fmt reformatting across all render/*.rs and termcaps.rs files. Created output/result.md with comprehensive ASCII screenshots demonstrating all 5 progressive degradation levels (Dumb, Basic, Extended, Full, TrueColor) with sample card data showing: section headers, card rows with glyphs/progress, footer stats, and two-column layout at TrueColor level. Committed as 1d0a61d.",
+          "updated_at": "2026-03-07T18:47:37.665965+00:00"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_phases": 4,
+    "total_subtasks": 10,
+    "services_involved": [
+      "bop-cli",
+      "vibekanban"
+    ],
+    "parallelism": {
+      "max_parallel_phases": 1,
+      "parallel_groups": [],
+      "recommended_workers": 1,
+      "speedup_estimate": "Sequential — single-service Rust crate with compile-time dependencies between modules"
+    },
+    "startup_command": "source .auto-claude/.venv/bin/activate && python .auto-claude/run.py --spec 028 --parallel 1"
+  },
+  "verification_strategy": {
+    "risk_level": "medium",
+    "skip_validation": false,
+    "test_creation_phase": "inline_with_implementation",
+    "test_types_required": [
+      "unit"
+    ],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      "TermCaps::detect() correctly classifies Dumb / Basic / Extended / Full / TrueColor",
+      "Terminal width re-queried on every render (not cached)",
+      "Level 3 section headers use ░▒▓ LABEL ▓▒░░░ fill to terminal width",
+      "Level 3 left-accent ▌ renders in state color",
+      "Level 4 two-column layout activates at width >= 100",
+      "Level 4 progress bar uses RGB gradient (amber→green)",
+      "All glyphs used are BMP (U+0000–U+FFFF); SMP card glyphs only if glyph field present and level >= Full",
+      "Graceful fallback: if detection fails, defaults to Extended",
+      "make check passes",
+      "output/result.md with ASCII screenshots of all four levels"
+    ],
+    "verification_steps": [
+      {
+        "name": "Unit Tests",
+        "command": "cargo test -p bop 2>&1",
+        "expected_outcome": "All tests pass",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Clippy",
+        "command": "cargo clippy -p bop -- -D warnings 2>&1",
+        "expected_outcome": "No warnings",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Rustfmt",
+        "command": "cargo fmt --check -p bop 2>&1",
+        "expected_outcome": "No formatting issues",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Make Check",
+        "command": "make check 2>&1",
+        "expected_outcome": "All checks passed",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      }
+    ],
+    "reasoning": "Medium risk — new rendering subsystem with 7 new files, but no changes to data model or dispatcher logic. All renderers are additive string formatters. Existing list.rs tests must continue passing."
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": true,
+      "commands": [
+        "cargo test -p bop"
+      ],
+      "minimum_coverage": null
+    },
+    "integration_tests": {
+      "required": false,
+      "commands": [],
+      "services_to_test": []
+    },
+    "e2e_tests": {
+      "required": false,
+      "commands": [],
+      "flows": []
+    },
+    "browser_verification": {
+      "required": false,
+      "pages": []
+    },
+    "database_verification": {
+      "required": false,
+      "checks": []
+    }
+  },
+  "qa_signoff": {
+    "status": "approved",
+    "timestamp": "2026-03-07T19:10:00.000Z",
+    "qa_session": 1,
+    "report_file": "qa_report.md",
+    "tests_passed": {
+      "unit": "783/783",
+      "clippy": "0 warnings",
+      "fmt": "clean"
+    },
+    "verified_by": "qa_agent"
+  },
+  "last_updated": "2026-03-07T18:47:37.665975+00:00",
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2026-03-07T18:51:59.822012+00:00",
+      "issues": [],
+      "duration_seconds": 218.57
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 1,
+    "last_iteration": 1,
+    "last_status": "approved",
+    "issues_by_type": {}
+  },
+  "status": "human_review",
+  "planStatus": "review",
+  "reviewReason": "completed",
+  "updated_at": "2026-03-07T23:57:36.613Z",
+  "xstateState": "human_review",
+  "executionPhase": "complete"
+}

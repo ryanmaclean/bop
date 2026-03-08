@@ -1,0 +1,508 @@
+{
+  "feature": "Pause/Resume/Retry-Transient Commands",
+  "workflow_type": "feature",
+  "workflow_rationale": "Adding three new CLI commands to an existing system with process management and state transitions",
+  "phases": [
+    {
+      "id": "phase-1-meta-fields",
+      "name": "Add Meta Fields",
+      "type": "implementation",
+      "description": "Add exit_code and paused_at fields to Meta struct",
+      "depends_on": [],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Add exit_code and paused_at fields to Meta struct in bop-core",
+          "service": "bop",
+          "files_to_modify": [
+            "crates/bop-core/src/lib.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-core/src/lib.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo build --package bop-core",
+            "expected": "Build succeeds"
+          },
+          "status": "completed",
+          "notes": "Added Option<i32> exit_code and Option<DateTime<Utc>> paused_at fields to Meta struct, following the pattern of retry_count/failure_reason. Updated Default impl. Build verified successful."
+        }
+      ]
+    },
+    {
+      "id": "phase-2-dispatcher-exit-code",
+      "name": "Write Exit Code on Failure",
+      "type": "implementation",
+      "description": "Update dispatcher to write exit_code and failure_reason when cards fail",
+      "depends_on": [
+        "phase-1-meta-fields"
+      ],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-2-1",
+          "description": "Write exit_code to meta.json when card moves to failed/",
+          "service": "bop",
+          "files_to_modify": [
+            "crates/bop-cli/src/dispatcher.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/dispatcher.rs"
+          ],
+          "verification": {
+            "type": "manual",
+            "instructions": "Read dispatcher.rs to confirm exit_code is written before fs::rename to failed/"
+          },
+          "status": "completed",
+          "notes": "Added exit_code writes in two locations: (1) workspace prepare failure sets exit_code=None at line 268, (2) process completion sets exit_code=Some(exit_code) at line 389. Both write meta before fs::rename to failed/. Also fixed Meta struct initializations in cards.rs to include new exit_code and paused_at fields."
+        },
+        {
+          "id": "subtask-2-2",
+          "description": "Write failure_reason as last line of stderr when moving to failed/",
+          "service": "bop",
+          "files_to_modify": [
+            "crates/bop-cli/src/dispatcher.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/dispatcher.rs"
+          ],
+          "verification": {
+            "type": "manual",
+            "instructions": "Read dispatcher.rs to confirm failure_reason is read from stderr and written to meta"
+          },
+          "status": "completed",
+          "notes": "Added util::read_last_nonempty_line() helper function in util.rs to read last non-empty line from stderr with 256 byte truncation. Updated dispatcher.rs in two locations: (1) workspace prepare failure (line 269) - reads stderr or falls back to error message, (2) process completion failure (lines 394-401) - reads stderr only when will_fail is true. Both locations write meta.failure_reason before fs::rename to failed/. Build and clippy verified successful."
+        }
+      ]
+    },
+    {
+      "id": "phase-3-pause-command",
+      "name": "Implement bop pause",
+      "type": "implementation",
+      "description": "Add pause command to stop running adapters and return cards to pending/",
+      "depends_on": [
+        "phase-1-meta-fields"
+      ],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-3-1",
+          "description": "Add Pause command variant to main.rs Command enum",
+          "service": "bop",
+          "files_to_modify": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo build --package bop-cli",
+            "expected": "Build succeeds"
+          },
+          "status": "completed",
+          "notes": "Added Pause command variant at line 110-113 with id: String parameter following the pattern of Retry/Kill commands. Added stub match arm in main() at line 578-582 with placeholder implementation (will be replaced in subtask-3-2). Also added stub cmd_pause function in cards.rs. Build verified successful with cargo build --package bop."
+        },
+        {
+          "id": "subtask-3-2",
+          "description": "Add cmd_pause implementation in cards.rs",
+          "service": "bop",
+          "files_to_modify": [
+            "crates/bop-cli/src/cards.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/cards.rs",
+            "crates/bop-cli/src/reaper.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo build --package bop-cli",
+            "expected": "Build succeeds"
+          },
+          "status": "completed",
+          "notes": "Implemented cmd_pause as async function that: (1) scans both flat and team-based running/ directories for .bop/.jobcard cards, (2) for each card calls pause_single_card helper which reads PID via reaper::read_pid, sends SIGTERM, waits up to 5s polling with is_alive (100ms intervals), sends SIGKILL if still alive with 200ms grace period, (3) checks card still exists before meta update (race condition check - handles concurrent dispatcher exit-75 moves), (4) updates meta with paused_at timestamp and resets Running stages to Pending, (5) creates pending_dir if needed with fs::create_dir_all, (6) renames using actual filename (not hardcoded .bop) to team-appropriate pending/ directory (preserves team structure via card_parent logic), (7) renders thumbnail. Main.rs already has .await on cmd_pause call. Build verified successful with cargo build."
+        },
+        {
+          "id": "subtask-3-3",
+          "description": "Wire Pause command in main.rs match block",
+          "service": "bop",
+          "files_to_modify": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo build --package bop-cli",
+            "expected": "Build succeeds"
+          },
+          "status": "completed",
+          "notes": "Pause command already wired at line 578: Command::Pause { id } => cards::cmd_pause(&root, &id).await. Verified with successful cargo build --package bop. No changes needed."
+        }
+      ]
+    },
+    {
+      "id": "phase-4-resume-command",
+      "name": "Implement bop resume",
+      "type": "implementation",
+      "description": "Add resume command to clear paused_at markers from pending cards",
+      "depends_on": [
+        "phase-1-meta-fields"
+      ],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-4-1",
+          "description": "Add Resume command variant to main.rs Command enum",
+          "service": "bop",
+          "files_to_modify": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo build --package bop-cli",
+            "expected": "Build succeeds"
+          },
+          "status": "completed",
+          "notes": "Added Resume command variant at line 114-117 with id: String parameter following the pattern of Pause/Kill commands. Added match arm in main() at line 583 calling cards::cmd_resume(&root, &id).await. Created stub cmd_resume function in cards.rs (returns unimplemented error) to enable build to succeed. Build verified successful with cargo build --package bop."
+        },
+        {
+          "id": "subtask-4-2",
+          "description": "Add cmd_resume implementation in cards.rs",
+          "service": "bop",
+          "files_to_modify": [
+            "crates/bop-cli/src/cards.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/cards.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo build --package bop-cli",
+            "expected": "Build succeeds"
+          },
+          "status": "completed",
+          "notes": "Implemented cmd_resume that: (1) scans both flat and team-based pending/ directories for .bop/.jobcard cards, (2) reads meta.json for each card, (3) filters for cards with paused_at set, (4) clears paused_at field and writes meta back, (5) re-renders thumbnail, (6) prints '▶  queued for dispatch: <id>' for each resumed card. Handles cases where no pending cards exist or no paused cards found. Build verified successful with cargo build --package bop."
+        },
+        {
+          "id": "subtask-4-3",
+          "description": "Wire Resume command in main.rs match block",
+          "service": "bop",
+          "files_to_modify": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo build --package bop-cli",
+            "expected": "Build succeeds"
+          },
+          "status": "completed",
+          "notes": "Resume command already wired at line 583: Command::Resume { id } => cards::cmd_resume(&root, &id).await. This was completed in subtask-4-1. Verified with successful cargo build --package bop. No changes needed."
+        }
+      ]
+    },
+    {
+      "id": "phase-5-retry-transient",
+      "name": "Implement bop retry-transient",
+      "type": "implementation",
+      "description": "Add retry-transient command to retry only transient failures",
+      "depends_on": [
+        "phase-2-dispatcher-exit-code"
+      ],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-5-1",
+          "description": "Define TRANSIENT_PATTERNS const in cards.rs",
+          "service": "bop",
+          "files_to_modify": [
+            "crates/bop-cli/src/cards.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cargo build --package bop-cli",
+            "expected": "Build succeeds"
+          },
+          "status": "completed",
+          "notes": "Added TRANSIENT_PATTERNS const with 11 patterns (rate limit, 429, 503, timeout, connection refused, network, ECONNRESET, EX_TEMPFAIL, name resolution failed, no route to host, 524). Placed after imports with doc comment explaining usage by bop retry-transient. Build verified successful with cargo build --package bop."
+        },
+        {
+          "id": "subtask-5-2",
+          "description": "Add RetryTransient command variant with --all flag",
+          "service": "bop",
+          "files_to_modify": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo build --package bop-cli",
+            "expected": "Build succeeds"
+          },
+          "status": "completed",
+          "notes": "Added RetryTransient command variant at line 110-117 with id: Option<String> and #[arg(long)] all: bool parameters following the pattern of other commands. Added match arm in main() at line 591-593 calling cards::cmd_retry_transient(&root, id.as_deref(), all). Created stub cmd_retry_transient function in cards.rs that returns unimplemented errors for now (will be implemented in subtask-5-3). Build verified successful with cargo build --package bop."
+        },
+        {
+          "id": "subtask-5-3",
+          "description": "Add cmd_retry_transient implementation",
+          "service": "bop",
+          "files_to_modify": [
+            "crates/bop-cli/src/cards.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/cards.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo build --package bop-cli",
+            "expected": "Build succeeds"
+          },
+          "status": "completed",
+          "notes": "Implemented cmd_retry_transient that: (1) added is_transient_failure helper function that checks exit_code==75, meta.failure_reason, and last line of logs/stderr against TRANSIENT_PATTERNS using case-insensitive matching, (2) handles both single card ID and scan-all-failed modes, (3) for single card mode: validates card is in failed state, updates meta (increment retry_count, clear failure_reason/exit_code), resets Failed stages to Pending, renames to appropriate pending directory preserving team structure, (4) for scan mode: scans both flat and team-based failed/ directories, filters by transient check (or --all flag bypasses), updates meta same as single mode, prints skip messages for non-transient failures with reason, (5) logs lineage events and re-renders thumbnails for all retried cards. Build verified successful with cargo build --package bop."
+        },
+        {
+          "id": "subtask-5-4",
+          "description": "Wire RetryTransient command in main.rs",
+          "service": "bop",
+          "files_to_modify": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo build --package bop-cli",
+            "expected": "Build succeeds"
+          },
+          "status": "completed",
+          "notes": "RetryTransient command already fully wired at lines 590-592: Command::RetryTransient { id, all } => cards::cmd_retry_transient(&root, id.as_deref(), all). This was completed in subtask-5-2. Verified with successful cargo build --package bop. No changes needed."
+        }
+      ]
+    },
+    {
+      "id": "phase-6-testing",
+      "name": "Testing and Documentation",
+      "type": "implementation",
+      "description": "Run make check and create sample output documentation",
+      "depends_on": [
+        "phase-3-pause-command",
+        "phase-4-resume-command",
+        "phase-5-retry-transient"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-6-1",
+          "description": "Run make check to verify all tests pass",
+          "service": "bop",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "make check",
+            "expected": "All tests, clippy, and fmt checks pass"
+          },
+          "status": "completed",
+          "notes": "All tests, clippy, and fmt checks pass. Fixed test code Meta initializers to include exit_code and paused_at fields. Fixed clippy warning by using rfind instead of filter().next_back(). Applied cargo fmt to fix formatting.",
+          "updated_at": "2026-03-07T08:43:57.774738+00:00"
+        },
+        {
+          "id": "subtask-6-2",
+          "description": "Create output/result.md with sample command outputs",
+          "service": "bop",
+          "files_to_modify": [],
+          "files_to_create": [
+            "output/result.md"
+          ],
+          "patterns_from": [],
+          "verification": {
+            "type": "manual",
+            "instructions": "Verify output/result.md exists and contains sample outputs for all three commands"
+          },
+          "status": "completed",
+          "notes": "Created comprehensive output/result.md with sample outputs for all three commands: (1) bop pause - shows pausing multiple cards, nothing running case, and race condition handling, (2) bop resume - shows resuming paused cards and no paused cards case, (3) bop retry-transient - shows single card retry, scanning with transient filtering, --all flag bypassing filter, and no failed cards case. Also documented transient failure patterns and meta field updates (paused_at, exit_code, failure_reason)."
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_phases": 6,
+    "total_subtasks": 15,
+    "services_involved": [
+      "bop"
+    ],
+    "parallelism": {
+      "max_parallel_phases": 3,
+      "parallel_groups": [
+        {
+          "phases": [
+            "phase-2-dispatcher-exit-code",
+            "phase-3-pause-command",
+            "phase-4-resume-command"
+          ],
+          "reason": "All depend only on phase-1, modify different code sections"
+        }
+      ],
+      "recommended_workers": 1,
+      "speedup_estimate": "Sequential execution recommended - phases modify overlapping files"
+    },
+    "startup_command": "source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 023 --parallel 1"
+  },
+  "verification_strategy": {
+    "risk_level": "medium",
+    "skip_validation": false,
+    "test_creation_phase": "post_implementation",
+    "test_types_required": [
+      "unit"
+    ],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      "bop pause stops running adapters and moves cards to pending/ with paused_at timestamp",
+      "bop pause does NOT double-move cards that exit voluntarily with code 75",
+      "bop pause handles race conditions with concurrent dispatcher",
+      "bop resume clears paused_at markers from pending cards",
+      "bop retry-transient uses TRANSIENT_PATTERNS const",
+      "bop retry-transient --all retries all failed cards regardless of reason",
+      "exit_code field written to meta.json on failure",
+      "failure_reason populated from stderr last line on failure",
+      "make check passes"
+    ],
+    "verification_steps": [
+      {
+        "name": "Unit Tests",
+        "command": "cargo test",
+        "expected_outcome": "All tests pass",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Clippy Lints",
+        "command": "cargo clippy -- -D warnings",
+        "expected_outcome": "No warnings or errors",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Format Check",
+        "command": "cargo fmt --check",
+        "expected_outcome": "All files formatted",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Full Make Check",
+        "command": "make check",
+        "expected_outcome": "All checks pass",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      }
+    ],
+    "reasoning": "Medium risk change adding new CLI commands with process management - requires unit tests and linting to ensure correctness"
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": true,
+      "commands": [
+        "cargo test"
+      ],
+      "minimum_coverage": null
+    },
+    "integration_tests": {
+      "required": false,
+      "commands": [],
+      "services_to_test": []
+    },
+    "e2e_tests": {
+      "required": false,
+      "commands": [],
+      "flows": []
+    },
+    "browser_verification": {
+      "required": false,
+      "pages": []
+    },
+    "database_verification": {
+      "required": false,
+      "checks": []
+    }
+  },
+  "qa_signoff": {
+    "status": "approved",
+    "timestamp": "2026-03-07T08:53:17.597342+00:00",
+    "qa_session": 1,
+    "report_file": "qa_report.md",
+    "tests_passed": {
+      "unit": "442/442",
+      "integration": "N/A",
+      "e2e": "N/A"
+    },
+    "verified_by": "qa_agent",
+    "acceptance_criteria_met": 8,
+    "issues_found": {
+      "critical": 0,
+      "major": 0,
+      "minor": 0
+    }
+  },
+  "last_updated": "2026-03-07T08:53:17.597597+00:00",
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2026-03-07T08:51:00.536159+00:00",
+      "issues": [],
+      "duration_seconds": 280.41
+    },
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2026-03-07T08:53:44.119399+00:00",
+      "issues": [],
+      "duration_seconds": 409.08
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 2,
+    "last_iteration": 1,
+    "last_status": "approved",
+    "issues_by_type": {}
+  },
+  "status": "human_review",
+  "planStatus": "review",
+  "reviewReason": "completed",
+  "updated_at": "2026-03-07T23:57:36.608Z",
+  "xstateState": "human_review",
+  "executionPhase": "complete"
+}

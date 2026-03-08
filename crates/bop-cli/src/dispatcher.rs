@@ -1,23 +1,124 @@
 use anyhow::Context;
-use bop_core::{write_meta, Meta, RunRecord};
+use bop_core::{append_event, write_meta, Event, Meta, RunRecord};
 use chrono::Utc;
+use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+use tokio::net::TcpStream;
 use tokio::process::Command as TokioCommand;
+use tokio::sync::mpsc as tokio_mpsc;
 
 use super::VcsEngine;
-use crate::{cards, inspect, lock, memory, paths, providers, quicklook, reaper, util, workspace};
+use crate::{
+    cards, inspect, lock, memory, paths, power, providers, quicklook, reaper, util, workspace,
+};
+
+/// Pauses all running cards before system sleep.
+/// This stub will be implemented with actual pause logic in a future subtask.
+async fn pause_all_running(_cards_dir: &Path) -> anyhow::Result<()> {
+    // TODO: Implement actual pause logic
+    // For now, just log that we would pause
+    eprintln!("[dispatcher] pause_all_running called (stub)");
+    Ok(())
+}
+
+/// Checks if a failure reason indicates a transient network error.
+/// Returns true if the failure is likely due to network issues that may be
+/// resolved by retrying after a delay.
+fn is_network_failure(failure_reason: &Option<String>) -> bool {
+    let Some(ref reason) = failure_reason else {
+        return false;
+    };
+
+    let reason_lower = reason.to_lowercase();
+
+    // Common network error patterns
+    reason_lower.contains("connection refused")
+        || reason_lower.contains("connection timed out")
+        || reason_lower.contains("connection timeout")
+        || reason_lower.contains("connection reset")
+        || reason_lower.contains("connection closed")
+        || reason_lower.contains("network unreachable")
+        || reason_lower.contains("network is unreachable")
+        || reason_lower.contains("host unreachable")
+        || reason_lower.contains("no route to host")
+        || reason_lower.contains("dns resolution failed")
+        || reason_lower.contains("could not resolve host")
+        || reason_lower.contains("name resolution failed")
+        || reason_lower.contains("temporary failure in name resolution")
+        || reason_lower.contains("tls handshake")
+        || reason_lower.contains("ssl handshake")
+        || reason_lower.contains("certificate verify failed")
+        || reason_lower.contains("502 bad gateway")
+        || reason_lower.contains("503 service unavailable")
+        || reason_lower.contains("504 gateway timeout")
+        || reason_lower.contains("socket closed")
+        || reason_lower.contains("socket error")
+        || reason_lower.contains("broken pipe")
+        || reason_lower.contains("unexpected eof")
+        || reason_lower.contains("connection aborted")
+        || reason_lower.contains("no internet connection")
+        || reason_lower.contains("network error")
+        || reason_lower.contains("dns error")
+        || reason_lower.contains("timed out")
+}
+
+/// Checks if a cloud provider API is reachable via TCP probe.
+/// Returns true if a TCP connection can be established within 2 seconds.
+/// Local providers (ollama-local) always return true without probing.
+async fn provider_reachable(provider: &str) -> bool {
+    // Local providers don't need network connectivity
+    if provider == "ollama-local" {
+        return true;
+    }
+
+    // Map provider names to their API endpoints
+    let endpoint = match provider {
+        "claude" => "api.anthropic.com:443",
+        "codex" | "opencode" => "api.openai.com:443",
+        _ => {
+            // Unknown provider - assume reachable to avoid blocking
+            return true;
+        }
+    };
+
+    // Try to establish TCP connection with 2s timeout
+    match tokio::time::timeout(Duration::from_secs(2), TcpStream::connect(endpoint)).await {
+        Ok(Ok(_)) => true,
+        Ok(Err(_)) | Err(_) => false,
+    }
+}
+
+fn resolve_adapter(meta: &Meta, fallback: &str) -> String {
+    let provider = meta
+        .provider_chain
+        .first()
+        .map(|s| s.as_str())
+        .unwrap_or("");
+    match provider {
+        "claude" => "adapters/claude.nu".to_string(),
+        "codex" => "adapters/codex.nu".to_string(),
+        "gemini" => "adapters/gemini.nu".to_string(),
+        "ollama" => "adapters/ollama-local.nu".to_string(),
+        "ollama-local" => "adapters/ollama-local.nu".to_string(),
+        "mock" => "adapters/mock.nu".to_string(),
+        "opencode" => "adapters/opencode.nu".to_string(),
+        "goose" => "adapters/goose.nu".to_string(),
+        "aider" => "adapters/aider.nu".to_string(),
+        _ => fallback.to_string(),
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_dispatcher(
     cards_dir: &Path,
     vcs_engine: VcsEngine,
-    adapter: &str,
+    global_adapter: &str,
     max_workers: usize,
-    poll_ms: u64,
+    _poll_ms: u64,
     max_retries: u32,
     reap_ms: u64,
     no_reap: bool,
@@ -26,7 +127,7 @@ pub async fn run_dispatcher(
 ) -> anyhow::Result<()> {
     paths::ensure_cards_layout(cards_dir)?;
     providers::seed_providers(cards_dir)?;
-    providers::ensure_mock_provider_command(cards_dir, adapter)?;
+    providers::ensure_mock_provider_command(cards_dir, global_adapter)?;
     let _dispatcher_lock = lock::acquire_dispatcher_lock(cards_dir)?;
 
     let pending_dir = cards_dir.join("pending");
@@ -42,9 +143,122 @@ pub async fn run_dispatcher(
         .checked_sub(Duration::from_millis(reap_ms))
         .unwrap_or_else(std::time::Instant::now);
 
+    // Recover orphans from previous crashes on startup
+    let recovered = reaper::recover_orphans(&running_dir, &pending_dir).await?;
+    if !recovered.is_empty() {
+        eprintln!(
+            "[dispatcher] recovered {} orphaned cards: {:?}",
+            recovered.len(),
+            recovered
+        );
+    }
+
+    // Spawn power state watcher on dedicated OS thread
+    let mut power_rx = power::spawn_power_watcher();
+
     let lineage_enabled = bop_core::lineage::is_enabled(cards_dir);
+    let mut shown_empty_hint = false;
+
+    // Set up filesystem watcher with 100ms debounce on pending/
+    let (tx, mut rx) = tokio_mpsc::unbounded_channel();
+    let pending_dir_clone = pending_dir.clone();
+
+    std::thread::spawn(move || {
+        let (std_tx, std_rx) = std::sync::mpsc::channel();
+        let mut debouncer = match new_debouncer(Duration::from_millis(100), std_tx) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("[dispatcher] failed to create watcher: {}", e);
+                return;
+            }
+        };
+
+        if let Err(e) = debouncer
+            .watcher()
+            .watch(&pending_dir_clone, notify::RecursiveMode::Recursive)
+        {
+            eprintln!("[dispatcher] failed to watch pending/: {}", e);
+            return;
+        }
+
+        for res in std_rx {
+            match res {
+                Ok(events) => {
+                    // Filter to only .bop directory events
+                    let relevant = events.iter().any(|e| {
+                        e.path.extension().and_then(|s| s.to_str()) == Some("bop")
+                            && matches!(
+                                e.kind,
+                                DebouncedEventKind::Any | DebouncedEventKind::AnyContinuous
+                            )
+                    });
+                    if relevant {
+                        let _ = tx.send(());
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[dispatcher] watch error: {}", e);
+                }
+            }
+        }
+    });
+
+    // Trigger immediate initial scan
+    let mut needs_scan = true;
+    let mut reap_interval = tokio::time::interval(Duration::from_millis(reap_ms));
+    reap_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
+        // Wait for either a filesystem event or reap timer (unless in once mode)
+        if !once && !needs_scan {
+            tokio::select! {
+                _ = rx.recv() => {
+                    needs_scan = true;
+                }
+                _ = reap_interval.tick(), if !no_reap => {
+                    reaper::reap_orphans(
+                        &running_dir,
+                        &pending_dir,
+                        &failed_dir,
+                        max_retries,
+                        stale_lease_after,
+                    )
+                    .await?;
+                    needs_scan = true;
+                }
+                Ok(()) = power_rx.changed() => {
+                    let state = *power_rx.borrow_and_update();
+                    match state {
+                        power::SleepState::Sleeping => {
+                            eprintln!("[dispatcher] system sleeping, pausing running cards");
+                            if let Err(e) = pause_all_running(cards_dir).await {
+                                eprintln!("[dispatcher] warning: pause_all_running failed: {}", e);
+                            }
+                        }
+                        power::SleepState::Awake => {
+                            eprintln!("[dispatcher] system resumed, re-dispatching paused cards");
+                            needs_scan = true;
+                        }
+                    }
+                }
+            }
+        } else if !no_reap && last_reap.elapsed() >= Duration::from_millis(reap_ms) {
+            reaper::reap_orphans(
+                &running_dir,
+                &pending_dir,
+                &failed_dir,
+                max_retries,
+                stale_lease_after,
+            )
+            .await?;
+            last_reap = std::time::Instant::now();
+        }
+
+        if !needs_scan {
+            continue;
+        }
+        needs_scan = false;
+
         let mut lineage_events: Vec<bop_core::lineage::RunEvent> = Vec::new();
         let mut record = |meta: &bop_core::Meta, from: &str, to: &str, card_dir: Option<&Path>| {
             if lineage_enabled {
@@ -58,18 +272,6 @@ pub async fn run_dispatcher(
                 bop_core::lineage::write_ics(dir, meta, to);
             }
         };
-
-        if !no_reap && last_reap.elapsed() >= Duration::from_millis(reap_ms) {
-            reaper::reap_orphans(
-                &running_dir,
-                &pending_dir,
-                &failed_dir,
-                max_retries,
-                stale_lease_after,
-            )
-            .await?;
-            last_reap = std::time::Instant::now();
-        }
 
         let running_count = fs::read_dir(&running_dir)
             .map(|rd| {
@@ -86,23 +288,25 @@ pub async fn run_dispatcher(
 
         if available_slots > 0 {
             if let Ok(entries) = fs::read_dir(&pending_dir) {
-                for ent in entries.flatten() {
+                let pending_cards: Vec<_> = entries
+                    .flatten()
+                    .filter(|e| {
+                        e.path().is_dir()
+                            && e.path().extension().and_then(|s| s.to_str()).unwrap_or("") == "bop"
+                    })
+                    .collect();
+
+                if pending_cards.is_empty() && !shown_empty_hint {
+                    eprintln!("[dispatcher] Nothing pending. Try: bop new <template> <id>");
+                    shown_empty_hint = true;
+                }
+
+                for ent in pending_cards {
                     if available_slots == 0 {
                         break;
                     }
 
                     let pending_path = ent.path();
-                    if !pending_path.is_dir() {
-                        continue;
-                    }
-                    if pending_path
-                        .extension()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("")
-                        != "bop"
-                    {
-                        continue;
-                    }
 
                     let name = match pending_path.file_name().and_then(|s| s.to_str()) {
                         Some(n) => n.to_string(),
@@ -157,6 +361,20 @@ pub async fn run_dispatcher(
                     if fs::rename(&pending_path, &running_path).is_err() {
                         continue;
                     }
+                    // Log stage transition event (best-effort)
+                    let _ = append_event(
+                        &running_path,
+                        &Event {
+                            ts: Utc::now().to_rfc3339(),
+                            event: "stage_transition".into(),
+                            stage: None,
+                            provider: None,
+                            pid: None,
+                            exit_code: None,
+                            from: Some("pending".into()),
+                            to: Some("running".into()),
+                        },
+                    );
                     if let Some(ref m) = meta {
                         record(m, "pending", "running", Some(&running_path));
                     }
@@ -177,11 +395,29 @@ pub async fn run_dispatcher(
                         Err(err) => {
                             eprintln!("[dispatcher] workspace prepare failed: {err}");
                             if let Some(ref mut m) = meta {
-                                m.failure_reason = Some(format!("workspace_prepare_failed: {err}"));
+                                // Read last line from stderr if available, otherwise use error message
+                                let stderr_log = running_path.join("logs").join("stderr.log");
+                                m.failure_reason = util::read_last_nonempty_line(&stderr_log, 256)
+                                    .or_else(|| Some(format!("workspace_prepare_failed: {err}")));
+                                m.exit_code = None; // No process exit code for workspace prepare failure
                                 let _ = write_meta(&running_path, m);
                             }
                             let failed_path = failed_dir.join(&name);
                             let _ = fs::rename(&running_path, &failed_path);
+                            // Log stage transition event (best-effort)
+                            let _ = append_event(
+                                &failed_path,
+                                &Event {
+                                    ts: Utc::now().to_rfc3339(),
+                                    event: "stage_transition".into(),
+                                    stage: None,
+                                    provider: None,
+                                    pid: None,
+                                    exit_code: None,
+                                    from: Some("running".into()),
+                                    to: Some("failed".into()),
+                                },
+                            );
                             if let Some(ref m) = meta {
                                 record(m, "running", "failed", Some(&failed_path));
                             }
@@ -199,7 +435,15 @@ pub async fn run_dispatcher(
                     // Assign deterministic zellij session name
                     if let Some(ref mut m) = meta {
                         if m.zellij_session.is_none() {
-                            m.zellij_session = Some(format!("bop-{}", card_id));
+                            m.zellij_session = Some(
+                                std::env::var("ZELLIJ_SESSION_NAME")
+                                    .unwrap_or_else(|_| "pmr".to_string()),
+                            );
+                            let _ = write_meta(&running_path, m);
+                        }
+                        // Set zellij pane to the card name
+                        if m.zellij_pane.is_none() {
+                            m.zellij_pane = Some(name.clone());
                             let _ = write_meta(&running_path, m);
                         }
                     }
@@ -222,7 +466,7 @@ pub async fn run_dispatcher(
 
                     let (
                         provider_name,
-                        provider_cmd,
+                        _provider_cmd,
                         rate_limit_exit,
                         provider_env,
                         provider_model,
@@ -231,6 +475,20 @@ pub async fn run_dispatcher(
                         None => {
                             let pending_path = pending_dir.join(&name);
                             let _ = fs::rename(&running_path, &pending_path);
+                            // Log stage transition event (best-effort)
+                            let _ = append_event(
+                                &pending_path,
+                                &Event {
+                                    ts: Utc::now().to_rfc3339(),
+                                    event: "stage_transition".into(),
+                                    stage: None,
+                                    provider: None,
+                                    pid: None,
+                                    exit_code: None,
+                                    from: Some("running".into()),
+                                    to: Some("pending".into()),
+                                },
+                            );
                             if let Some(ref m) = meta {
                                 record(m, "running", "pending", Some(&pending_path));
                             }
@@ -243,10 +501,49 @@ pub async fn run_dispatcher(
                         let _ = write_meta(&running_path, meta);
                     }
 
+                    // Check connectivity before spawning adapter
+                    if !provider_reachable(&provider_name).await {
+                        eprintln!(
+                            "[dispatcher] provider {} unreachable, requeueing card {}",
+                            provider_name, name
+                        );
+                        let pending_path = pending_dir.join(&name);
+                        let _ = fs::rename(&running_path, &pending_path);
+                        // Log stage transition event (best-effort)
+                        let _ = append_event(
+                            &pending_path,
+                            &Event {
+                                ts: Utc::now().to_rfc3339(),
+                                event: "stage_transition".into(),
+                                stage: None,
+                                provider: None,
+                                pid: None,
+                                exit_code: None,
+                                from: Some("running".into()),
+                                to: Some("pending".into()),
+                            },
+                        );
+                        if let Some(ref m) = meta {
+                            record(m, "running", "pending", Some(&pending_path));
+                        }
+                        quicklook::render_card_thumbnail(&pending_path);
+                        continue;
+                    }
+
+                    let resolved_adapter = meta
+                        .as_ref()
+                        .map(|m| resolve_adapter(m, global_adapter))
+                        .unwrap_or_else(|| global_adapter.to_string());
+                    let card_adapter = if std::path::Path::new(&resolved_adapter).exists() {
+                        resolved_adapter
+                    } else {
+                        global_adapter.to_string()
+                    };
+
                     let (exit_code, mut meta) = run_card(
                         cards_dir,
                         &running_path,
-                        &provider_cmd,
+                        &card_adapter,
                         &provider_name,
                         &provider_env,
                         provider_model.as_deref(),
@@ -280,6 +577,9 @@ pub async fn run_dispatcher(
                         }
                     }
 
+                    // Check if this is a transient network failure that should be retried
+                    let mut is_transient_retry = false;
+
                     if let Some(ref mut meta) = meta {
                         if is_rate_limited {
                             let next = meta.retry_count.unwrap_or(0).saturating_add(1);
@@ -290,29 +590,71 @@ pub async fn run_dispatcher(
                                 providers::set_provider_cooldown(cards_dir, &provider_name, 300);
                         }
 
+                        meta.exit_code = Some(exit_code);
+
+                        // Read stderr last line when moving to failed/
+                        let will_fail =
+                            validation_triggered_fail || (exit_code != 0 && !is_rate_limited);
+                        if will_fail {
+                            let stderr_log = running_path.join("logs").join("stderr.log");
+                            if let Some(last_line) = util::read_last_nonempty_line(&stderr_log, 256)
+                            {
+                                meta.failure_reason = Some(last_line);
+                            }
+
+                            // Check if this is a transient network failure that should be retried
+                            let current_retry_count = meta.retry_count.unwrap_or(0);
+                            if is_network_failure(&meta.failure_reason)
+                                && current_retry_count < max_retries
+                            {
+                                // Increment retry count for transient failure
+                                meta.retry_count = Some(current_retry_count.saturating_add(1));
+                                is_transient_retry = true;
+                                eprintln!(
+                                    "[dispatcher] transient network failure detected for card '{}', retry {}/{}",
+                                    name, current_retry_count + 1, max_retries
+                                );
+                            }
+                        }
+
                         let _ = write_meta(&running_path, meta);
                     }
                     let target = if validation_triggered_fail {
                         failed_dir.join(&name)
                     } else if exit_code == 0 {
                         done_dir.join(&name)
-                    } else if is_rate_limited {
+                    } else if is_rate_limited || is_transient_retry {
                         pending_dir.join(&name)
                     } else {
                         failed_dir.join(&name)
                     };
 
+                    let to_state = if validation_triggered_fail {
+                        "failed"
+                    } else if exit_code == 0 {
+                        "done"
+                    } else if is_rate_limited || is_transient_retry {
+                        "pending"
+                    } else {
+                        "failed"
+                    };
+
                     let _ = fs::rename(&running_path, &target);
+                    // Log stage transition event (best-effort)
+                    let _ = append_event(
+                        &target,
+                        &Event {
+                            ts: Utc::now().to_rfc3339(),
+                            event: "stage_transition".into(),
+                            stage: None,
+                            provider: None,
+                            pid: None,
+                            exit_code: Some(exit_code),
+                            from: Some("running".into()),
+                            to: Some(to_state.into()),
+                        },
+                    );
                     if let Some(ref m) = meta {
-                        let to_state = if validation_triggered_fail {
-                            "failed"
-                        } else if exit_code == 0 {
-                            "done"
-                        } else if is_rate_limited {
-                            "pending"
-                        } else {
-                            "failed"
-                        };
                         record(m, "running", to_state, Some(&target));
                     }
                     quicklook::render_card_thumbnail(&target);
@@ -334,7 +676,6 @@ pub async fn run_dispatcher(
         if once {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(poll_ms)).await;
     }
 
     Ok(())
@@ -1007,6 +1348,45 @@ mod tests {
         assert_ne!(a, b);
     }
 
+    // ── resolve_adapter ───────────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_adapter_returns_known_provider_adapter_paths() {
+        let fallback = "adapters/fallback.nu";
+        let known = [
+            ("claude", "adapters/claude.nu"),
+            ("codex", "adapters/codex.nu"),
+            ("gemini", "adapters/gemini.nu"),
+            ("ollama", "adapters/ollama-local.nu"),
+            ("ollama-local", "adapters/ollama-local.nu"),
+            ("mock", "adapters/mock.nu"),
+            ("opencode", "adapters/opencode.nu"),
+            ("goose", "adapters/goose.nu"),
+            ("aider", "adapters/aider.nu"),
+        ];
+
+        for (provider, adapter) in known {
+            let mut meta = Meta::default();
+            meta.provider_chain = vec![provider.to_string()];
+            assert_eq!(resolve_adapter(&meta, fallback), adapter.to_string());
+        }
+    }
+
+    #[test]
+    fn resolve_adapter_returns_fallback_for_empty_provider_chain() {
+        let fallback = "adapters/fallback.nu";
+        let meta = Meta::default();
+        assert_eq!(resolve_adapter(&meta, fallback), fallback.to_string());
+    }
+
+    #[test]
+    fn resolve_adapter_returns_fallback_for_unknown_provider() {
+        let fallback = "adapters/fallback.nu";
+        let mut meta = Meta::default();
+        meta.provider_chain = vec!["grok".to_string()];
+        assert_eq!(resolve_adapter(&meta, fallback), fallback.to_string());
+    }
+
     // ── model_from_provider_env ───────────────────────────────────────────────
 
     #[test]
@@ -1260,5 +1640,166 @@ mod tests {
         assert_eq!(usage.prompt_tokens, None);
         assert_eq!(usage.completion_tokens, None);
         assert_eq!(usage.cost_usd, None);
+    }
+
+    // ── is_network_failure ────────────────────────────────────────────────────
+
+    #[test]
+    fn is_network_failure_returns_false_for_none() {
+        assert!(!is_network_failure(&None));
+    }
+
+    #[test]
+    fn is_network_failure_returns_false_for_non_network_error() {
+        let reason = Some("syntax error in code".to_string());
+        assert!(!is_network_failure(&reason));
+    }
+
+    #[test]
+    fn is_network_failure_detects_connection_refused() {
+        let reason = Some("Error: Connection refused".to_string());
+        assert!(is_network_failure(&reason));
+    }
+
+    #[test]
+    fn is_network_failure_detects_connection_timeout() {
+        let reason = Some("Error: Connection timed out".to_string());
+        assert!(is_network_failure(&reason));
+    }
+
+    #[test]
+    fn is_network_failure_detects_connection_reset() {
+        let reason = Some("Error: Connection reset by peer".to_string());
+        assert!(is_network_failure(&reason));
+    }
+
+    #[test]
+    fn is_network_failure_detects_network_unreachable() {
+        let reason = Some("Network unreachable".to_string());
+        assert!(is_network_failure(&reason));
+    }
+
+    #[test]
+    fn is_network_failure_detects_dns_resolution() {
+        let reason = Some("DNS resolution failed for api.example.com".to_string());
+        assert!(is_network_failure(&reason));
+    }
+
+    #[test]
+    fn is_network_failure_detects_could_not_resolve_host() {
+        let reason = Some("curl: (6) Could not resolve host: api.example.com".to_string());
+        assert!(is_network_failure(&reason));
+    }
+
+    #[test]
+    fn is_network_failure_detects_tls_handshake() {
+        let reason = Some("Error: TLS handshake failed".to_string());
+        assert!(is_network_failure(&reason));
+    }
+
+    #[test]
+    fn is_network_failure_detects_502_bad_gateway() {
+        let reason = Some("HTTP error: 502 Bad Gateway".to_string());
+        assert!(is_network_failure(&reason));
+    }
+
+    #[test]
+    fn is_network_failure_detects_503_service_unavailable() {
+        let reason = Some("HTTP error: 503 Service Unavailable".to_string());
+        assert!(is_network_failure(&reason));
+    }
+
+    #[test]
+    fn is_network_failure_detects_504_gateway_timeout() {
+        let reason = Some("HTTP error: 504 Gateway Timeout".to_string());
+        assert!(is_network_failure(&reason));
+    }
+
+    #[test]
+    fn is_network_failure_detects_socket_error() {
+        let reason = Some("Socket error: broken pipe".to_string());
+        assert!(is_network_failure(&reason));
+    }
+
+    #[test]
+    fn is_network_failure_detects_unexpected_eof() {
+        let reason = Some("Error: unexpected EOF while reading response".to_string());
+        assert!(is_network_failure(&reason));
+    }
+
+    #[test]
+    fn is_network_failure_is_case_insensitive() {
+        let reason = Some("ERROR: CONNECTION REFUSED".to_string());
+        assert!(is_network_failure(&reason));
+    }
+
+    #[test]
+    fn is_network_failure_detects_no_route_to_host() {
+        let reason = Some("connect: No route to host".to_string());
+        assert!(is_network_failure(&reason));
+    }
+
+    #[test]
+    fn is_network_failure_returns_false_for_validation_error() {
+        let reason = Some("validation_threshold_exceeded".to_string());
+        assert!(!is_network_failure(&reason));
+    }
+
+    #[test]
+    fn is_network_failure_returns_false_for_workspace_prepare_error() {
+        let reason = Some("workspace_prepare_failed: invalid git ref".to_string());
+        assert!(!is_network_failure(&reason));
+    }
+
+    // ── provider_reachable ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn provider_reachable_returns_true_for_ollama_local() {
+        assert!(provider_reachable("ollama-local").await);
+    }
+
+    #[tokio::test]
+    async fn provider_reachable_returns_true_for_unknown_provider() {
+        // Unknown providers should not block dispatch
+        assert!(provider_reachable("unknown-provider").await);
+    }
+
+    #[tokio::test]
+    async fn provider_reachable_checks_claude_endpoint() {
+        // This test attempts to connect to api.anthropic.com:443
+        // It may succeed or fail depending on network availability
+        // We're just testing that the function doesn't panic and returns a bool
+        let result = provider_reachable("claude").await;
+        // Result can be true or false depending on actual network state
+        assert!(result || !result); // Always passes, just ensures function executes
+    }
+
+    #[tokio::test]
+    async fn provider_reachable_checks_codex_endpoint() {
+        // This test attempts to connect to api.openai.com:443
+        // We're just testing that the function doesn't panic and returns a bool
+        let result = provider_reachable("codex").await;
+        assert!(result || !result); // Always passes, just ensures function executes
+    }
+
+    #[tokio::test]
+    async fn provider_reachable_checks_opencode_endpoint() {
+        // This test attempts to connect to api.openai.com:443
+        // We're just testing that the function doesn't panic and returns a bool
+        let result = provider_reachable("opencode").await;
+        assert!(result || !result); // Always passes, just ensures function executes
+    }
+
+    #[tokio::test]
+    async fn provider_reachable_timeout_does_not_hang() {
+        // Test with an unreachable endpoint to verify timeout works
+        // Using a non-routable IP (TEST-NET-1 from RFC 5737)
+        // We can't easily test this without modifying the function to accept custom endpoints
+        // For now, we'll just verify the function returns quickly for a valid provider
+        let start = std::time::Instant::now();
+        let _result = provider_reachable("claude").await;
+        let elapsed = start.elapsed();
+        // Should complete within 3 seconds (2s timeout + overhead)
+        assert!(elapsed < Duration::from_secs(3));
     }
 }

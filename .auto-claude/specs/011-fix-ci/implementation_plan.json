@@ -1,0 +1,345 @@
+{
+  "feature": "Fix CI: Replace broken self-hosted workflow with cloud-based CI",
+  "workflow_type": "simple",
+  "workflow_rationale": "Single-service task with clear, sequential steps: delete broken workflow, create new workflow, verify existing workflows are valid, add badge to README. No complex dependencies or multi-service coordination needed.",
+  "phases": [
+    {
+      "id": "phase-1-implementation",
+      "name": "Replace Broken CI Workflow",
+      "type": "implementation",
+      "description": "Delete ai-coding-job.yml (broken self-hosted workflow) and create ci.yml (cloud-based CI using ubuntu-latest)",
+      "depends_on": [],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Delete broken ai-coding-job.yml workflow",
+          "service": "github_workflows",
+          "files_to_modify": [],
+          "files_to_delete": [
+            ".github/workflows/ai-coding-job.yml"
+          ],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "test ! -f .github/workflows/ai-coding-job.yml && echo 'OK' || echo 'FAIL'",
+            "expected": "OK"
+          },
+          "status": "completed",
+          "notes": "Successfully deleted .github/workflows/ai-coding-job.yml. Verification passed. Committed with message: auto-claude: subtask-1-1 - Delete broken ai-coding-job.yml workflow",
+          "updated_at": "2026-03-05T22:50:00.978752+00:00"
+        },
+        {
+          "id": "subtask-1-2",
+          "description": "Create ci.yml workflow with ubuntu-latest runner and make check",
+          "service": "github_workflows",
+          "files_to_modify": [],
+          "files_to_create": [
+            ".github/workflows/ci.yml"
+          ],
+          "patterns_from": [
+            ".github/workflows/repo-health.yml",
+            ".github/workflows/release.yml"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "grep -q 'runs-on: ubuntu-latest' .github/workflows/ci.yml && grep -q 'cargo test && cargo clippy' .github/workflows/ci.yml && echo 'OK' || echo 'FAIL'",
+            "expected": "OK"
+          },
+          "status": "completed",
+          "notes": "Created ci.yml workflow with ubuntu-latest runner running cargo test && cargo clippy. Follows patterns from repo-health.yml and release.yml. Verification passes successfully.",
+          "updated_at": "2026-03-05T22:51:34.000235+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-2-audit",
+      "name": "Audit Existing Workflows",
+      "type": "implementation",
+      "description": "Verify repo-health.yml and release.yml are valid cloud CI workflows (no changes needed)",
+      "depends_on": [
+        "phase-1-implementation"
+      ],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-2-1",
+          "description": "Audit repo-health.yml and release.yml for cloud compatibility",
+          "service": "github_workflows",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [
+            ".github/workflows/repo-health.yml",
+            ".github/workflows/release.yml"
+          ],
+          "verification": {
+            "type": "manual",
+            "instructions": "Verify both workflows use cloud runners (macos-latest), no self-hosted references, no bop serve dependencies. Both are already valid - no changes needed."
+          },
+          "status": "completed",
+          "notes": "Audit complete: both repo-health.yml and release.yml are cloud-compatible. Both use macos-latest runners, no self-hosted references, no bop serve dependencies. Created audit-report.md documenting findings.",
+          "updated_at": "2026-03-05T22:52:45.598203+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-3-badge",
+      "name": "Add CI Badge to README",
+      "type": "implementation",
+      "description": "Add GitHub Actions CI badge to README.md",
+      "depends_on": [
+        "phase-1-implementation"
+      ],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-3-1",
+          "description": "Add CI workflow badge to README.md after title",
+          "service": "readme",
+          "files_to_modify": [
+            "README.md"
+          ],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "grep -q '![CI](https://github.com/ryanmaclean/bop/actions/workflows/ci.yml/badge.svg)' README.md && echo 'OK' || echo 'FAIL'",
+            "expected": "OK"
+          },
+          "status": "completed",
+          "notes": "Added CI workflow badge to README.md after title. Badge displays build status from GitHub Actions ci.yml workflow.",
+          "updated_at": "2026-03-05T22:54:37.292575+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-4-verification",
+      "name": "Verify CI Changes Locally",
+      "type": "implementation",
+      "description": "Run make check locally to ensure the new CI workflow commands will pass",
+      "depends_on": [
+        "phase-1-implementation",
+        "phase-2-audit",
+        "phase-3-badge"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-4-1",
+          "description": "Run make check to verify all tests, clippy, and formatting pass",
+          "service": "bop",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "make check",
+            "expected": "All checks pass (exit code 0)"
+          },
+          "status": "completed",
+          "notes": "Successfully ran make check - all 318 unit tests, 10 dispatcher tests, 17 job control tests, 4 merge gate tests, and 91 additional tests passed. Clippy and formatting checks also passed with no warnings.",
+          "updated_at": "2026-03-05T22:56:04.490675+00:00"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_phases": 4,
+    "total_subtasks": 4,
+    "services_involved": [
+      "github_workflows",
+      "readme",
+      "bop"
+    ],
+    "parallelism": {
+      "max_parallel_phases": 2,
+      "parallel_groups": [
+        {
+          "phases": [
+            "phase-2-audit",
+            "phase-3-badge"
+          ],
+          "reason": "Both depend only on phase-1, operate on different file sets (workflows vs README)"
+        }
+      ],
+      "recommended_workers": 1,
+      "speedup_estimate": "Sequential is fine - task is quick and simple"
+    },
+    "startup_command": "source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 011 --parallel 1"
+  },
+  "verification_strategy": {
+    "risk_level": "low",
+    "skip_validation": false,
+    "test_creation_phase": "none",
+    "test_types_required": [],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      ".github/workflows/ci.yml exists with runs-on: ubuntu-latest",
+      "ai-coding-job.yml is deleted or rewritten to not silently fail",
+      "make check passes locally",
+      "CI badge added to README.md"
+    ],
+    "verification_steps": [
+      {
+        "name": "Verify ai-coding-job.yml deleted",
+        "command": "test ! -f .github/workflows/ai-coding-job.yml",
+        "expected_outcome": "File does not exist (exit code 0)",
+        "type": "command",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Verify ci.yml exists and uses cloud runner",
+        "command": "grep -q 'runs-on: ubuntu-latest' .github/workflows/ci.yml",
+        "expected_outcome": "Match found (exit code 0)",
+        "type": "command",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Run make check locally",
+        "command": "make check",
+        "expected_outcome": "All tests, clippy, and fmt checks pass",
+        "type": "command",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Verify CI badge in README",
+        "command": "grep -q 'github.com/ryanmaclean/bop/actions/workflows/ci.yml/badge.svg' README.md",
+        "expected_outcome": "Badge markdown found in README",
+        "type": "command",
+        "required": true,
+        "blocking": true
+      }
+    ],
+    "reasoning": "Low risk - only modifying CI configuration files (YAML) and adding a badge to README. No functional code changes. The new ci.yml runs existing make check commands that are already tested."
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": false,
+      "commands": [],
+      "minimum_coverage": null
+    },
+    "integration_tests": {
+      "required": false,
+      "commands": [],
+      "services_to_test": []
+    },
+    "e2e_tests": {
+      "required": false,
+      "commands": [],
+      "flows": []
+    },
+    "browser_verification": {
+      "required": false,
+      "pages": []
+    },
+    "database_verification": {
+      "required": false,
+      "checks": []
+    },
+    "custom_verification": {
+      "required": true,
+      "checks": [
+        {
+          "name": "CI workflow syntax valid",
+          "command": "yamllint .github/workflows/ci.yml || echo 'yamllint not installed - manual review required'",
+          "description": "Verify YAML syntax is valid"
+        },
+        {
+          "name": "All workflows use cloud runners",
+          "command": "! grep -r 'runs-on: self-hosted' .github/workflows/ || echo 'FAIL: self-hosted runners found'",
+          "description": "Ensure no self-hosted runner references remain"
+        }
+      ]
+    }
+  },
+  "qa_signoff": {
+    "status": "approved",
+    "timestamp": "2026-03-05T23:09:54.922168+00:00",
+    "qa_session": 2,
+    "report_file": "qa_report.md",
+    "tests_passed": {
+      "unit": "441/441",
+      "integration": "N/A",
+      "e2e": "N/A",
+      "custom_verification": "all"
+    },
+    "verified_by": "qa_agent",
+    "previous_issues_resolved": [
+      "CI command missing clippy error flag",
+      "CI command missing format check",
+      "Missing rust toolchain components",
+      "Missing rust cache action"
+    ],
+    "fix_commit": "536310c"
+  },
+  "last_updated": "2026-03-05T23:09:54.924697+00:00",
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "rejected",
+      "timestamp": "2026-03-05T23:00:36.429251+00:00",
+      "issues": [
+        {
+          "type": "critical",
+          "title": "CI command missing clippy error flag",
+          "location": ".github/workflows/ci.yml:20",
+          "fix_required": "Add -- -D warnings to cargo clippy command"
+        },
+        {
+          "type": "critical",
+          "title": "CI command missing format check",
+          "location": ".github/workflows/ci.yml:20",
+          "fix_required": "Add cargo fmt --check to CI command"
+        },
+        {
+          "type": "major",
+          "title": "Missing rust toolchain components",
+          "location": ".github/workflows/ci.yml:16-17",
+          "fix_required": "Add components: clippy, rustfmt to rust-toolchain action"
+        },
+        {
+          "type": "minor",
+          "title": "Missing rust cache action",
+          "location": ".github/workflows/ci.yml (after line 17)",
+          "fix_required": "Add Swatinem/rust-cache@v2 action"
+        }
+      ],
+      "duration_seconds": 250.9
+    },
+    {
+      "iteration": 2,
+      "status": "approved",
+      "timestamp": "2026-03-05T23:09:54.924694+00:00",
+      "issues": [],
+      "all_previous_issues_resolved": true
+    },
+    {
+      "iteration": 2,
+      "status": "approved",
+      "timestamp": "2026-03-05T23:10:09.553260+00:00",
+      "issues": [],
+      "duration_seconds": 294.87
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 3,
+    "last_iteration": 2,
+    "last_status": "approved",
+    "issues_by_type": {
+      "critical": 2,
+      "major": 1,
+      "minor": 1
+    }
+  },
+  "status": "human_review",
+  "planStatus": "review",
+  "reviewReason": "completed",
+  "updated_at": "2026-03-07T23:57:36.588Z",
+  "xstateState": "human_review",
+  "executionPhase": "complete"
+}

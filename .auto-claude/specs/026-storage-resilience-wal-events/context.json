@@ -1,0 +1,59 @@
+{
+  "files_to_modify": {
+    "bop-core": [
+      "crates/bop-core/src/lib.rs",
+      "crates/bop-core/Cargo.toml"
+    ],
+    "bop-cli": [
+      "crates/bop-cli/src/dispatcher.rs"
+    ],
+    "docs": [
+      "docs/storage-decision.md"
+    ]
+  },
+  "files_to_create": [
+    "docs/storage-decision.md",
+    "output/result.md"
+  ],
+  "files_to_reference": [
+    "crates/bop-core/src/lib.rs",
+    "docs/format-storage-contract.md"
+  ],
+  "patterns": {
+    "meta_struct": "Meta struct in lib.rs uses serde with optional fields, skip_serializing_if for None/empty",
+    "write_meta": "write_meta already uses tmp+rename atomicity (tempfile::Builder + persist) per spec 022",
+    "read_meta": "read_meta deserializes from bytes, validates, and hydrates typed metadata",
+    "error_handling": "Best-effort operations use 'let _ =' pattern (lines 369, 372 in dispatcher)",
+    "logging": "Uses eprintln! macro for warnings/info - no structured logging crate",
+    "tests": "Unit tests inline in #[cfg(test)] mod tests at end of lib.rs files",
+    "docs": "Markdown documentation in docs/ with clear sections, design principles, contracts"
+  },
+  "existing_implementations": {
+    "description": "Found tmp+rename atomicity already implemented in write_meta (spec 022). Meta struct has ~40 fields with serde derive. Dispatcher has 5 fs::rename calls for state transitions.",
+    "relevant_files": [
+      "crates/bop-core/src/lib.rs:633-661 (write_meta with tmp+rename)",
+      "crates/bop-core/src/lib.rs:624-631 (read_meta)",
+      "crates/bop-core/src/lib.rs:160-342 (Meta struct)",
+      "crates/bop-cli/src/dispatcher.rs:341,372,429,449,546 (fs::rename calls)"
+    ]
+  },
+  "dependencies": {
+    "current": [
+      "anyhow",
+      "chrono",
+      "serde",
+      "serde_json",
+      "tempfile",
+      "thiserror"
+    ],
+    "to_add": [
+      "blake3 (preferred) OR sha2+hex (fallback if blake3 not suitable)"
+    ]
+  },
+  "spec_requirements": {
+    "jsonl_wal": "Append logs/events.jsonl on meta_written and stage_transition events. Best-effort only (let _ = append_event)",
+    "checksum": "Add checksum field to Meta, compute sha256/blake3 of compact JSON with checksum=None",
+    "validation": "read_meta validates checksum, returns Err on mismatch. NO automated replay - caller handles recovery",
+    "storage_doc": "Document why filesystem+JSONL over SQLite/Dolt in docs/storage-decision.md"
+  }
+}

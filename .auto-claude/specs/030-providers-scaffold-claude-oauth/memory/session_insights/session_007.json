@@ -1,0 +1,153 @@
+{
+  "session_number": 7,
+  "timestamp": "2026-03-08T00:36:34.275238+00:00",
+  "subtasks_completed": [
+    "subtask-3-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/providers/history.rs",
+        "type": "new_module",
+        "insights": [
+          "JSONL append-only log implementation with O_APPEND for atomic writes on POSIX/APFS",
+          "HistoryEntry struct stores ts (milliseconds), provider name, primary_pct, secondary_pct as optional u8 values",
+          "append_history() auto-creates ~/.bop/provider-history.jsonl with parent directories",
+          "read_history() filters by provider, loads all entries into memory, then drains to keep last N",
+          "Silently skips malformed JSON lines without logging errors",
+          "Uses dirs::home_dir() for home directory resolution",
+          "5 unit tests with tempfile for isolation (roundtrip, missing file, malformed lines, path location, nested dirs)"
+        ]
+      },
+      {
+        "file": "crates/bop-cli/src/list.rs",
+        "type": "modified",
+        "insights": [
+          "Added git_root context plumbing through collect_card_groups() \u2192 collect_card_views()",
+          "Calls acplan::enrich_card_view() when git_root is Some to add plan phase/progress data to CardView",
+          "Uses acplan::find_git_root() once per list operation (not per card)",
+          "Passes git_root.as_deref() to preserve Option ergonomics through team card paths"
+        ]
+      },
+      {
+        "file": "crates/bop-cli/src/providers/mod.rs",
+        "type": "modified",
+        "insights": [
+          "Simple pub mod history declaration exports the new history module"
+        ]
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "name": "JSONL Append-Only Log",
+        "context": "history.rs",
+        "description": "Immutable event log per line with O_APPEND atomic writes; aligns with bop's storage decision (no SQLite, filesystem-first)",
+        "usage": "Provider metrics snapshots written as one line per observation, filtered by provider name on read"
+      },
+      {
+        "name": "Context Propagation",
+        "context": "list.rs",
+        "description": "git_root computed once at top level and passed through nested call stack",
+        "usage": "Avoids repeated git root lookups for each card; enables optional enrichment when git context is available"
+      },
+      {
+        "name": "Graceful Degradation",
+        "context": "history.rs",
+        "description": "read_history() returns empty vec on file-not-found; append_history() creates all parent dirs; no panics",
+        "usage": "First-use workflows don't fail; missing home dir in CI environments handled via Option"
+      },
+      {
+        "name": "Silent Malformed Data Skipping",
+        "context": "history.rs",
+        "description": "Malformed JSONL lines skipped without error or log message",
+        "usage": "Prevents log corruption from breaking reads, but no visibility into data quality"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "4KB Line Limit for O_APPEND Atomicity",
+        "location": "history.rs:append_history()",
+        "constraint": "POSIX/APFS atomic O_APPEND guarantee is <4096 bytes per write; HistoryEntry JSON likely stays well under, but no validation present",
+        "impact": "If entry serializes beyond 4KB, write could partially fail undetected"
+      },
+      {
+        "issue": "No Tracing for Skipped Malformed Lines",
+        "location": "history.rs:read_history()",
+        "constraint": "Malformed JSON lines silently discarded in loop; no error count, warning, or logging",
+        "impact": "Difficult to detect data corruption or file format issues in production"
+      },
+      {
+        "issue": "In-Memory History Read",
+        "location": "history.rs:read_history()",
+        "constraint": "Entire file loaded and filtered before limiting to last N entries",
+        "impact": "For multi-year history files with millions of entries, memory usage scales linearly; no streaming option"
+      },
+      {
+        "issue": "Missing Home Directory in Append",
+        "location": "history.rs:append_history()",
+        "constraint": "history_path() returns Option; append_history() accepts &Path directly without None handling",
+        "impact": "If caller bypasses history_path() and passes invalid path, error surfaces only as write failure"
+      },
+      {
+        "issue": "Coupling to acplan Module",
+        "location": "list.rs",
+        "constraint": "list.rs imports acplan; enrich_card_view() failure is silently ignored (no error propagation)",
+        "impact": "Plan enrichment can fail silently without informing user; list.rs still displays card without plan data"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "summary": "Subtask-3-1 completed successfully; history.rs module created with HistoryEntry struct, append/read functions, and comprehensive unit tests. Plan enrichment integrated into list.rs card view collection pipeline.",
+      "commits": [
+        "e514b53 auto-claude: subtask-3-1 - Create providers/history.rs with HistoryEntry struct",
+        "bb6201a auto-claude: subtask-3-3 - Wire plan enrichment into collect_card_views()"
+      ],
+      "test_coverage": "5 unit tests in history.rs covering roundtrip, missing file, malformed line skipping, path location, and nested directory creation; all use tempfile for isolation"
+    },
+    "recommendations": [
+      {
+        "priority": "HIGH",
+        "title": "Add Entry Size Validation",
+        "description": "Validate HistoryEntry serializes to <4KB before append; document or enforce in append_history()",
+        "rationale": "Prevents silent truncation if provider names, labels, or error messages grow large"
+      },
+      {
+        "priority": "MEDIUM",
+        "title": "Stream Large History Files",
+        "description": "Implement read_history_streaming() or take_last_n() iterator to avoid loading entire file into memory",
+        "rationale": "Multi-year history logs could consume significant memory; streaming would degrade gracefully"
+      },
+      {
+        "priority": "MEDIUM",
+        "title": "Log Skipped Malformed Entries",
+        "description": "Add optional tracing/debug logging in read_history() when JSON deserialization fails",
+        "rationale": "Operator visibility into data corruption without blocking reads; can be enabled in debug builds or via env var"
+      },
+      {
+        "priority": "LOW",
+        "title": "Document O_APPEND Contract",
+        "description": "Add module-level doc comment clarifying 4KB line limit, APFS atomicity, and implications for max entry size",
+        "rationale": "Future maintainers need to understand storage guarantees when modifying HistoryEntry"
+      },
+      {
+        "priority": "LOW",
+        "title": "Make Plan Enrichment Error Visible",
+        "description": "In list.rs, log or collect enrichment errors instead of silently ignoring failures",
+        "rationale": "Helps debug missing plan data in card list; currently indistinguishable from cards without AC plans"
+      }
+    ],
+    "subtask_id": "subtask-3-1",
+    "session_num": 7,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/list.rs",
+      "crates/bop-cli/src/providers/history.rs",
+      "crates/bop-cli/src/providers/mod.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-3-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

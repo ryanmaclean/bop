@@ -1,0 +1,112 @@
+{
+  "session_number": 4,
+  "timestamp": "2026-03-07T09:04:43.178209+00:00",
+  "subtasks_completed": [
+    "subtask-1-3"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/dispatcher.rs",
+        "changes": [
+          "Added `power` module import to dispatcher dependencies",
+          "Created `pause_all_running()` stub function with TODO comment for deferred implementation",
+          "Spawned power state watcher on dedicated OS thread via `power::spawn_power_watcher()`",
+          "Added new select arm in dispatcher main loop: `Ok(()) = power_rx.changed()` handler",
+          "Implemented power state machine: Sleeping \u2192 pause cards, Awake \u2192 rescan and resume"
+        ],
+        "lines_changed": 28,
+        "impact": "Core dispatcher loop now responds to OS power state changes"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "OS Thread + Tokio Channel Integration",
+        "description": "Power watcher runs on dedicated OS thread (blocking I/O), communicates with async dispatcher via tokio::sync::watch channel",
+        "evidence": "power::spawn_power_watcher() returns watch receiver; dispatcher uses power_rx.changed() and power_rx.borrow_and_update()"
+      },
+      {
+        "pattern": "Stub-Driven Implementation",
+        "description": "Deferred implementation pattern: pause_all_running() is a no-op stub that logs intent, actual logic marked TODO for future subtask",
+        "evidence": "Function body contains eprintln! and TODO comment"
+      },
+      {
+        "pattern": "Cascading State Invalidation",
+        "description": "System wake event triggers needs_scan = true to force card re-dispatch, ensuring no stale state",
+        "evidence": "Both Sleeping and Awake branches manage needs_scan state"
+      },
+      {
+        "pattern": "Non-Fatal Error Handling in Event Loop",
+        "description": "Power state changes logged as warnings, do not halt dispatcher",
+        "evidence": "if let Err(e) = pause_all_running() { eprintln!(...) } - error logged but loop continues"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "pause_all_running is unimplemented",
+        "risk_level": "medium",
+        "note": "Stub function currently does nothing. Will need to define: pause semantics, card lifecycle during pause, resume behavior"
+      },
+      {
+        "gotcha": "Power state transitions on OS thread, dispatcher on async task",
+        "risk_level": "low",
+        "note": "Correct architecture but requires careful synchronization via channel; no blocking I/O in dispatcher loop"
+      },
+      {
+        "gotcha": "No check for concurrent pause_all_running invocations",
+        "risk_level": "low",
+        "note": "If power watcher emits multiple Sleeping events, pause_all_running could be called repeatedly before Awake"
+      },
+      {
+        "gotcha": "Pause/resume semantics undefined",
+        "risk_level": "high",
+        "note": "No specification of where paused cards are stored, how they're moved/tracked, or what triggers actual resume"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "approach_details": {
+      "strategy": "Minimal integration of power watcher into dispatcher event loop with deferred implementation of pause logic",
+      "execution": "Clean, idiomatic tokio integration. Power watcher spawned early in dispatcher startup, integrated into select! macro",
+      "previous_attempts": 2,
+      "attempt_success_rate": "100% (all 3 attempts succeeded)"
+    },
+    "recommendations": [
+      {
+        "priority": "high",
+        "area": "Deferred Implementation",
+        "recommendation": "Define pause_all_running() actual logic: enumerate running cards, transition them to paused state, ensure they don't get moved to failed/ on system wake"
+      },
+      {
+        "priority": "high",
+        "area": "Card State Machine",
+        "recommendation": "Design paused card lifecycle: introduce 'paused' intermediate state or use existing state with marker file, prevent merge-gate/policy-check from treating paused cards as stuck"
+      },
+      {
+        "priority": "medium",
+        "area": "Idempotency",
+        "recommendation": "Ensure pause_all_running() is idempotent (safe to call multiple times) and handles case where no cards are running"
+      },
+      {
+        "priority": "medium",
+        "area": "Testing",
+        "recommendation": "Add power state transition test: mock power watcher, verify dispatcher calls pause_all_running() on Sleeping, verify needs_scan set on Awake"
+      },
+      {
+        "priority": "low",
+        "area": "Observability",
+        "recommendation": "Consider structured logging (trace level) for power state changes to aid debugging of sleep/wake issues"
+      }
+    ],
+    "subtask_id": "subtask-1-3",
+    "session_num": 4,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/dispatcher.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-3"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

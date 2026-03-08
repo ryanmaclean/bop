@@ -1,0 +1,66 @@
+=== AUTO-BUILD PROGRESS ===
+
+Project: AC implementation plan progress in Quick Look + CLI
+Workspace: managed by orchestrator
+Started: 2026-03-07
+
+Workflow Type: feature
+Rationale: Multi-service feature spanning bop-core (data model), bop-cli (CLI rendering
+  + TUI), macOS Quick Look (Swift), and dispatch.nu (Nushell). Phases follow service
+  dependency order: core model → plan loader → CLI rendering → Quick Look → dispatch.
+
+Session 1 (Planner):
+- Created implementation_plan.json
+- Phases: 6
+- Total subtasks: 13
+- Created context.json
+- Created init.sh
+
+Phase Summary:
+- Phase 1 (Core Data Model): 1 subtask, no dependencies
+  → Add ac_spec_id: Option<String> to Meta struct
+- Phase 2 (Plan Loader Module): 3 subtasks, depends on Phase 1
+  → AcPlan types + parser, git root discovery, CardView enrichment
+- Phase 3 (CLI Rendering): 4 subtasks, depends on Phase 2
+  → CardView extensions, renderer updates, list wiring, watch mode
+- Phase 4 (Quick Look Plan Tab): 3 subtasks, depends on Phase 1
+  → BopCardMeta + AcPlan Swift types, git root discovery, plan tab UI
+- Phase 5 (dispatch.nu Card Linkage): 1 subtask, depends on Phase 1
+  → Write ac_spec_id to matching card when dispatching spec
+- Phase 6 (Verification + Output): 2 subtasks, depends on Phases 3, 4, 5
+  → make check, output/result.md
+
+Services Involved:
+- bop-core: Add ac_spec_id field to Meta struct
+- bop-cli: New acplan.rs module, render updates, list.rs enrichment, watch mode
+- macos: Plan tab in Quick Look PreviewViewController.swift
+- scripts: dispatch.nu card linkage in run_spec
+
+Parallelism Analysis:
+- Max parallel phases: 3 (Phases 3, 4, 5 after Phase 1 completes)
+- Recommended workers: 1 (sequential safest; Phase 3 depends on Phase 2)
+- Parallel groups: [Phase 4 (Swift) + Phase 5 (Nushell)] can run parallel with Phase 2→3
+
+Key Architecture Decisions:
+- CardView already has phase_name/phase_frac — enrichment fills these from plan data
+- New fields: ac_subtasks_done/ac_subtasks_total for N/T display
+- Half-circle glyphs (○◔◑◕●) use DIFFERENT thresholds than existing moon_glyph
+- Plan loaded lazily only when ac_spec_id is set — no perf impact on cards without AC
+- Git root discovery: walk parent dirs max 6 levels, look for .auto-claude/
+- spec dir resolution: glob <git_root>/.auto-claude/specs/<id>-*
+
+Risk Assessment: MEDIUM
+- All changes are additive (new field, new module, new tab)
+- Existing behavior unchanged for cards without ac_spec_id
+- serde(default) ensures backward compatibility with old meta.json files
+
+=== STARTUP COMMAND ===
+
+To continue building this spec, run:
+
+  PYTHONPATH=$(python3 -c 'import site; print(site.getsitepackages()[0])') \
+    env -u CLAUDECODE python3 \
+    /Applications/Auto-Claude.app/Contents/Resources/backend/run.py \
+    --spec 027 --project-dir /Users/studio/bop --direct
+
+=== END SESSION 1 ===

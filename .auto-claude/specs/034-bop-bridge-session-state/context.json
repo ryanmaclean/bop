@@ -1,0 +1,56 @@
+{
+  "files_to_create": {
+    "bop-cli": [
+      "crates/bop-cli/src/bridge/mod.rs",
+      "crates/bop-cli/src/bridge/cmd.rs",
+      "crates/bop-cli/src/bridge/hook_installer.rs",
+      "crates/bop-cli/src/bridge/opencode.rs",
+      "vibekanban/bop-bridge.nu"
+    ]
+  },
+  "files_to_modify": {
+    "bop-cli": [
+      "crates/bop-cli/src/main.rs"
+    ]
+  },
+  "files_to_reference": [
+    "crates/bop-cli/src/providers/mod.rs",
+    "crates/bop-cli/src/providers/history.rs",
+    "crates/bop-cli/src/serve.rs",
+    "crates/bop-cli/src/main.rs"
+  ],
+  "patterns": {
+    "module_structure": "All CLI modules are flat files or subdirectories in src/ (e.g., providers/). Commands wired via Command enum in main.rs.",
+    "unix_socket": "Use std::os::unix::net::UnixListener for listen mode. std::os::unix::net::UnixStream for emit (fire-and-forget). tokio net feature already added to Cargo.toml.",
+    "event_log": "Append to ~/.bop/bridge-events.jsonl using O_APPEND (same pattern as providers/history.rs). One JSON line per event.",
+    "hook_target": "~/.claude/settings.json is JSON. Read → merge hooks key → write back. Do not clobber non-hook fields. Existing hook arrays get bop entry appended.",
+    "error_handling": "emit() must never fail sessions — return Ok(()) if socket absent. hook installer returns anyhow::Result but callers handle gracefully.",
+    "nushell_scripts": "vibekanban/bop-bridge.nu uses shebang #!/usr/bin/env nu. See existing vibekanban/bop-provider.nu for style reference.",
+    "binary_path": "Hook installer writes full path to bop binary. Use std::env::current_exe() to find the running binary, or accept a Path parameter in install_claude_hooks()."
+  },
+  "key_decisions": [
+    "BridgeEvent uses kebab-case serde tags (e.g., 'session-start', 'stage-change') to match CLI --event flag values directly",
+    "CardStage uses kebab-case serialization to match BopDeck card state naming ('in-progress', 'human-review')",
+    "Unix socket is SOCK_STREAM not SOCK_DGRAM — each event is a newline-terminated JSON line on a short-lived connection",
+    "emit() is synchronous (std::os::unix::net) not async — hooks are shell commands, not async Rust code",
+    "listen daemon writes to bridge-events.jsonl for auditability; BopDeck reads socket directly, not the log",
+    "hook install uses merge strategy: read settings.json (or {}), merge hooks key, write back — never clobber",
+    "opencode SSE listener is async (tokio) — spawned as a long-running task",
+    "bridge emit --event flag takes kebab-case string matching BridgeEvent serde tags"
+  ],
+  "socket_protocol": {
+    "path": "~/.bop/bridge.sock",
+    "type": "SOCK_STREAM (Unix domain)",
+    "format": "newline-delimited JSON, one BridgeEvent per line",
+    "direction": "emit → listen (one-way push)",
+    "log": "~/.bop/bridge-events.jsonl (append-only)"
+  },
+  "cli_integration_matrix": {
+    "claude_code": "hooks in ~/.claude/settings.json — SessionStart, PreToolUse, PostToolUse, Stop",
+    "opencode": "SSE GET localhost:4096/event — session.status busy→InProgress idle→HumanReview, permission.updated→AwaitingHuman",
+    "goose": "SSE /reply — out of scope for this spec (spec 035)",
+    "gemini": "ACP ndjson — out of scope for this spec (spec 035)",
+    "aider": "log tail — out of scope for this spec (spec 035)",
+    "ollama": "REST poll — out of scope for this spec (spec 035)"
+  }
+}

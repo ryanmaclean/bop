@@ -1,0 +1,126 @@
+{
+  "session_number": 2,
+  "timestamp": "2026-03-06T16:16:09.520871+00:00",
+  "subtasks_completed": [
+    "subtask-1-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "install/macos/sh.bop.merge-gate.plist",
+        "type": "new_file",
+        "purpose": "launchd service definition template for macOS filesystem-triggered merge-gate daemon",
+        "key_elements": [
+          "WatchPaths array monitoring .cards/done directory",
+          "Program invocation: /usr/local/bin/bop merge-gate",
+          "Environment variables: CARDS_DIR, PATH, RUST_LOG",
+          "Resource limits: file descriptor caps (hard=1024, soft=512)",
+          "Logging to /tmp/bop-merge-gate.log and .err",
+          "Placeholder substitution points: REPLACE_WITH_REPO_ROOT, REPLACE_WITH_HOME"
+        ],
+        "lines_of_code": 60
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "launchd_plist_template",
+        "description": "XML-based macOS service definition with WatchPaths filesystem trigger",
+        "elements": [
+          "Label key for unique service identification",
+          "WatchPaths array for directory monitoring (replaces polling)",
+          "ProgramArguments for bop binary invocation",
+          "EnvironmentVariables for runtime configuration",
+          "Resource limits (HardResourceLimits, SoftResourceLimits)"
+        ]
+      },
+      {
+        "pattern": "filesystem_trigger_gate",
+        "description": "WatchPaths monitoring pattern replaces polling dispatcher",
+        "config": {
+          "runAtLoad": true,
+          "keepAlive": false,
+          "trigger_type": "filesystem_watch"
+        }
+      },
+      {
+        "pattern": "template_with_placeholders",
+        "description": "Configuration template requiring post-installation substitution",
+        "placeholders": [
+          "REPLACE_WITH_REPO_ROOT",
+          "REPLACE_WITH_HOME"
+        ]
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Placeholder substitution required",
+        "severity": "high",
+        "description": "Multiple REPLACE_WITH_* tokens must be substituted before launchctl load",
+        "impact": "Service will not function correctly with unresolved placeholders"
+      },
+      {
+        "issue": "WatchPaths team-specific directories commented out",
+        "severity": "medium",
+        "description": "Template includes examples for team-arch/, team-cli/ etc. but they are commented",
+        "impact": "Multi-team setups require manual uncommentation and path adjustment"
+      },
+      {
+        "issue": "RunAtLoad + KeepAlive configuration",
+        "severity": "low",
+        "description": "RunAtLoad=true with KeepAlive=false implies one-shot execution per WatchPaths trigger",
+        "impact": "Service starts on login but doesn't auto-restart on crash (expected behavior for event-driven merge-gate)"
+      },
+      {
+        "issue": "Log files to /tmp/",
+        "severity": "medium",
+        "description": "StandardOutPath and StandardErrorPath use /tmp/ which are cleaned on reboot",
+        "impact": "Logs disappear on system restart; may need rotation or persistent log location"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "approach_details": {
+      "execution": "Template created with complete launchd plist structure",
+      "alignment": "Aligns with bop VM-first architecture and MICROCLAW dispatcher design (WatchPaths replaces polling)",
+      "completeness": "Includes all required launchd keys plus optional resource limits and logging",
+      "git_state": "Single file committed successfully (94c12a7)"
+    },
+    "recommendations": [
+      {
+        "priority": "high",
+        "item": "Create installation script",
+        "details": "Script should substitute REPLACE_WITH_REPO_ROOT and REPLACE_WITH_HOME, verify paths exist, then launchctl load"
+      },
+      {
+        "priority": "high",
+        "item": "Document path requirements",
+        "details": "Document that /usr/local/bin/bop must exist and be executable by launchd session"
+      },
+      {
+        "priority": "medium",
+        "item": "Add persistent logging",
+        "details": "Consider logging to ~/.bop/logs/ or /var/log/bop/ instead of /tmp/ to survive reboots"
+      },
+      {
+        "priority": "medium",
+        "item": "Document multi-team setup",
+        "details": "Provide clear example of uncommented WatchPaths entries for team-specific directories"
+      },
+      {
+        "priority": "low",
+        "item": "Add launchctl verification step",
+        "details": "Document launchctl list sh.bop.merge-gate and log inspection troubleshooting steps"
+      }
+    ],
+    "subtask_id": "subtask-1-1",
+    "session_num": 2,
+    "success": true,
+    "changed_files": [
+      "install/macos/sh.bop.merge-gate.plist"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

@@ -1,0 +1,10 @@
+{
+  "discovered_files": {
+    "crates/bop-cli/src/render/mod.rs": {
+      "description": "Render module scaffold: CardView flat struct, Stats, CardRenderer trait, from_meta() conversion, render_board() dispatch by TermLevel. Submodules: dumb (implemented), basic/extended/full/truecolor (stubs).",
+      "category": "architecture",
+      "discovered_at": "2026-03-07T18:03:43.151595+00:00"
+    }
+  },
+  "last_updated": "2026-03-07T18:03:43.151604+00:00"
+}

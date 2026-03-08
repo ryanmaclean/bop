@@ -1,0 +1,86 @@
+=== AUTO-BUILD PROGRESS ===
+
+Project: bop - Fix CI Workflows
+Workspace: [managed by orchestrator]
+Started: 2026-03-05
+
+Workflow Type: simple
+Rationale: Single-service task with clear, sequential steps. Delete broken self-hosted workflow (ai-coding-job.yml), create new cloud-based CI workflow (ci.yml), verify existing workflows are valid, add badge to README.
+
+Session 1 (Planner):
+- Performed deep codebase investigation
+- Analyzed existing GitHub Actions workflows
+- Created context.json with patterns and findings
+- Created implementation_plan.json with 4 phases, 4 subtasks
+- Created init.sh for environment verification
+- Verified Rust toolchain and project structure
+
+Phase Summary:
+- Phase 1 (Implementation): 2 subtasks - Delete ai-coding-job.yml, Create ci.yml
+- Phase 2 (Audit): 1 subtask - Verify repo-health.yml and release.yml are valid
+- Phase 3 (Badge): 1 subtask - Add CI badge to README.md
+- Phase 4 (Verification): 1 subtask - Run make check locally
+
+Services Involved:
+- github_workflows: CI/CD configuration
+- readme: Documentation updates
+- bop: Main Rust project (verification only)
+
+Parallelism Analysis:
+- Max parallel phases: 2 (phase-2-audit and phase-3-badge can run together)
+- Recommended workers: 1
+- Reasoning: Simple task, sequential is fine. Phase 2 and 3 can run in parallel after phase 1, but task is quick enough that parallelism adds unnecessary complexity.
+
+Investigation Findings:
+1. ai-coding-job.yml is BROKEN - requires self-hosted runner with bop daemon, triggers on PR labels but does nothing in GHA cloud
+2. repo-health.yml is VALID - runs on macos-latest, executes make check + policy check
+3. release.yml is VALID - runs on macos-latest, builds releases on tags
+4. Makefile check target runs: cargo test && cargo clippy -- -D warnings && cargo fmt --check
+5. README.md exists, starts with title "# bop — Heterogeneous Agent Orchestrator"
+6. Rust 1.93.1 toolchain is available
+
+Acceptance Criteria:
+✓ .github/workflows/ci.yml exists with runs-on: ubuntu-latest
+✓ ai-coding-job.yml is deleted
+✓ make check passes locally
+✓ CI badge added to README.md
+
+Risk Assessment: LOW
+- Only modifying CI configuration files (YAML)
+- Adding badge to README (documentation)
+- No functional code changes
+- New ci.yml runs existing make check commands
+
+=== STARTUP COMMAND ===
+
+To continue building this spec, run:
+
+  source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 011 --parallel 1
+
+Or using the orchestrator:
+
+  cd /Users/studio/bop
+  nu dispatch.nu run --wave <N> --yes
+
+=== END SESSION 1 ===
+
+Next session will implement:
+1. Delete .github/workflows/ai-coding-job.yml
+2. Create .github/workflows/ci.yml with ubuntu-latest runner
+3. Audit and document repo-health.yml and release.yml status
+4. Add CI badge to README.md after title line
+5. Run make check to verify all commands pass
+6. Commit changes with message describing CI fix
+
+## 2026-03-05 - Subtask 4-1: Verify CI Changes Locally
+
+✅ Ran `make check` successfully
+- All 318 unit tests passed
+- All 10 dispatcher harness tests passed
+- All 17 job control harness tests passed
+- All 4 merge gate harness tests passed
+- All 91 additional tests passed
+- Clippy passed with no warnings
+- Formatting check passed
+
+No code changes were needed for this verification step.

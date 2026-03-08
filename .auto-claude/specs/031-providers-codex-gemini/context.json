@@ -1,0 +1,51 @@
+{
+  "files_to_modify": {
+    "bop-cli": [
+      "crates/bop-cli/src/providers/mod.rs"
+    ]
+  },
+  "files_to_create": {
+    "bop-cli": [
+      "crates/bop-cli/src/providers/codex.rs",
+      "crates/bop-cli/src/providers/gemini.rs"
+    ]
+  },
+  "files_to_reference": [
+    "crates/bop-cli/src/providers/claude.rs",
+    "crates/bop-cli/src/providers/mod.rs",
+    "crates/bop-cli/src/providers/history.rs"
+  ],
+  "patterns": {
+    "provider_trait": "Each provider implements the Provider trait (name/detect/fetch). detect() is sync, fetch() is async. Errors are returned as ProviderSnapshot with error field set, never propagated.",
+    "module_registration": "Each provider is a separate module file (e.g., claude.rs) with `pub mod` in mod.rs. all_providers() returns Vec<Box<dyn Provider>> with all registered providers.",
+    "parse_separation": "Network-dependent fetch() logic delegates to a pure parse_*_response() method that can be unit-tested without network calls. ClaudeProvider::parse_usage_response() is the reference pattern.",
+    "error_handling": "All network/IO failures produce a ProviderSnapshot with error field set and None percentages rather than propagating anyhow::Error. This keeps cmd_providers resilient.",
+    "credentials_pattern": "Credentials are read fresh on each fetch() call, never cached. File path via dirs::home_dir(). macOS Keychain as secondary source (Claude uses security CLI).",
+    "async_trait_usage": "#[async_trait::async_trait] on impl blocks, async fn fetch(&self) -> anyhow::Result<ProviderSnapshot>",
+    "test_pattern": "In-file #[cfg(test)] mod tests. Parse helpers tested with hardcoded JSON strings. detect() tested by temporarily setting HOME to temp dir.",
+    "http_client": "reqwest::Client::new() created per-request inside fetch(). No persistent client. Features: json + rustls-tls.",
+    "binary_detection": "ClaudeProvider only checks credential files/Keychain. Codex/Gemini need PATH detection — use std::process::Command::new(\"which\").arg(binary) since no which crate in deps."
+  },
+  "existing_implementations": {
+    "description": "Spec 030 established the Provider trait, ProviderSnapshot, ClaudeProvider, history JSONL, and bop providers CLI command. This spec adds CodexProvider and GeminiProvider following the same patterns.",
+    "relevant_files": [
+      "crates/bop-cli/src/providers/claude.rs",
+      "crates/bop-cli/src/providers/mod.rs",
+      "crates/bop-cli/src/providers/history.rs",
+      "crates/bop-cli/Cargo.toml"
+    ]
+  },
+  "dependencies_status": {
+    "already_available": [
+      "reqwest (0.12, json + rustls-tls)",
+      "async-trait (0.1)",
+      "dirs (5.0)",
+      "chrono (0.4, serde)",
+      "serde + serde_json",
+      "tokio (1, rt-multi-thread + macros + time + process + signal + net)",
+      "anyhow (1)",
+      "tempfile (3, dev-dep)"
+    ],
+    "new_deps_needed": "none"
+  }
+}

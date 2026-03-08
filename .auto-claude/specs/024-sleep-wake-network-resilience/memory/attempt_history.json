@@ -1,0 +1,237 @@
+{
+  "subtasks": {
+    "subtask-1-1": {
+      "attempts": [
+        {
+          "session": 2,
+          "timestamp": "2026-03-07T08:59:31.265395+00:00",
+          "approach": "Implemented: Create power.rs module with SleepState enum and power watcher spawner for macOS",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 2,
+          "timestamp": "2026-03-07T09:00:28.265397+00:00",
+          "approach": "Implemented: Create power.rs module with SleepState enum and power watcher spawner for macOS",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-2": {
+      "attempts": [
+        {
+          "session": 3,
+          "timestamp": "2026-03-07T09:01:04.558496+00:00",
+          "approach": "Implemented: Add core-foundation dependency for macOS IOKit integration",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 3,
+          "timestamp": "2026-03-07T09:01:31.416994+00:00",
+          "approach": "Implemented: Add core-foundation dependency for macOS IOKit integration",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-3": {
+      "attempts": [
+        {
+          "session": 4,
+          "timestamp": "2026-03-07T09:04:17.360355+00:00",
+          "approach": "Implemented: Integrate power watcher into dispatcher main loop with pause_all_running stub",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 4,
+          "timestamp": "2026-03-07T09:04:27.570844+00:00",
+          "approach": "Implemented: Integrate power watcher into dispatcher main loop with pause_all_running stub",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-2-1": {
+      "attempts": [
+        {
+          "session": 5,
+          "timestamp": "2026-03-07T09:06:45.060744+00:00",
+          "approach": "Implemented: Add NETWORK_ERROR_PATTERNS constant and is_network_error helper to claude.nu",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 5,
+          "timestamp": "2026-03-07T09:06:51.111196+00:00",
+          "approach": "Implemented: Add NETWORK_ERROR_PATTERNS constant and is_network_error helper to claude.nu",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-2-2": {
+      "attempts": [
+        {
+          "session": 6,
+          "timestamp": "2026-03-07T09:09:01.088586+00:00",
+          "approach": "Implemented: Add NETWORK_ERROR_PATTERNS constant and is_network_error helper to codex.nu",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 6,
+          "timestamp": "2026-03-07T09:10:21.784965+00:00",
+          "approach": "Implemented: Add NETWORK_ERROR_PATTERNS constant and is_network_error helper to codex.nu",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-1": {
+      "attempts": [
+        {
+          "session": 7,
+          "timestamp": "2026-03-07T09:12:10.826829+00:00",
+          "approach": "Implemented: Add is_network_failure helper to detect network errors from failure_reason field",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 7,
+          "timestamp": "2026-03-07T09:12:13.514085+00:00",
+          "approach": "Implemented: Add is_network_failure helper to detect network errors from failure_reason field",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-2": {
+      "attempts": [
+        {
+          "session": 8,
+          "timestamp": "2026-03-07T09:15:26.060588+00:00",
+          "approach": "Implemented: Implement transient failure retry logic after run_card completes",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 8,
+          "timestamp": "2026-03-07T09:15:49.204105+00:00",
+          "approach": "Implemented: Implement transient failure retry logic after run_card completes",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-4-1": {
+      "attempts": [
+        {
+          "session": 9,
+          "timestamp": "2026-03-07T09:19:06.616276+00:00",
+          "approach": "Implemented: Implement provider_reachable async function with TCP probe",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 9,
+          "timestamp": "2026-03-07T09:19:54.401715+00:00",
+          "approach": "Implemented: Implement provider_reachable async function with TCP probe",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-4-2": {
+      "attempts": [
+        {
+          "session": 10,
+          "timestamp": "2026-03-07T09:21:51.003922+00:00",
+          "approach": "Implemented: Add probe field to Provider struct and update providers.rs",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 10,
+          "timestamp": "2026-03-07T09:21:54.462673+00:00",
+          "approach": "Implemented: Add probe field to Provider struct and update providers.rs",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-4-3": {
+      "attempts": [
+        {
+          "session": 11,
+          "timestamp": "2026-03-07T09:23:34.033267+00:00",
+          "approach": "Implemented: Integrate connectivity probe into dispatcher before adapter spawn",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 11,
+          "timestamp": "2026-03-07T09:24:50.427029+00:00",
+          "approach": "Implemented: Integrate connectivity probe into dispatcher before adapter spawn",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-5-1": {
+      "attempts": [
+        {
+          "session": 12,
+          "timestamp": "2026-03-07T09:26:09.870454+00:00",
+          "approach": "Implemented: Run make check and fix any clippy/test failures",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 12,
+          "timestamp": "2026-03-07T09:27:18.548897+00:00",
+          "approach": "Implemented: Run make check and fix any clippy/test failures",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-5-2": {
+      "attempts": [
+        {
+          "session": 13,
+          "timestamp": "2026-03-07T09:32:34.097192+00:00",
+          "approach": "Implemented: Write output/result.md documenting sleep/wake flow and network resilience",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 13,
+          "timestamp": "2026-03-07T09:33:34.026635+00:00",
+          "approach": "Implemented: Write output/result.md documenting sleep/wake flow and network resilience",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    }
+  },
+  "stuck_subtasks": [],
+  "metadata": {
+    "created_at": "2026-03-07T08:52:19.289062+00:00",
+    "last_updated": "2026-03-07T09:33:34.026649+00:00"
+  }
+}

@@ -1,0 +1,159 @@
+{
+  "session_number": 2,
+  "timestamp": "2026-03-08T06:37:25.166541+00:00",
+  "subtasks_completed": [
+    "subtask-2-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/providers/ollama.rs",
+        "type": "new_file",
+        "purpose": "OllamaLocalProvider implementation with TCP detection and HTTP API integration",
+        "key_functions": [
+          "detect() - TcpStream::connect_timeout to localhost:11434 with 500ms timeout",
+          "fetch() - GET http://localhost:11434/api/ps to retrieve loaded models",
+          "parse_ps_response() - Parse {models: [{name, size_vram, expires_at}]} JSON structure"
+        ],
+        "critical_details": "ProviderSnapshot returned with provider='ollama-local', display_name='Ollama (local)', primary_pct=None, source='http', loaded_models parsed from API response"
+      },
+      {
+        "file": "crates/bop-cli/src/providers/mod.rs",
+        "type": "module_registration",
+        "change": "Added pub mod ollama; declaration for new OllamaLocalProvider module",
+        "impact": "Integration point for provider registry system"
+      },
+      {
+        "file": ".auto-claude/specs/032-providers-ollama-opencode/implementation_plan.json",
+        "type": "metadata",
+        "change": "Updated subtask-1-1 status from pending to completed, documented session timestamp and outcomes",
+        "impact": "Tracking system now reflects completion of prerequisite phase"
+      },
+      {
+        "file": ".secretsignore",
+        "type": "security_config",
+        "change": "Updated to exclude credential-related files for Ollama configuration",
+        "impact": "Prevents accidental credential exposure in version control"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Timeout-based service detection pattern",
+        "usage": "std::net::TcpStream::connect_timeout(SocketAddr, Duration) with 500ms timeout",
+        "benefit": "Non-blocking detection of local services without false positives from slow responses"
+      },
+      {
+        "pattern": "Separated parsing function design",
+        "usage": "parse_ps_response() as standalone testable function distinct from fetch()",
+        "benefit": "Unit tests can validate JSON parsing independently of HTTP layer"
+      },
+      {
+        "pattern": "Fallback text for empty state",
+        "usage": "Return '(idle)' when models list is empty in loaded_models field",
+        "benefit": "UI renders meaningful state even when no models are loaded"
+      },
+      {
+        "pattern": "Reset deadline extraction",
+        "usage": "Find earliest expires_at field across models array for reset_at computation",
+        "benefit": "Single source of truth for provider quota reset timing"
+      },
+      {
+        "pattern": "Optional primary percentage handling",
+        "usage": "primary_pct=None for local provider (quota not applicable), display loaded model names instead",
+        "benefit": "Adapts display strategy per provider type without code duplication"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Empty models list handling",
+        "risk": "Parsing {models: []} correctly vs. crashing on None/missing field",
+        "mitigation": "Unit test parse_ps_response with empty models; return loaded_models as Option<Vec<String>> where empty vec becomes '(idle)'"
+      },
+      {
+        "gotcha": "expires_at field optional vs. required",
+        "risk": "If models lack expires_at, earliest-finder logic fails",
+        "mitigation": "Defensive parsing with Option<i64> for expires_at per model; skip models without valid timestamp"
+      },
+      {
+        "gotcha": "500ms timeout on connect_timeout may be too aggressive",
+        "risk": "False negatives if Ollama daemon is slow on first startup",
+        "mitigation": "No hardcoded increase in plan; observable in canary testing; adjust if failure rate >5%"
+      },
+      {
+        "gotcha": "HTTP endpoint stability assumption",
+        "risk": "Assumes /api/ps endpoint always returns same shape; Ollama version drift could break parser",
+        "mitigation": "Malformed JSON test case included; production logging should capture unexpected response shapes"
+      },
+      {
+        "gotcha": "Integration with ProviderSnapshot requires loaded_models field population",
+        "risk": "If subtask-1-1 (ProviderSnapshot struct extension) not fully merged, compile fails",
+        "mitigation": "Dependency marked as subtask-1-1; verify loaded_models: Option<Vec<String>> exists before merge"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "subtask_id": "subtask-2-1",
+      "description": "Created OllamaLocalProvider with complete detect() and fetch() implementation following Provider trait",
+      "verification": "cargo test -p bop providers::ollama -- --nocapture passes; all unit tests for parse_ps_response cover models, empty list, expires_at, and malformed JSON cases",
+      "commit_hash": "0f881633581ac858300546deda15ea693809525c",
+      "session_number": 844,
+      "blockers": "None",
+      "next_dependency": "subtask-2-2 (OllamaCloudProvider) can proceed; subtask-4-1 (registration in all_providers) depends on both Ollama subtasks complete"
+    },
+    "recommendations": [
+      {
+        "priority": "high",
+        "action": "Verify subtask-1-1 loaded_models field fully integrated",
+        "reason": "ollama.rs build depends on ProviderSnapshot struct having loaded_models: Option<Vec<String>> with correct serde attributes",
+        "timing": "Before merging subtask-2-1 to main"
+      },
+      {
+        "priority": "high",
+        "action": "Add integration test spawning mock Ollama HTTP server on 11434",
+        "reason": "Current unit tests cover parsing only; live endpoint behavior (timeouts, malformed responses) untested",
+        "timing": "Optional for this subtask; critical for subtask-2-2 (cloud variant)"
+      },
+      {
+        "priority": "medium",
+        "action": "Document Ollama API response shape expectations",
+        "reason": "parse_ps_response assumes {models: [{name, size_vram, expires_at}]}; if Ollama version drifts, parser breaks silently",
+        "timing": "Add as inline comment in parse_ps_response with example JSON response"
+      },
+      {
+        "priority": "medium",
+        "action": "Consider parametrizing 500ms timeout constant",
+        "reason": "Hardcoded timeout may need tuning based on user environment (VMs, slow disks); makes debugging difficult",
+        "timing": "Can be added in subtask-2-2 or future refactor if canary data shows timeout collisions"
+      },
+      {
+        "priority": "low",
+        "action": "Log unparseable models in fetch()",
+        "reason": "If expires_at parsing fails on a model, it's silently skipped; diagnostics would help troubleshooting",
+        "timing": "Optional enhancement post-subtask-2-1; defer to quotability debugging phase"
+      },
+      {
+        "priority": "low",
+        "action": "Add human-readable error message for TCP connection failure",
+        "reason": "Current timeout error may confuse users unsure if Ollama is installed or just not listening",
+        "timing": "Polish item; defer to UX refinement phase"
+      }
+    ],
+    "subtask_id": "subtask-2-1",
+    "session_num": 2,
+    "success": true,
+    "changed_files": [
+      ".auto-claude/specs/032-providers-ollama-opencode/implementation_plan.json",
+      ".auto-claude/specs/032-providers-ollama-opencode/memory/attempt_history.json",
+      ".auto-claude/specs/032-providers-ollama-opencode/memory/build_commits.json",
+      ".auto-claude/specs/032-providers-ollama-opencode/memory/session_insights/session_844.json",
+      ".secretsignore",
+      "crates/bop-cli/src/providers/mod.rs",
+      "crates/bop-cli/src/providers/ollama.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-2-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

@@ -1,0 +1,68 @@
+{
+  "files_to_modify": {},
+  "files_to_create": {
+    "cards": [
+      ".cards/pending/{glyph}-watchpaths-dispatcher.bop/",
+      ".cards/pending/{glyph}-jj-gitignore-audit.bop/",
+      ".cards/pending/{glyph}-bop-serve.bop/",
+      ".cards/pending/{glyph}-bop-doctor-checks.bop/",
+      ".cards/pending/{glyph}-e2e-factory-test.bop/",
+      ".cards/pending/{glyph}-adapter-stress-test.bop/",
+      ".cards/pending/{glyph}-model-routing.bop/"
+    ]
+  },
+  "files_to_reference": [
+    ".cards/templates/implement.bop/spec.md",
+    ".cards/done/🂡-codex-smoke-test.bop/spec.md",
+    "crates/bop-cli/src/cards.rs"
+  ],
+  "patterns": {
+    "card_creation": "Use `bop new implement <id> --team <team>` to create cards in pending/ with auto-assigned glyphs",
+    "spec_format": "Each spec.md should have Overview, Requirements, Scope, and Acceptance Criteria sections",
+    "team_mapping": "arch=♥, cli=♠, quality=♦, intelligence=♣"
+  },
+  "existing_implementations": {
+    "description": "Card creation via bop-cli/src/cards.rs create_card() function",
+    "relevant_files": [
+      "crates/bop-cli/src/cards.rs",
+      ".cards/templates/implement.bop/"
+    ]
+  },
+  "card_specs": {
+    "watchpaths-dispatcher": {
+      "team": "arch",
+      "description": "Extend dispatcher WatchPaths to cover all team-*/pending dirs",
+      "files_affected": ["crates/bop-cli/src/dispatcher.rs"]
+    },
+    "jj-gitignore-audit": {
+      "team": "arch",
+      "description": "Audit all large files that break jj snapshot, add to .gitignore",
+      "files_affected": [".gitignore"]
+    },
+    "bop-serve": {
+      "team": "cli",
+      "description": "HTTP endpoint that accepts spec body and creates a card",
+      "files_affected": ["crates/bop-cli/src/main.rs", "crates/bop-cli/src/serve.rs"]
+    },
+    "bop-doctor-checks": {
+      "team": "cli",
+      "description": "Expand bop doctor to check nu/jj versions, adapter availability, launchd status",
+      "files_affected": ["crates/bop-cli/src/doctor.rs"]
+    },
+    "e2e-factory-test": {
+      "team": "quality",
+      "description": "Test that bop factory install + drop card → dispatcher → card moves to done/",
+      "files_affected": ["tests/e2e_factory.rs"]
+    },
+    "adapter-stress-test": {
+      "team": "quality",
+      "description": "Run 10 cards concurrently through ollama adapter, verify no races",
+      "files_affected": ["tests/adapter_stress.rs"]
+    },
+    "model-routing": {
+      "team": "intelligence",
+      "description": "Route cards to cheap (haiku) vs capable (sonnet/opus) based on cost field",
+      "files_affected": ["crates/bop-cli/src/dispatcher.rs", "crates/bop-core/src/meta.rs"]
+    }
+  }
+}

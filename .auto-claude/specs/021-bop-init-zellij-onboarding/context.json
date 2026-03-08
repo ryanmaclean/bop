@@ -1,0 +1,39 @@
+{
+  "files_to_modify": {
+    "bop-cli": [
+      "crates/bop-cli/src/main.rs",
+      "crates/bop-cli/src/doctor.rs"
+    ],
+    "bop-core": [
+      "crates/bop-core/src/lib.rs",
+      "crates/bop-core/src/config.rs"
+    ]
+  },
+  "files_to_reference": [
+    "crates/bop-cli/src/doctor.rs",
+    "crates/bop-core/src/config.rs",
+    "crates/bop-cli/src/main.rs"
+  ],
+  "patterns": {
+    "config_pattern": "Config structs use serde Serialize/Deserialize, write to JSON with serde_json::to_string_pretty",
+    "doctor_checks": "Use command_available() helper to check binaries, print ok/missing for each check",
+    "init_handler": "Command::Init handler creates directories, writes config files, prints success messages",
+    "env_var_checks": "Use std::env::var() to read environment variables, returns Result<String, VarError>"
+  },
+  "existing_implementations": {
+    "description": "Found existing doctor command that checks tools and adapters. Found existing init that creates .cards/ layout. Meta struct already has zellij_session field.",
+    "relevant_files": [
+      "crates/bop-cli/src/doctor.rs",
+      "crates/bop-cli/src/paths.rs",
+      "crates/bop-core/src/config.rs",
+      "crates/bop-core/src/lib.rs"
+    ]
+  },
+  "key_findings": {
+    "doctor_exists": "doctor.rs already implements most checks (nu, zellij, tools, adapters, .cards/ structure)",
+    "meta_has_zellij": "Meta struct in bop-core already has zellij_session and zellij_pane fields",
+    "config_precedent": "bop-core has Config struct for .bop/config.json with read/write helpers",
+    "init_location": "Init handler is in main.rs lines 391-414, uses paths::ensure_cards_layout()",
+    "make_check": "Makefile line 28: check = test + lint + check-fmt"
+  }
+}

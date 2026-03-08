@@ -1,0 +1,280 @@
+{
+  "subtasks": {
+    "subtask-1-1": {
+      "attempts": [
+        {
+          "session": 2,
+          "timestamp": "2026-03-07T08:04:15.656825+00:00",
+          "approach": "Implemented: Add exit_code and paused_at fields to Meta struct in bop-core",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-2-1": {
+      "attempts": [
+        {
+          "session": 3,
+          "timestamp": "2026-03-07T08:08:03.657264+00:00",
+          "approach": "Implemented: Write exit_code to meta.json when card moves to failed/",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-2-2": {
+      "attempts": [
+        {
+          "session": 1,
+          "timestamp": "2026-03-07T08:12:06.601256+00:00",
+          "approach": "Implemented: Write failure_reason as last line of stderr when moving to failed/",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 4,
+          "timestamp": "2026-03-07T08:12:16.207007+00:00",
+          "approach": "Implemented: Write failure_reason as last line of stderr when moving to failed/",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-1": {
+      "attempts": [
+        {
+          "session": 2,
+          "timestamp": "2026-03-07T08:15:00.650689+00:00",
+          "approach": "Implemented: Add Pause command variant to main.rs Command enum",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 5,
+          "timestamp": "2026-03-07T08:15:13.958396+00:00",
+          "approach": "Implemented: Add Pause command variant to main.rs Command enum",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-2": {
+      "attempts": [
+        {
+          "session": 6,
+          "timestamp": "2026-03-07T08:19:55.505663+00:00",
+          "approach": "Implemented: Add cmd_pause implementation in cards.rs",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 3,
+          "timestamp": "2026-03-07T08:20:27.568295+00:00",
+          "approach": "Implemented: Add cmd_pause implementation in cards.rs",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-3": {
+      "attempts": [
+        {
+          "session": 7,
+          "timestamp": "2026-03-07T08:21:25.658146+00:00",
+          "approach": "Implemented: Wire Pause command in main.rs match block",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 4,
+          "timestamp": "2026-03-07T08:22:00.784908+00:00",
+          "approach": "Implemented: Wire Pause command in main.rs match block",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-4-1": {
+      "attempts": [
+        {
+          "session": 8,
+          "timestamp": "2026-03-07T08:24:25.805211+00:00",
+          "approach": "Implemented: Add Resume command variant to main.rs Command enum",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 5,
+          "timestamp": "2026-03-07T08:24:38.445086+00:00",
+          "approach": "Implemented: Add Resume command variant to main.rs Command enum",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-4-2": {
+      "attempts": [
+        {
+          "session": 9,
+          "timestamp": "2026-03-07T08:26:41.310500+00:00",
+          "approach": "Implemented: Add cmd_resume implementation in cards.rs",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 6,
+          "timestamp": "2026-03-07T08:27:01.982793+00:00",
+          "approach": "Implemented: Add cmd_resume implementation in cards.rs",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-4-3": {
+      "attempts": [
+        {
+          "session": 7,
+          "timestamp": "2026-03-07T08:28:26.170490+00:00",
+          "approach": "Implemented: Wire Resume command in main.rs match block",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 10,
+          "timestamp": "2026-03-07T08:28:27.758008+00:00",
+          "approach": "Implemented: Wire Resume command in main.rs match block",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-5-1": {
+      "attempts": [
+        {
+          "session": 8,
+          "timestamp": "2026-03-07T08:30:33.210046+00:00",
+          "approach": "Implemented: Define TRANSIENT_PATTERNS const in cards.rs",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 11,
+          "timestamp": "2026-03-07T08:30:33.730898+00:00",
+          "approach": "Implemented: Define TRANSIENT_PATTERNS const in cards.rs",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-5-2": {
+      "attempts": [
+        {
+          "session": 9,
+          "timestamp": "2026-03-07T08:34:16.689619+00:00",
+          "approach": "Implemented: Add RetryTransient command variant with --all flag",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 12,
+          "timestamp": "2026-03-07T08:34:33.707397+00:00",
+          "approach": "Implemented: Add RetryTransient command variant with --all flag",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-5-3": {
+      "attempts": [
+        {
+          "session": 10,
+          "timestamp": "2026-03-07T08:37:57.409943+00:00",
+          "approach": "Implemented: Add cmd_retry_transient implementation",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 13,
+          "timestamp": "2026-03-07T08:38:02.003101+00:00",
+          "approach": "Implemented: Add cmd_retry_transient implementation",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-5-4": {
+      "attempts": [
+        {
+          "session": 14,
+          "timestamp": "2026-03-07T08:39:48.827637+00:00",
+          "approach": "Implemented: Wire RetryTransient command in main.rs",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 11,
+          "timestamp": "2026-03-07T08:40:04.674884+00:00",
+          "approach": "Implemented: Wire RetryTransient command in main.rs",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-6-1": {
+      "attempts": [
+        {
+          "session": 15,
+          "timestamp": "2026-03-07T08:44:04.697203+00:00",
+          "approach": "Implemented: Run make check to verify all tests pass",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 12,
+          "timestamp": "2026-03-07T08:44:58.108174+00:00",
+          "approach": "Implemented: Run make check to verify all tests pass",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-6-2": {
+      "attempts": [
+        {
+          "session": 16,
+          "timestamp": "2026-03-07T08:46:03.472093+00:00",
+          "approach": "Implemented: Create output/result.md with sample command outputs",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 13,
+          "timestamp": "2026-03-07T08:46:37.985206+00:00",
+          "approach": "Implemented: Create output/result.md with sample command outputs",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    }
+  },
+  "stuck_subtasks": [],
+  "metadata": {
+    "created_at": "2026-03-07T07:58:17.856419+00:00",
+    "last_updated": "2026-03-07T08:46:37.985224+00:00"
+  }
+}

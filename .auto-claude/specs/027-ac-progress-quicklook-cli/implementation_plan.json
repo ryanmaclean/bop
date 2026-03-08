@@ -1,0 +1,505 @@
+{
+  "feature": "AC implementation plan progress in Quick Look + CLI",
+  "workflow_type": "feature",
+  "workflow_rationale": "Multi-service feature touching bop-core (data model), bop-cli (CLI rendering + TUI), macOS Quick Look (Swift), and dispatch.nu (Nushell). Phases follow service dependency: core model \u2192 plan loader \u2192 CLI rendering \u2192 Quick Look \u2192 dispatch linkage \u2192 output.",
+  "phases": [
+    {
+      "id": "phase-1-data-model",
+      "name": "Core Data Model \u2014 ac_spec_id field",
+      "type": "implementation",
+      "description": "Add ac_spec_id: Option<String> to the Meta struct in bop-core, with serde annotations and round-trip tests.",
+      "depends_on": [],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Add ac_spec_id field to Meta struct with serde annotation, add to Default impl, write round-trip test proving the field serializes to JSON as 'ac_spec_id' and omits when None",
+          "service": "bop-core",
+          "files_to_modify": [
+            "crates/bop-core/src/lib.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-core/src/lib.rs \u2014 zellij_session field pattern"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo test -p bop-core -- ac_spec_id",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "Added ac_spec_id: Option<String> to Meta struct with #[serde(default, skip_serializing_if = \"Option::is_none\")] annotation. Added to Default impl as None. Two tests: meta_ac_spec_id_round_trips (verifies serialization key and round-trip) and meta_ac_spec_id_omitted_when_none (verifies omission). All 106 bop-core tests pass.",
+          "updated_at": "2026-03-07T23:37:04.345741+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-2-plan-loader",
+      "name": "Plan Loader Module",
+      "type": "implementation",
+      "description": "Create acplan.rs module in bop-cli with AcPlan types, JSON parser, git root discovery, spec dir resolution, and CardView enrichment function.",
+      "depends_on": [
+        "phase-1-data-model"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-2-1",
+          "description": "Create crates/bop-cli/src/acplan.rs with AcPlan/AcPhase/AcSubtask structs (serde Deserialize), parse_plan(path) function, and half_circle_glyph(frac) using spec thresholds (\u25cb=0%, \u25d4=1-33%, \u25d1=34-66%, \u25d5=67-99%, \u25cf=100%). Add mod acplan to main.rs.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "files_to_create": [
+            "crates/bop-cli/src/acplan.rs"
+          ],
+          "patterns_from": [
+            "crates/bop-cli/src/render/full.rs \u2014 moon_glyph function"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo test -p bop -- acplan",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "Created crates/bop-cli/src/acplan.rs with AcPlan/AcPhase/AcSubtask structs (serde Deserialize), parse_plan(path) function, and half_circle_glyph(frac) using spec thresholds (\u25cb=0%, \u25d4=1-33%, \u25d1=34-66%, \u25d5=67-99%, \u25cf=100%). Added mod acplan to main.rs. Fixed missing ac_spec_id field in 10 Meta struct initializers in cards.rs. All 18 acplan tests pass.",
+          "updated_at": "2026-03-07T23:41:24.456249+00:00"
+        },
+        {
+          "id": "subtask-2-2",
+          "description": "Add find_git_root(start_dir) and resolve_spec_dir(git_root, ac_spec_id) functions to acplan.rs. find_git_root walks parent dirs looking for .git or .auto-claude (max 6 levels). resolve_spec_dir globs <git_root>/.auto-claude/specs/<id>-* for the spec directory. Returns Option<PathBuf> for the implementation_plan.json path.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/acplan.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-core/src/lib.rs \u2014 resolve_metadata_source pattern"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo test -p bop -- acplan::tests::find_git_root",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "Added find_git_root(start_dir) and resolve_spec_dir(git_root, ac_spec_id) to acplan.rs. find_git_root walks parent dirs (max 6 levels) looking for .git or .auto-claude markers. resolve_spec_dir globs .auto-claude/specs/<id>-*/implementation_plan.json. 9 tests passing.",
+          "updated_at": "2026-03-07T23:43:37.953882+00:00"
+        },
+        {
+          "id": "subtask-2-3",
+          "description": "Add plan_summary(plan) function returning (completed, total, current_phase_name, current_phase_frac) tuple. Add enrich_card_view(card_view, cards_root) function that: checks if Meta has ac_spec_id, calls resolve_spec_dir, loads plan, calls plan_summary, populates CardView.phase_name/phase_frac/progress and new ac_subtasks_done/ac_subtasks_total fields.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/acplan.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/render/mod.rs \u2014 from_meta enrichment pattern"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo test -p bop -- acplan::tests::plan_summary",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "plan_summary() and enrich_card_view() fully implemented with comprehensive tests. PlanSummary struct returns completed/total/current_phase_name/current_phase_frac. enrich_card_view checks ac_spec_id, resolves spec dir, loads plan, populates CardView.phase_name/phase_frac/progress. 6 plan_summary tests + 3 enrich_card_view tests all passing (36 total acplan tests). Code was already committed in prior sessions.",
+          "updated_at": "2026-03-08T00:16:07.672802+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-3-cli-rendering",
+      "name": "CLI Rendering \u2014 bop list + status --watch",
+      "type": "implementation",
+      "description": "Extend CardView with subtask counts, update all renderers to show N/T + half-circle, wire plan enrichment into collect_card_views, and update watch mode to reload plans.",
+      "depends_on": [
+        "phase-2-plan-loader"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-3-1",
+          "description": "Add ac_subtasks_done: Option<usize> and ac_subtasks_total: Option<usize> fields to CardView in render/mod.rs. Update from_meta() to set both to None. Update all existing test helper card() functions in render/*.rs and ui/widgets/*.rs to include the new fields.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/render/mod.rs",
+            "crates/bop-cli/src/render/full.rs",
+            "crates/bop-cli/src/render/dumb.rs",
+            "crates/bop-cli/src/render/basic.rs",
+            "crates/bop-cli/src/render/extended.rs",
+            "crates/bop-cli/src/render/truecolor.rs",
+            "crates/bop-cli/src/ui/widgets/kanban.rs",
+            "crates/bop-cli/src/ui/widgets/detail.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/render/mod.rs \u2014 CardView struct"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo test -p bop",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "Added ac_subtasks_done: Option<usize> and ac_subtasks_total: Option<usize> fields to CardView struct in render/mod.rs. Updated from_meta() to set both to None. Updated all 9 test helper functions (card/test_card/rich_card) across render/dumb.rs, render/basic.rs, render/extended.rs, render/full.rs, render/truecolor.rs, ui/widgets/kanban.rs, ui/widgets/detail.rs, ui/input.rs, and ui/mod.rs. All 838 tests pass.",
+          "updated_at": "2026-03-08T00:20:14.801246+00:00"
+        },
+        {
+          "id": "subtask-3-2",
+          "description": "Update render_progress() in full.rs (and other renderers that support it) to show 'N/T' count when ac_subtasks_done/total are set, and use half_circle_glyph from acplan.rs instead of moon_glyph when plan data is present. The format becomes: '\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2591\u2591\u2591\u2591  6/7   Phase 2: CLI + Docs  \u25d1'. Update kanban.rs build_progress_line similarly.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/render/full.rs",
+            "crates/bop-cli/src/render/extended.rs",
+            "crates/bop-cli/src/render/truecolor.rs",
+            "crates/bop-cli/src/ui/widgets/kanban.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/render/full.rs \u2014 render_progress"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo test -p bop -- render_progress",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "Updated render_progress() in full.rs, extended.rs, truecolor.rs to show N/T count when ac_subtasks_done/total are set, and use half_circle_glyph from acplan.rs instead of moon_glyph when plan data is present. Updated build_progress_line in kanban.rs similarly. Also updated CardRenderer trait signature to accept ac_done/ac_total params, updated all 5 renderer implementations (dumb, basic, extended, full, truecolor), and wired up enrich_card_view to populate ac_subtasks_done/total fields. All 872 tests pass.",
+          "updated_at": "2026-03-08T00:32:48.050058+00:00"
+        },
+        {
+          "id": "subtask-3-3",
+          "description": "Wire plan enrichment into collect_card_views() in list.rs: after from_meta(), if meta has ac_spec_id, call acplan::enrich_card_view() to populate plan data. Need to pass the .cards root path (or git root) so the enrichment function can find the spec dir. Also update collect_card_groups if needed.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/list.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/list.rs \u2014 collect_card_views"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo test -p bop -- list",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "Wired acplan::enrich_card_view() into collect_card_views() in list.rs. Added `use crate::acplan;` import. Updated collect_card_groups() to compute git_root once via acplan::find_git_root(root) and pass it as Option<&Path> to collect_card_views(). Updated collect_card_views() to accept git_root param and call acplan::enrich_card_view(&mut view, &meta, gr) for each card when git_root is available. All 26 list tests pass.",
+          "updated_at": "2026-03-08T00:35:34.313434+00:00"
+        },
+        {
+          "id": "subtask-3-4",
+          "description": "Update list_cards_watch() to also reload implementation_plan.json on change events. The fs watcher already watches .cards/ recursively \u2014 additionally watch .auto-claude/specs/ for plan changes. Or alternatively, reload plan data on every redraw (since redraw only happens on stats_changed). Ensure plan data changes trigger redraw.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/list.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/list.rs \u2014 list_cards_watch"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo test -p bop -- list_cards_watch",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "Updated list_cards_watch() to also watch .auto-claude/specs/ for implementation_plan.json changes. Added git root discovery via acplan::find_git_root(root) to locate specs dir. Changed channel type from () to bool: true = plan changed (force redraw), false = card changed (check stats_changed). Event filter detects both .bop extension events and implementation_plan.json file changes. Plan changes force a redraw even when card counts are unchanged. All 26 list tests pass.",
+          "updated_at": "2026-03-08T00:39:20.176192+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-4-quicklook",
+      "name": "Quick Look \u2014 Plan Tab",
+      "type": "implementation",
+      "description": "Add Plan tab to Quick Look preview showing phase/subtask progress with SF Symbol icons. New Codable structs for AcPlan, git root discovery, lazy loading.",
+      "depends_on": [
+        "phase-1-data-model"
+      ],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-4-1",
+          "description": "Add acSpecId: String? to BopCardMeta with CodingKey 'ac_spec_id'. Add AcPlan, AcPhase, AcSubtask private Codable structs. Add 'plan' case to CardTab enum (shown only when acSpecId is set and plan loads). Add @State var acPlan: AcPlan? to BopCardPreview.",
+          "service": "macos",
+          "files_to_modify": [
+            "macos/bop/PreviewViewController.swift"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "macos/bop/PreviewViewController.swift \u2014 BopCardMeta, MetaSubtask, CardTab"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "xcodebuild -project macos/macos.xcodeproj -scheme JobCardHost -configuration Debug build 2>&1 | tail -5",
+            "expected": "BUILD SUCCEEDED"
+          },
+          "status": "completed",
+          "notes": "Added acSpecId: String? to BopCardMeta with CodingKey 'ac_spec_id'. Added AcPlan, AcPhase, AcSubtask private Codable structs. Added 'plan' case to CardTab enum with conditional visibility (shown only when acSpecId is set and acPlan loads). Added @State var acPlan: AcPlan? to BopCardPreview. Added availableTabs computed property that filters plan tab. Added tabName support for plan tab showing done/total counts. Added stub planTab() view builder. Updated tab bar to use availableTabs. BUILD SUCCEEDED.",
+          "updated_at": "2026-03-08T00:41:55.200559+00:00"
+        },
+        {
+          "id": "subtask-4-2",
+          "description": "Implement git root discovery: walk parent dirs from cardURL max 6 levels looking for .auto-claude dir. Add findGitRoot(from:) helper. In preparePreviewOfFile, if meta.acSpecId is set, resolve the spec dir and load implementation_plan.json. Pass the loaded AcPlan to BopCardPreview.",
+          "service": "macos",
+          "files_to_modify": [
+            "macos/bop/PreviewViewController.swift"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "macos/bop/PreviewViewController.swift \u2014 preparePreviewOfFile"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "xcodebuild -project macos/macos.xcodeproj -scheme JobCardHost -configuration Debug build 2>&1 | tail -5",
+            "expected": "BUILD SUCCEEDED"
+          },
+          "status": "completed",
+          "notes": "Added findGitRoot(from:) helper that walks parent dirs from cardURL (max 6 levels) looking for .auto-claude dir. Added resolveSpecDir(gitRoot:specId:) that finds spec dir by prefix match under .auto-claude/specs/. Added loadAcPlan(cardURL:specId:) that combines both to load implementation_plan.json. Updated preparePreviewOfFile to load AcPlan when meta.acSpecId is set and pass it to BopCardPreview. Changed acPlan from @State to regular var since it's set once from controller. BUILD SUCCEEDED.",
+          "updated_at": "2026-03-08T00:44:17.050707+00:00"
+        },
+        {
+          "id": "subtask-4-3",
+          "description": "Implement planTab(@ViewBuilder) method in BopCardPreview: overall progress bar (same style as subtasksTab header), per-phase collapsible rows with SF Symbol icons (circle.fill=done, circle.lefthalf.filled=partial, circle=not-started), subtask rows with checkmark.circle.fill (completed/green), arrow.triangle.2.circlepath (in_progress/amber), circle (pending/dim). Phase name row background matches existing card row style.",
+          "service": "macos",
+          "files_to_modify": [
+            "macos/bop/PreviewViewController.swift"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "macos/bop/PreviewViewController.swift \u2014 subtasksTab"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "xcodebuild -project macos/macos.xcodeproj -scheme JobCardHost -configuration Debug build 2>&1 | tail -5",
+            "expected": "BUILD SUCCEEDED"
+          },
+          "status": "completed",
+          "notes": "Implemented full planTab() @ViewBuilder in BopCardPreview with: (1) Overall progress bar showing N of M subtasks complete + percentage, same style as subtasksTab header. (2) Per-phase collapsible rows with SF Symbol icons: circle.fill (done/green via .stageActive), circle.lefthalf.filled (partial/amber via .pillOrange), circle (not started/dim via .textMuted). (3) Subtask rows with: checkmark.circle.fill (completed/green), arrow.triangle.2.circlepath (in_progress/amber), circle (pending/dim). (4) Phase header rows use existing card row style (Color.black.opacity(0.15) + RoundedRectangle border). (5) Added @State collapsedPhases: Set<String> for expand/collapse toggle. (6) Extracted phaseIconInfo() and subtaskIconInfo() helper functions to avoid @ViewBuilder issues with if/switch assignments. BUILD SUCCEEDED.",
+          "updated_at": "2026-03-08T00:48:12.670798+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-5-dispatch",
+      "name": "dispatch.nu \u2014 Card Linkage",
+      "type": "implementation",
+      "description": "Update dispatch.nu to write ac_spec_id to matching card's meta.json when dispatching a spec.",
+      "depends_on": [
+        "phase-1-data-model"
+      ],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-5-1",
+          "description": "In dispatch.nu run_spec function (after write_approval), add logic to search .cards/ state dirs for a card whose meta.json id matches the spec slug or title contains the spec ID. If found, read meta.json, add/update ac_spec_id field, write back. Use nu's open/save json commands. This is the dogfood path \u2014 non-fatal if no matching card found.",
+          "service": "scripts",
+          "files_to_modify": [
+            "dispatch.nu"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "dispatch.nu \u2014 write_approval function"
+          ],
+          "verification": {
+            "type": "manual",
+            "instructions": "Verify dispatch.nu parses correctly: nu --no-config-file -c 'source dispatch.nu; echo ok'"
+          },
+          "status": "completed",
+          "notes": "Added link_card_to_spec function to dispatch.nu that searches .cards/ state dirs (pending, running, done, failed, merged) \u2014 both flat and team-prefixed \u2014 for a card whose meta.json id matches the spec slug or contains the spec ID. When found, reads meta.json, upserts ac_spec_id field, writes back with `to json --indent 2 | save --force`. Wired into run_spec after write_approval. Non-fatal: prints skip message if no matching card. Safe patterns: try/catch with null fallback (not continue in catch), mut found_meta with break on match. Nu command blocked in sandbox so manual syntax review only \u2014 no runtime parse test.",
+          "updated_at": "2026-03-08T00:51:45.547773+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-6-verification",
+      "name": "Verification + Output",
+      "type": "integration",
+      "description": "Run make check, create output/result.md with ASCII screenshot and Quick Look tab description.",
+      "depends_on": [
+        "phase-3-cli-rendering",
+        "phase-4-quicklook",
+        "phase-5-dispatch"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-6-1",
+          "description": "Run make check (cargo test + clippy + fmt --check). Fix any warnings or failures.",
+          "service": "bop",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "make check",
+            "expected": "All checks pass"
+          },
+          "status": "completed",
+          "notes": "make check passed with zero issues. cargo test: 953 tests passed (846 bop-cli + 106 bop-core + 1 doc-test). cargo clippy: 0 warnings. cargo fmt --check: 0 formatting issues. No code fixes were needed.",
+          "updated_at": "2026-03-08T00:54:36.741073+00:00"
+        },
+        {
+          "id": "subtask-6-2",
+          "description": "Create output/result.md with: (1) ASCII screenshot showing bop list output with the new AC progress bar and half-circle glyph, (2) description of the Plan tab in Quick Look with its SF Symbol icon rendering, (3) summary of all changes made.",
+          "service": "output",
+          "files_to_modify": [],
+          "files_to_create": [
+            "output/result.md"
+          ],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "test -f output/result.md && echo OK",
+            "expected": "OK"
+          },
+          "status": "completed",
+          "notes": "Created output/result.md with: (1) ASCII screenshot of bop list showing the new AC progress bar with 16-cell block bar, N/T subtask count, current phase name, and half-circle glyph (\u25cb\u25d4\u25d1\u25d5\u25cf). (2) Detailed description of the Quick Look Plan tab including tab bar appearance, plan layout with overall progress bar + per-phase collapsible sections, SF Symbol icon table for phase status (circle.fill/circle.lefthalf.filled/circle) and subtask status (checkmark.circle.fill/arrow.triangle.2.circlepath/circle), interaction model (tap to collapse), and git root discovery mechanism. (3) Comprehensive summary of all changes across 5 services: bop-core (ac_spec_id field), bop-cli (new acplan.rs module, renderer updates, list wiring), macOS Quick Look (Plan tab, Codable structs, SF Symbol rendering), and dispatch.nu (link_card_to_spec function).",
+          "updated_at": "2026-03-08T00:57:12.124177+00:00"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_phases": 6,
+    "total_subtasks": 13,
+    "services_involved": [
+      "bop-core",
+      "bop-cli",
+      "macos",
+      "scripts",
+      "output"
+    ],
+    "parallelism": {
+      "max_parallel_phases": 3,
+      "parallel_groups": [
+        {
+          "phases": [
+            "phase-3-cli-rendering",
+            "phase-4-quicklook",
+            "phase-5-dispatch"
+          ],
+          "reason": "phase-3 depends on phase-2 (sequential with phases 1-2), but phase-4 and phase-5 only depend on phase-1 (data model). phase-4 (Swift) and phase-5 (Nushell) modify completely different files from phase-3 (Rust CLI). All three can run in parallel after phase-1 completes, but phase-3 requires phase-2 first."
+        }
+      ],
+      "recommended_workers": 1,
+      "speedup_estimate": "Sequential is safest \u2014 phase-3 depends on phase-2 which is the heaviest Rust work. Quick Look and dispatch.nu changes are light."
+    },
+    "startup_command": "PYTHONPATH=$(python3 -c 'import site; print(site.getsitepackages()[0])') env -u CLAUDECODE python3 /Applications/Auto-Claude.app/Contents/Resources/backend/run.py --spec 027 --project-dir /Users/studio/bop --direct"
+  },
+  "verification_strategy": {
+    "risk_level": "medium",
+    "skip_validation": false,
+    "test_creation_phase": "inline_with_implementation",
+    "test_types_required": [
+      "unit",
+      "build"
+    ],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      "Meta has ac_spec_id: Option<String> field (serde rename ac_spec_id)",
+      "bop list renders block bar + phase half-circle for cards with ac_spec_id",
+      "bop status --watch reloads plan on file changes",
+      "Quick Look shows Plan tab when ac_spec_id resolves to a readable plan",
+      "Plan tab shows overall block bar + per-phase subtask list with SF Symbol icons",
+      "Git root discovery walks up from card dir (max 6 levels)",
+      "make check passes",
+      "output/result.md with ASCII screenshot of CLI output and description of QL tab"
+    ],
+    "verification_steps": [
+      {
+        "name": "Cargo Test",
+        "command": "cargo test",
+        "expected_outcome": "All tests pass including new ac_spec_id and acplan tests",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Clippy",
+        "command": "cargo clippy -- -D warnings",
+        "expected_outcome": "No warnings",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Format Check",
+        "command": "cargo fmt --check",
+        "expected_outcome": "No formatting issues",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Xcode Build",
+        "command": "xcodebuild -project macos/macos.xcodeproj -scheme JobCardHost -configuration Debug build 2>&1 | tail -5",
+        "expected_outcome": "BUILD SUCCEEDED",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      }
+    ],
+    "reasoning": "Medium risk: adds new field to core data model (backward-compatible via serde defaults), new module in CLI, new tab in Quick Look. All changes are additive \u2014 no existing behavior is altered."
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": true,
+      "commands": [
+        "cargo test"
+      ],
+      "minimum_coverage": null
+    },
+    "integration_tests": {
+      "required": false,
+      "commands": [],
+      "services_to_test": []
+    },
+    "e2e_tests": {
+      "required": false,
+      "commands": [],
+      "flows": []
+    },
+    "browser_verification": {
+      "required": false,
+      "pages": []
+    },
+    "database_verification": {
+      "required": false,
+      "checks": []
+    }
+  },
+  "qa_signoff": {
+    "status": "approved",
+    "timestamp": "2026-03-08T01:10:00.000000+00:00",
+    "qa_session": 1,
+    "report_file": "qa_report.md",
+    "tests_passed": {
+      "unit": "953/953",
+      "integration": "N/A",
+      "e2e": "N/A",
+      "xcode_build": "BUILD SUCCEEDED",
+      "clippy": "0 warnings",
+      "fmt": "0 issues"
+    },
+    "verified_by": "qa_agent"
+  },
+  "last_updated": "2026-03-08T01:10:00.000000+00:00",
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2026-03-08T01:03:04.924086+00:00",
+      "issues": [],
+      "duration_seconds": 323.74
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 1,
+    "last_iteration": 1,
+    "last_status": "approved",
+    "issues_by_type": {}
+  }
+}

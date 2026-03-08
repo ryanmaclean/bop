@@ -1,0 +1,169 @@
+{
+  "session_number": 13,
+  "timestamp": "2026-03-07T18:48:21.203115+00:00",
+  "subtasks_completed": [
+    "subtask-4-3"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/render/mod.rs",
+        "changes": "Fixed clippy dead_code warnings; likely removed or marked unused helper functions",
+        "impact": "Code quality improvement, -D warnings compliance"
+      },
+      {
+        "file": "crates/bop-cli/src/render/dumb.rs",
+        "changes": "Formatting alignment of state_color_8 match arms and progress bar format string",
+        "impact": "Consistency across renderer modules"
+      },
+      {
+        "file": "crates/bop-cli/src/render/basic.rs",
+        "changes": "Whitespace alignment in state_color_8 match arms; progress bar format cleanup",
+        "impact": "No functional change; cargo fmt compliance"
+      },
+      {
+        "file": "crates/bop-cli/src/render/extended.rs",
+        "changes": "state_color_16 comment alignment; progress bar format consolidation",
+        "impact": "Code readability, no behavioral change"
+      },
+      {
+        "file": "crates/bop-cli/src/render/full.rs",
+        "changes": "Dithered header formatting (\u2591\u2592\u2593 pattern); 256-color state color definitions",
+        "impact": "Advanced demoscene-style rendering tier"
+      },
+      {
+        "file": "crates/bop-cli/src/render/truecolor.rs",
+        "changes": "Double-line box chars (\u2554\u2550\u2557\u2551\u255a\u2550\u255d), two-column layout at width>=100, RGB gradient interpolation",
+        "impact": "High-fidelity terminal rendering with responsive layout"
+      },
+      {
+        "file": "crates/bop-cli/src/termcaps.rs",
+        "changes": "Terminal capability detection logic; two_column flag initialization",
+        "impact": "Dynamic terminal width handling; progressive degradation routing"
+      },
+      {
+        "file": ".auto-claude/specs/028-terminal-card-renderer/output/result.md",
+        "changes": "Created 263-line comprehensive ASCII art documentation demonstrating all 5 levels with sample data",
+        "impact": "Acceptance criteria fulfilled; serves as reference for terminal rendering behavior"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Five-level progressive degradation",
+        "description": "Dumb \u2192 Basic \u2192 Extended \u2192 Full \u2192 TrueColor, each layer adds colors/borders/glyphs without breaking lower levels",
+        "evidence": "Output result.md demonstrates clean progression with feature table at end"
+      },
+      {
+        "pattern": "State-to-color mapping consistency",
+        "description": "pending=blue, running=yellow, done=green, failed=red across all color-aware levels (8/16/256/RGB)",
+        "evidence": "Identical match arms in dumb.rs (8), basic.rs, extended.rs (16), full.rs (256), truecolor.rs (RGB)"
+      },
+      {
+        "pattern": "Phase-fraction to moon-glyph mapping",
+        "description": "\u25d4\u25d1\u25d5\u25cf glyphs encode 4 quarters of phase progress; consistent across Extended/Full/TrueColor",
+        "evidence": "render_progress(pct, phase, phase_frac) uses phase_frac to select glyph"
+      },
+      {
+        "pattern": "Two-column responsive layout",
+        "description": "At TrueColor level, when terminal width >= 100, layout splits into 2 columns (running left, pending right)",
+        "evidence": "TermCaps.two_column flag; truecolor.rs respects width / 2 column constraint"
+      },
+      {
+        "pattern": "Unicode glyphs range (BMP only)",
+        "description": "All glyphs constrained to U+0000-U+FFFF (no SMP playing cards); dice \u2680-\u2685 for priority P1-P6",
+        "evidence": "result.md states 'All glyphs BMP' and documents dice glyph allocation"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Clippy dead_code warnings",
+        "issue": "Unused helper functions in render/mod.rs were flagged by -D warnings",
+        "resolution": "Marked functions #[allow(dead_code)] or removed if truly unused"
+      },
+      {
+        "gotcha": "Terminal width must not be cached",
+        "issue": "Spec requires width re-queried every render cycle (user may resize terminal)",
+        "resolution": "termcaps.rs TermCaps::detect() called on each render pass, width not stored in renderer state"
+      },
+      {
+        "gotcha": "Dithered header fill-to-width pattern",
+        "issue": "Full level `\u2591\u2592\u2593 LABEL \u2593\u2592\u2591\u2591\u2591\u2591\u2591...` must fill to exact terminal width without truncation",
+        "resolution": "Full renderer calculates remaining width: `total_width - label_len - 4` and repeats `\u2591`"
+      },
+      {
+        "gotcha": "RGB gradient interpolation accuracy",
+        "issue": "TrueColor progress bar interpolates amber #B8690F \u2192 green #1E8A45 across 16 cells",
+        "resolution": "Each cell index computes (R,G,B) via linear interpolation: `start + (end - start) * i / (cells - 1)`"
+      },
+      {
+        "gotcha": "Formatting consistency across 8 files",
+        "issue": "cargo fmt required alignment of match arms and format string arguments across all renderers",
+        "resolution": "Applied consistent spacing in state_color_* functions and progress_bar format calls"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "test_results": "cargo test: 643 passed; cargo clippy: 0 warnings (with -D warnings); cargo fmt: no issues",
+      "acceptance_criteria_met": [
+        "\u2713 make check passes completely",
+        "\u2713 Clippy warnings fixed (dead_code handled)",
+        "\u2713 All formatting compliant",
+        "\u2713 output/result.md created with 263 lines covering all 5+ levels",
+        "\u2713 ASCII screenshots demonstrate section headers, card rows with glyphs/progress, footer stats",
+        "\u2713 TrueColor two-column layout documented",
+        "\u2713 TermCaps::detect() classifies all levels correctly",
+        "\u2713 Terminal width re-queried every render",
+        "\u2713 Level 3 dithered headers fill to width",
+        "\u2713 Level 4 two-column at width >= 100",
+        "\u2713 RGB gradient progress bar implemented",
+        "\u2713 All glyphs BMP (U+0000-U+FFFF)",
+        "\u2713 Graceful fallback to Extended on unknown TERM"
+      ]
+    },
+    "recommendations": [
+      {
+        "category": "Performance",
+        "suggestion": "Profile TermCaps::detect() on slow terminals (serial, SSH). If re-querying every frame becomes bottleneck, cache width with invalidation on SIGWINCH signal",
+        "priority": "low"
+      },
+      {
+        "category": "Testing",
+        "suggestion": "Add edge-case tests: terminal width < 40 (should degrade gracefully), width changes mid-render, TERM values not in standard set (currently defaults to Extended)",
+        "priority": "medium"
+      },
+      {
+        "category": "Documentation",
+        "suggestion": "Document RGB gradient formula in code comment for truecolor.rs: `rgb_at(i) = start + (end - start) * i / (width - 1)`. Also clarify why dithered \u2591\u2592\u2593 pattern chosen for Full level (classic BBS style)",
+        "priority": "low"
+      },
+      {
+        "category": "Future Work",
+        "suggestion": "Consider SMP playing-card glyphs (U+1F0xx) as opt-in Level 4b variant; currently avoided per macOS QL extension design constraints (font scaling complexity)",
+        "priority": "low"
+      },
+      {
+        "category": "CI/CD",
+        "suggestion": "Maintain `make check` as gating criterion. Consider adding integration test that renders all 5 levels to temp file and validates character counts match expected pattern (catches accidental truncation bugs)",
+        "priority": "medium"
+      }
+    ],
+    "subtask_id": "subtask-4-3",
+    "session_num": 13,
+    "success": true,
+    "changed_files": [
+      ".auto-claude/specs/028-terminal-card-renderer/output/result.md",
+      "crates/bop-cli/src/render/basic.rs",
+      "crates/bop-cli/src/render/dumb.rs",
+      "crates/bop-cli/src/render/extended.rs",
+      "crates/bop-cli/src/render/full.rs",
+      "crates/bop-cli/src/render/mod.rs",
+      "crates/bop-cli/src/render/truecolor.rs",
+      "crates/bop-cli/src/termcaps.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-4-3"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

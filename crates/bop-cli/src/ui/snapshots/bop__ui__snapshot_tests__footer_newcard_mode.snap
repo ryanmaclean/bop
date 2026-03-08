@@ -1,0 +1,6 @@
+---
+source: crates/bop-cli/src/ui/mod.rs
+assertion_line: 626
+expression: content
+---
+New card id: my-feature█  [↵]create [Esc]cancel

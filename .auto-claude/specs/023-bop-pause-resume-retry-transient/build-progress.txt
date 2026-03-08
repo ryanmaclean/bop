@@ -1,0 +1,295 @@
+=== AUTO-BUILD PROGRESS ===
+
+Project: bop pause/resume/retry-transient
+Workspace: /Users/studio/bop
+Started: 2026-03-07
+
+Workflow Type: feature
+Rationale: Adding three new CLI commands (pause, resume, retry-transient) to the existing bop job card dispatcher system
+
+Session 1 (Planner):
+- Created implementation_plan.json
+- Created context.json
+- Created init.sh
+- Phases: 6
+- Total subtasks: 15
+
+Phase Summary:
+
+Phase 1: Add Meta Fields (1 subtask)
+- Add exit_code and paused_at fields to Meta struct
+- Depends on: none
+
+Phase 2: Write Exit Code on Failure (2 subtasks)
+- Write exit_code to meta.json when cards fail
+- Write failure_reason from stderr last line
+- Depends on: phase-1
+
+Phase 3: Implement bop pause (3 subtasks)
+- Add Pause command variant
+- Implement cmd_pause in cards.rs
+- Wire command in main.rs
+- Depends on: phase-1
+
+Phase 4: Implement bop resume (3 subtasks)
+- Add Resume command variant
+- Implement cmd_resume in cards.rs
+- Wire command in main.rs
+- Depends on: phase-1
+
+Phase 5: Implement bop retry-transient (4 subtasks)
+- Define TRANSIENT_PATTERNS const
+- Add RetryTransient command with --all flag
+- Implement cmd_retry_transient in cards.rs
+- Wire command in main.rs
+- Depends on: phase-2
+
+Phase 6: Testing and Documentation (2 subtasks)
+- Run make check
+- Create output/result.md with sample outputs
+- Depends on: phase-3, phase-4, phase-5
+
+Services Involved:
+- bop (Rust CLI): Main service for implementation
+
+Parallelism Analysis:
+- Max parallel phases: 3 (phases 2, 3, 4 can run after phase 1)
+- Recommended workers: 1 (sequential execution - overlapping files)
+- Parallel groups:
+  * Phase 2, 3, 4 after phase 1 completes (but modify different sections)
+
+Critical Requirements:
+1. Pause race condition: Check card still in running/ before rename
+2. Exit 75 handling: Don't double-move voluntary exits
+3. TRANSIENT_PATTERNS: Use const slice for pattern matching
+4. Stderr reading: Last non-empty line, truncate to 256 bytes
+
+=== STARTUP COMMAND ===
+
+To continue building this spec, run:
+
+  source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 023 --parallel 1
+
+This will launch the coder agent to implement the subtasks sequentially.
+
+=== END SESSION 1 ===
+
+=== SESSION 2 (Coder) ===
+
+[subtask-1-1] Add exit_code and paused_at fields to Meta struct
+- Status: COMPLETED
+- Files modified:
+  * crates/bop-core/src/lib.rs
+- Changes made:
+  * Added Option<i32> exit_code field to Meta struct
+  * Added Option<DateTime<Utc>> paused_at field to Meta struct
+  * Updated Default impl for Meta to include both new fields
+  * Fields follow existing pattern with #[serde(default, skip_serializing_if = "Option::is_none")]
+- Verification: cargo build --package bop-core ✓ PASSED
+- Commit: a5817c0 "auto-claude: subtask-1-1 - Add exit_code and paused_at fields to Meta struct"
+
+[subtask-2-1] Write exit_code to meta.json when card moves to failed/
+- Status: COMPLETED
+- Files modified:
+  * crates/bop-cli/src/dispatcher.rs (exit_code writes)
+  * crates/bop-cli/src/cards.rs (Meta struct initialization fixes)
+- Changes made:
+  * Workspace prepare failure: Set exit_code=None at line 268 before write_meta
+  * Process completion: Set exit_code=Some(exit_code) at line 389 before write_meta
+  * Both locations write exit_code before fs::rename to failed/
+  * Fixed Meta struct initializations in cards.rs to include exit_code and paused_at fields
+- Verification: Manual inspection confirmed exit_code written before rename ✓ PASSED
+- Commit: b8309c7 "auto-claude: subtask-2-1 - Write exit_code to meta.json when card moves to fa"
+
+[subtask-2-2] Write failure_reason as last line of stderr when moving to failed/
+- Status: COMPLETED
+- Files modified:
+  * crates/bop-cli/src/util.rs (new helper function)
+  * crates/bop-cli/src/dispatcher.rs (read stderr and write failure_reason)
+- Changes made:
+  * Added util::read_last_nonempty_line() helper function to read last non-empty line from stderr
+  * Helper truncates to max_bytes (256) to match spec requirement
+  * Workspace prepare failure (line 269): Reads stderr or falls back to error message
+  * Process completion failure (lines 394-401): Reads stderr only when will_fail is true
+  * Both locations write meta.failure_reason before fs::rename to failed/
+  * Removed duplicate unused function from dispatcher.rs
+- Verification: Manual inspection + cargo build + cargo clippy ✓ PASSED
+- Commit: 0ebeec1 "auto-claude: subtask-2-2 - Write failure_reason as last line of stderr when moving to failed/"
+
+[subtask-3-1] Add Pause command variant to main.rs Command enum
+- Status: COMPLETED
+- Files modified:
+  * crates/bop-cli/src/main.rs (Pause command variant and match arm)
+  * crates/bop-cli/src/cards.rs (stub cmd_pause function)
+- Changes made:
+  * Added Pause command variant at line 110-113 with id: String parameter
+  * Doc comment: "Pause a running card, preventing it from being dispatched until resumed."
+  * Added stub match arm in main() at line 578-582 with placeholder implementation
+  * Added stub cmd_pause() function in cards.rs (returns "not yet implemented" error)
+  * Implementation follows pattern of existing commands like Retry and Kill
+- Verification: cargo build --package bop ✓ PASSED (one dead_code warning on stub function)
+- Commit: ef72e5f "auto-claude: subtask-3-1 - Add Pause command variant to main.rs Command enum"
+
+
+[2026-03-07 subtask-3-3] Wire Pause command in main.rs match block
+Status: COMPLETED
+Finding: The Pause command is already properly wired in main.rs at line 578:
+  Command::Pause { id } => cards::cmd_pause(&root, &id).await
+This follows the correct pattern matching other commands (Retry, Kill, Approve).
+Verification: cargo build --package bop succeeds (0.07s)
+Result: No changes needed, subtask already complete from previous work
+
+[subtask-4-1] Add Resume command variant to main.rs Command enum
+- Status: COMPLETED
+- Files modified:
+  * crates/bop-cli/src/main.rs (Resume command variant and match arm)
+  * crates/bop-cli/src/cards.rs (stub cmd_resume function)
+- Changes made:
+  * Added Resume command variant at line 114-117 with id: String parameter
+  * Doc comment: "Resume a paused card, allowing it to be dispatched again."
+  * Added match arm in main() at line 583: Command::Resume { id } => cards::cmd_resume(&root, &id).await
+  * Added stub cmd_resume() async function in cards.rs (returns "resume not yet implemented" error)
+  * Implementation follows pattern of Pause command (async function with same signature)
+- Verification: cargo build --package bop ✓ PASSED
+- Commit: f05e1be "auto-claude: subtask-4-1 - Add Resume command variant to main.rs Command enum"
+
+[subtask-4-2] Add cmd_resume implementation in cards.rs
+- Status: COMPLETED
+- Files modified:
+  * crates/bop-cli/src/cards.rs (cmd_resume full implementation)
+- Changes made:
+  * Implemented cmd_resume as async function that scans both flat and team-based pending/ directories
+  * Collects all .bop/.jobcard cards from pending/ directories
+  * For each card: reads meta.json, checks if paused_at is set
+  * If paused_at exists: clears the field, writes meta back, re-renders thumbnail
+  * Prints '▶  queued for dispatch: <id>' for each resumed card
+  * Handles edge cases: no pending cards, no paused cards, failed meta reads
+  * Follows the same directory scanning pattern as cmd_pause
+- Verification: cargo build --package bop ✓ PASSED (1.48s)
+- Commit: 9475550 "auto-claude: subtask-4-2 - Add cmd_resume implementation in cards.rs"
+
+## Subtask subtask-4-3: Wire Resume command in main.rs match block
+
+**Status:** ✅ Completed (already wired)
+
+**Changes:**
+- No code changes needed - Resume command already wired at line 583 of main.rs
+- Match arm: `Command::Resume { id } => cards::cmd_resume(&root, &id).await`
+- This was completed in subtask-4-1 when the command variant was added
+
+**Verification:**
+```bash
+cargo build --package bop
+```
+Result: Build succeeded ✅
+
+**Notes:**
+- The Resume command was already properly wired in the match block
+- Follows the same pattern as Pause and Kill commands
+- Implementation in cards::cmd_resume already exists and is functional
+
+[subtask-5-1] Define TRANSIENT_PATTERNS const in cards.rs
+- Status: COMPLETED
+- Files modified:
+  * crates/bop-cli/src/cards.rs (TRANSIENT_PATTERNS const)
+- Changes made:
+  * Added TRANSIENT_PATTERNS const with 11 string patterns at line 15
+  * Patterns: "rate limit", "429", "503", "timeout", "connection refused", "network", "ECONNRESET", "EX_TEMPFAIL", "name resolution failed", "no route to host", "524"
+  * Placed after imports with doc comment explaining usage by bop retry-transient
+  * Const type: &[&str] slice for case-insensitive matching in retry-transient
+- Verification: cargo build --package bop ✓ PASSED (warning about unused const expected until subtask-5-3)
+- Commit: 053f7fd "auto-claude: subtask-5-1 - Define TRANSIENT_PATTERNS const in cards.rs"
+
+## Subtask-5-1: Define TRANSIENT_PATTERNS const in cards.rs - COMPLETED
+
+**Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+**What was done:**
+- Added TRANSIENT_PATTERNS const to crates/bop-cli/src/cards.rs
+- Defined 11 transient error patterns as specified in the spec:
+  - "rate limit", "429", "503", "timeout", "connection refused"
+  - "network", "ECONNRESET", "EX_TEMPFAIL", "name resolution failed"
+  - "no route to host", "524"
+- Placed after imports with doc comment explaining usage by bop retry-transient
+- Const will be used case-insensitively against failure_reason or stderr
+
+**Verification:**
+- ✅ Build succeeded: cargo build --package bop
+- ✅ Committed: 053f7fd "auto-claude: subtask-5-1 - Define TRANSIENT_PATTERNS const in cards.rs"
+- ✅ Implementation plan updated to completed status
+
+**Notes:**
+- Warning about unused const is expected until cmd_retry_transient is implemented
+- Patterns match spec requirements exactly
+- Ready for next subtask: Add RetryTransient command variant
+
+
+## Subtask 5-2: Add RetryTransient command variant with --all flag - COMPLETED
+
+**Status:** ✅ Completed
+**Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+### Changes Made:
+1. Added RetryTransient command variant to main.rs Command enum (lines 110-117)
+   - Parameters: id: Option<String>, all: bool (with #[arg(long)])
+   - Follows pattern of other pause/resume commands
+   
+2. Added match arm in main() (lines 591-593)
+   - Calls cards::cmd_retry_transient(&root, id.as_deref(), all)
+
+3. Created stub function cmd_retry_transient in cards.rs
+   - Returns unimplemented errors (will be implemented in subtask-5-3)
+   - Prefixed unused parameter with underscore to avoid warnings
+
+### Verification:
+- ✅ cargo build --package bop: Build succeeded with only 1 warning (unused TRANSIENT_PATTERNS constant, will be used in next subtask)
+- ✅ Committed changes: b41735f
+
+### Next Steps:
+- Subtask 5-3: Implement cmd_retry_transient logic to scan failed/ cards and retry transient failures
+
+## Subtask 5-3: Add cmd_retry_transient implementation - COMPLETED
+
+**Status:** ✅ Completed
+**Date:** 2026-03-07
+
+### Changes Made:
+1. Added is_transient_failure() helper function in cards.rs
+   - Checks exit_code == 75 (rate limit exit code)
+   - Checks meta.failure_reason field against TRANSIENT_PATTERNS (case-insensitive)
+   - Checks last line of logs/stderr against TRANSIENT_PATTERNS (case-insensitive)
+   - Returns true if any pattern matches
+
+2. Implemented full cmd_retry_transient() function
+   - Handles single card ID mode: validates card in failed state, updates meta, moves to pending
+   - Handles scan-all mode: scans both flat and team-based failed/ directories
+   - Filters cards using is_transient_failure() unless --all flag is set
+   - Updates meta: increments retry_count, clears failure_reason and exit_code
+   - Resets Failed stages to Pending status (clears agent, provider, duration_s, started, blocked_by)
+   - Preserves team structure when renaming to pending/
+   - Logs lineage events and re-renders thumbnails
+   - Prints skip messages for non-transient failures
+   - Prints retry messages showing card ID and reason
+
+### Verification:
+- ✅ cargo build --package bop: Build succeeded in 1.60s
+- ✅ Committed changes: 98d102b "auto-claude: subtask-5-3 - Add cmd_retry_transient implementation"
+- ✅ Updated implementation_plan.json status to completed
+
+### Implementation Details:
+- Helper function is_transient_failure() uses TRANSIENT_PATTERNS const for matching
+- Single card mode uses paths::find_card() for lookup
+- Scan mode follows same directory scanning pattern as cmd_pause and cmd_resume
+- Error handling: continues on per-card failures, reports errors to stderr
+- Team structure preserved: grandparent check determines team-based pending path
+
+### Next Steps:
+- Subtask 5-4: Wire RetryTransient command in main.rs (likely already complete)
+
+
+[subtask-5-4] Wire RetryTransient command in main.rs - COMPLETED
+- RetryTransient command already fully wired at lines 590-592 in main.rs
+- Wiring was completed in subtask-5-2: Command::RetryTransient { id, all } => cards::cmd_retry_transient(&root, id.as_deref(), all)
+- Verification: cargo build --package bop succeeds
+- Implementation plan updated to mark subtask-5-4 as completed
+- Commit: 575da25

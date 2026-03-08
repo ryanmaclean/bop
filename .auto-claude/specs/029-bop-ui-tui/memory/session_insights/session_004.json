@@ -1,0 +1,164 @@
+{
+  "session_number": 4,
+  "timestamp": "2026-03-07T19:14:25.391990+00:00",
+  "subtasks_completed": [
+    "subtask-1-3"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/ui/event.rs",
+        "type": "new_file",
+        "size_lines": 248,
+        "key_components": [
+          "TerminalGuard (RAII struct with panic hook)",
+          "EventLoop (three background task spawners)",
+          "spawn_fs_watcher (std::thread + std::sync::mpsc bridge to tokio)",
+          "collect_watch_dirs (discovers state dirs and team-* subdirs)"
+        ],
+        "patterns": [
+          "RAII cleanup with Drop impl + panic hook chaining",
+          "std::thread for blocking operations (crossterm, fs watcher)",
+          "tokio::spawn for async timer",
+          "std::sync::mpsc internal bridge, exposed as tokio::sync::mpsc::UnboundedReceiver"
+        ]
+      },
+      {
+        "file": "crates/bop-cli/src/ui/app.rs",
+        "type": "modified",
+        "changes": [
+          "Extracted column building logic from App::new into public build_columns(cards_root)",
+          "Refactored App::new to use build_columns helper"
+        ],
+        "rationale": "Code reuse: fs watcher needs same column rebuild logic without duplicating card discovery"
+      },
+      {
+        "file": "crates/bop-cli/src/ui/mod.rs",
+        "type": "modified",
+        "changes": [
+          "Replaced stub run_ui with full implementation",
+          "Added TerminalGuard initialization",
+          "Added EventLoop spawning and main event loop with tokio::select!-style pattern",
+          "Implemented quit handling (q key or Ctrl-C)"
+        ],
+        "completeness": "Event routing to handlers mostly stubbed; input.rs will wire remaining handlers"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "name": "RAII terminal lifecycle",
+        "description": "TerminalGuard enters alternate screen/raw mode on new(), restores on Drop. Panic hook installed for safety net cleanup before abort.",
+        "benefit": "Terminal state never left broken even on panic or unwind"
+      },
+      {
+        "name": "Three-source unified event model",
+        "description": "Crossterm (std::thread + blocking poll), timer (tokio async), fs watcher (std::thread + std::sync::mpsc) all feed into single tokio::sync::mpsc::UnboundedReceiver<AppEvent>",
+        "benefit": "Main loop uses single async recv() call; no complex select! or polling required"
+      },
+      {
+        "name": "Sync-to-async bridge pattern",
+        "description": "std::sync::mpsc channel receiver inside std::thread spawned by spawn_fs_watcher, forwards to tokio channel via clone of UnboundedSender",
+        "benefit": "Blocking fs watcher doesn't block async main loop; clean separation"
+      },
+      {
+        "name": "Debouncer with timeout",
+        "description": "notify_debouncer_mini with 200ms timeout prevents event flooding on rapid filesystem changes",
+        "benefit": "Avoids card refresh storms; single coalesced Cards event per activity burst"
+      },
+      {
+        "name": "Extracted builder for state refresh",
+        "description": "build_columns() extracted from App::new so fs watcher can rebuild columns on change",
+        "benefit": "DRY principle; fs events trigger live column refresh without duplicating collection logic"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Crossterm event polling is blocking",
+        "solution": "Spawned on dedicated std::thread with 50ms timeout poll; thread exits when channel receiver drops",
+        "impact": "Cannot run blocking crossterm::event::poll in tokio context; thread spawn is correct",
+        "memory_ref": "bop project uses Tokio runtime; blocking ops must move to std::thread"
+      },
+      {
+        "issue": "Filesystem watcher is also blocking",
+        "solution": "std::sync::mpsc inside spawn_fs_watcher std::thread, cloned UnboundedSender bridges to tokio channel",
+        "impact": "Two std::threads (crossterm + watcher) + one tokio runtime = no deadlock risk",
+        "gotcha_detail": "notify receiver iteration blocks; must be in std::thread, not tokio::spawn"
+      },
+      {
+        "issue": "New team-* directories created after startup won't be watched",
+        "solution": "Root directory watched non-recursively to detect new team-* creation; per-team state dirs still watched recursively",
+        "impact": "If team-foo created mid-session, its state dirs are not auto-discovered until next full rebuild",
+        "recommendation": "Consider re-scanning watch_dirs on AppEvent::Cards to dynamically add new team dirs"
+      },
+      {
+        "issue": "Panic hook ownership chain",
+        "solution": "std::panic::take_hook() captures original before set_hook; closure moves original_hook into panic handler",
+        "impact": "Correct chaining; nested panic handlers won't lose previous behavior",
+        "gotcha_detail": "Forgetting to capture original_hook would silence previous panic handlers"
+      },
+      {
+        "issue": "Event polling timeout (50ms) is hardcoded",
+        "solution": "Works for typical UI frame rates (~16-20ms per frame at 60fps), but timeout is fixed",
+        "impact": "If terminal events are sent right before timeout expires, up to 50ms latency before processing",
+        "recommendation": "Consider making timeout configurable based on target frame rate"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "summary": "Fully implemented event loop infrastructure with three concurrent event sources unified into a single async channel. Terminal state lifecycle properly managed via RAII TerminalGuard with panic safety net.",
+      "completeness": "Event routing handlers (2-2 input.rs, 3-1 clock, 6-4 resize) stubbed but event dispatch architecture complete and ready for integration.",
+      "confidence_level": "HIGH",
+      "commit_quality": "Single focused commit (c21246b) implementing all subtask requirements"
+    },
+    "recommendations": [
+      {
+        "priority": "MEDIUM",
+        "category": "Enhancement",
+        "suggestion": "Add event timestamp to AppEvent variants (Instant::now()) for sparkline and clock rendering.",
+        "location": "AppEvent enum in app.rs",
+        "rationale": "Subtask 3-1 (clock + sparklines) will need precise tick timing; bake it into event payload now"
+      },
+      {
+        "priority": "LOW",
+        "category": "Code quality",
+        "suggestion": "Extract magic numbers to module-level constants: TICK_INTERVAL_MS (250), DEBOUNCE_DELAY_MS (200), CROSSTERM_POLL_TIMEOUT_MS (50)",
+        "location": "event.rs module header",
+        "rationale": "Improves maintainability; makes tuning behavior easier if frame rate or responsiveness needs adjustment"
+      },
+      {
+        "priority": "MEDIUM",
+        "category": "Robustness",
+        "suggestion": "Log fs watcher failures per state dir, but don't fail startup; allow partial watch coverage gracefully",
+        "location": "spawn_fs_watcher, collect_watch_dirs",
+        "rationale": "If a state dir is unmounted or permissions changed, TUI should remain responsive for other state dirs"
+      },
+      {
+        "priority": "MEDIUM",
+        "category": "Feature",
+        "suggestion": "Consider re-scanning collect_watch_dirs inside fs watcher loop to detect new team-* dirs created mid-session",
+        "location": "spawn_fs_watcher event handling",
+        "rationale": "Current design won't auto-watch newly created teams; re-scan on every fs event is safe but expensive; could scan every 5s or on explicit signal"
+      },
+      {
+        "priority": "LOW",
+        "category": "Testing",
+        "suggestion": "Add integration test spawning mock cards and simulating fs changes to verify Cards events fire with correct columns",
+        "location": "tests/ directory (new test file)",
+        "rationale": "Event loop is core IO loop; test watcher responsiveness and column sync on card moves"
+      }
+    ],
+    "subtask_id": "subtask-1-3",
+    "session_num": 4,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/ui/app.rs",
+      "crates/bop-cli/src/ui/event.rs",
+      "crates/bop-cli/src/ui/mod.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-3"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

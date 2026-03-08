@@ -35,7 +35,7 @@ layout {
                 // Board: auto-refreshing card list
                 pane name="board" size="25%" {
                     command "nu"
-                    args "-c" "ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); while true; do clear; $ROOT/target/debug/bop status 2>/dev/null || echo 'run: cargo build'; sleep 2; done"
+                    args "-c" "ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); $ROOT/target/debug/bop status --watch 2>&1 || { echo 'watch already running or binary missing (run: cargo build)'; sleep 5; }"
                 }
 
                 // Stage pipeline: 2 rows × 2 columns

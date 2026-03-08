@@ -1,0 +1,132 @@
+{
+  "session_number": 6,
+  "timestamp": "2026-03-07T05:46:17.670282+00:00",
+  "subtasks_completed": [
+    "subtask-1-5-card-id-sanitization"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/serve.rs",
+        "changes": "Added 4 sequential validation checks to post_cards_new handler after path separator validation",
+        "lines_added": 28,
+        "key_additions": [
+          "Rejects '..' path traversal pattern",
+          "Rejects '%' URL encoding character",
+          "Rejects null bytes (\\0)",
+          "Allow-list validation: only alphanumeric, dash, underscore, dot"
+        ],
+        "validation_order": "Specific bad patterns first, then allow-list approach"
+      },
+      {
+        "file": "crates/bop-cli/tests/serve_smoke.rs",
+        "changes": "Added 4 new test cases for ID validation",
+        "lines_added": 162,
+        "test_cases": [
+          "test_serve_rejects_path_traversal",
+          "test_serve_rejects_url_encoding",
+          "test_serve_rejects_invalid_chars",
+          "test_serve_accepts_valid_chars"
+        ],
+        "test_coverage": "Each validation rule has dedicated negative test; positive case validates acceptance"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Defense-in-depth validation",
+        "description": "Multiple sequential checks: path separators \u2192 path traversal \u2192 encoding chars \u2192 null bytes \u2192 allow-list",
+        "benefit": "Explicit error messages for each rejection reason aids debugging and security auditing"
+      },
+      {
+        "pattern": "Specific before general",
+        "description": "Test and reject known attack vectors before applying broad character restrictions",
+        "implementation": "Individual checks for '..' and '%' before final alphanumeric allow-list"
+      },
+      {
+        "pattern": "Test parity",
+        "description": "Each validation rule has at least one negative test case verifying rejection",
+        "coverage": "Valid character set test ensures allow-list doesn't over-restrict"
+      },
+      {
+        "pattern": "Explicit allow-list over deny-list",
+        "description": "Character validation uses positive assertion (what IS allowed) not exclusion (what is NOT allowed)",
+        "rationale": "Allow-lists are more secure and maintainable than deny-lists"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Dot character ambiguity",
+        "context": "Dot is valid in filenames (e.g., version numbering: test-v1.2) but '..' is a path traversal vector",
+        "solution": "Separate check for '..' pattern preserves dot utility while blocking traversal"
+      },
+      {
+        "issue": "Validation order matters",
+        "context": "Path separator check (existing) must run before allow-list to catch '/' early",
+        "observation": "New checks placed after path separator validation maintains correct precedence"
+      },
+      {
+        "issue": "HTTP error response format consistency",
+        "context": "Tests expect both status code (400) AND specific error message in response body",
+        "implementation": "Each rejection returns structured JSON with descriptive error string"
+      },
+      {
+        "issue": "Null byte injection",
+        "context": "While rare in HTTP bodies, null bytes can truncate strings in C-interop or filesystem operations",
+        "solution": "Explicit null byte check provides defense for downstream zam/dub interaction"
+      }
+    ],
+    "approach_outcome": [
+      {
+        "result": "SUCCESS",
+        "commit": "7dcd152",
+        "validation_checks_added": 4,
+        "test_cases_added": 4,
+        "status": "All tests passing"
+      },
+      {
+        "security_boundary": "Card ID sanitization now rejects: './', '../', '%XX', null bytes, non-alphanumeric",
+        "impact": "Prevents path traversal, URL decoding attacks, and filesystem abuse via card creation endpoint"
+      }
+    ],
+    "recommendations": [
+      {
+        "priority": "medium",
+        "action": "Document allowed character set in API specification",
+        "rationale": "Clients need clear guidance; currently only discoverable from error messages or code"
+      },
+      {
+        "priority": "medium",
+        "action": "Add length constraint on card ID (e.g., max 128 chars)",
+        "rationale": "Unbounded IDs could cause filesystem or database issues; aligns with filesystem path limits"
+      },
+      {
+        "priority": "low",
+        "action": "Consider rate limiting on validation failures",
+        "rationale": "Repeated failed creation attempts could indicate scanning or attack; not critical for MVP"
+      },
+      {
+        "priority": "low",
+        "action": "Audit other POST /cards endpoints for similar injection vectors",
+        "rationale": "validate spec field length/content encoding; template field same checks",
+        "related_code": "req.template and req.spec fields in post_cards_new handler"
+      },
+      {
+        "priority": "future",
+        "action": "Consider UUID or URL-safe base64 encoding for card IDs",
+        "rationale": "Would eliminate allow-list maintenance if adopting stricter format in future waves"
+      }
+    ],
+    "subtask_id": "subtask-1-5-card-id-sanitization",
+    "session_num": 6,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/serve.rs",
+      "crates/bop-cli/tests/serve_smoke.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-5-card-id-sanitization"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

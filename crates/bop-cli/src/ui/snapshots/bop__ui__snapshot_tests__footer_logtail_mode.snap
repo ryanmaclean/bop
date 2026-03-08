@@ -1,0 +1,6 @@
+---
+source: crates/bop-cli/src/ui/mod.rs
+assertion_line: 570
+expression: content
+---
+[↑↓]scroll [f]follow [c]clear [Esc]close

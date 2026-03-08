@@ -1,0 +1,37 @@
+{
+  "existing_features": [],
+  "tech_stack": [],
+  "target_audience": null,
+  "planned_features": [
+    "Event-driven merge-gate via launchd / systemd.path",
+    "Run merge-gate on done/ cards",
+    "Fix bop factory: KeepAlive \u2192 WatchPaths",
+    "Ollama end-to-end adapter test",
+    "Shell completions (bash / zsh / fish)",
+    "Resume spec-003: claude e2e adapter test \u2014 run and verify passing",
+    "codex.nu end-to-end adapter test",
+    "bop clean command",
+    "claude.nu end-to-end adapter test",
+    "Create scripts/test-real-adapters.nu",
+    "job-control: bop retry / kill / logs commands",
+    "Fix CI: make workflows actually run",
+    "bop serve smoke test: curl POST creates card in pending/",
+    "make check clean: fix clippy + finish install-hooks Linux",
+    "QEMU adapter: VM-per-card execution",
+    "Dogfood: seed bop's own backlog as bop cards"
+  ],
+  "graph_hints": {},
+  "config": {
+    "enabled_types": [
+      "code_improvements",
+      "documentation_gaps",
+      "security_hardening",
+      "performance_optimizations",
+      "ui_ux_improvements"
+    ],
+    "include_roadmap_context": true,
+    "include_kanban_context": true,
+    "max_ideas_per_type": 15
+  },
+  "created_at": "2026-03-06T19:52:15.778413"
+}

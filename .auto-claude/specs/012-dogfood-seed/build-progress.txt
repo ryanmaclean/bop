@@ -1,0 +1,57 @@
+=== AUTO-BUILD PROGRESS ===
+
+Project: bop - Dogfood Seed
+Workspace: (managed by orchestrator)
+Started: 2026-03-05
+
+Workflow Type: simple
+Rationale: Single-service task with no complex dependencies. Just creating 7 cards with real specs across 4 teams. No multi-phase coordination needed.
+
+Session 1 (Planner):
+- Created implementation_plan.json
+- Created context.json
+- Created init.sh
+- Phases: 1
+- Total subtasks: 8
+
+Phase Summary:
+- Create and populate cards: 8 subtasks, no dependencies
+
+Cards to Create:
+1. watchpaths-dispatcher (team-arch ♥) - Extend dispatcher WatchPaths to all team-*/pending dirs
+2. jj-gitignore-audit (team-arch ♥) - Audit large files breaking jj snapshot, update .gitignore
+3. bop-serve (team-cli ♠) - HTTP endpoint to create cards from spec POST requests
+4. bop-doctor-checks (team-cli ♠) - Enhanced health checks for nu/jj/adapters/launchd
+5. e2e-factory-test (team-quality ♦) - End-to-end test of factory → dispatcher → done flow
+6. adapter-stress-test (team-quality ♦) - Concurrent adapter test (10 cards via ollama)
+7. model-routing (team-intelligence ♣) - Route to haiku/sonnet/opus based on cost field
+
+Services Involved:
+- bop: Rust CLI for card management
+
+Parallelism Analysis:
+- Max parallel phases: 1
+- Recommended workers: 1
+- Sequential card creation (cannot parallelize bop new commands safely)
+
+Implementation Notes:
+- Each subtask creates one card using: cargo run --bin bop -- new implement <id> --team <team>
+- Spec content is embedded in implementation_plan.json for each subtask
+- Cards auto-assign glyphs based on team (arch=♥, cli=♠, quality=♦, intelligence=♣)
+- Final subtask verifies all 7 cards exist via bop list command
+
+Verification Strategy:
+- Risk level: low (only creating card files)
+- Command-based verification: bop list --state pending --json
+- No test creation needed (cards are data, not code)
+
+=== STARTUP COMMAND ===
+
+To continue building this spec, run:
+
+  source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 012 --parallel 1
+
+Example:
+  source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 012 --parallel 1
+
+=== END SESSION 1 ===

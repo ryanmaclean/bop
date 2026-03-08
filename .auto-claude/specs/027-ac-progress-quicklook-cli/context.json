@@ -1,0 +1,61 @@
+{
+  "files_to_modify": {
+    "bop-core": [
+      "crates/bop-core/src/lib.rs"
+    ],
+    "bop-cli": [
+      "crates/bop-cli/src/list.rs",
+      "crates/bop-cli/src/render/mod.rs",
+      "crates/bop-cli/src/render/full.rs",
+      "crates/bop-cli/src/render/dumb.rs",
+      "crates/bop-cli/src/render/basic.rs",
+      "crates/bop-cli/src/render/extended.rs",
+      "crates/bop-cli/src/render/truecolor.rs",
+      "crates/bop-cli/src/ui/widgets/kanban.rs",
+      "crates/bop-cli/src/ui/widgets/detail.rs"
+    ],
+    "macos": [
+      "macos/bop/PreviewViewController.swift"
+    ],
+    "scripts": [
+      "dispatch.nu"
+    ]
+  },
+  "files_to_create": {
+    "bop-cli": [
+      "crates/bop-cli/src/acplan.rs"
+    ],
+    "output": [
+      "output/result.md"
+    ]
+  },
+  "files_to_reference": [
+    "crates/bop-core/src/lib.rs (Meta struct serde patterns)",
+    "crates/bop-cli/src/render/full.rs (moon_glyph, progress bar, render_progress)",
+    "crates/bop-cli/src/render/mod.rs (CardView struct, from_meta, CardRenderer trait)",
+    "crates/bop-cli/src/list.rs (collect_card_views, list_cards_watch)",
+    "crates/bop-cli/src/ui/widgets/kanban.rs (build_progress_line, moon_glyph, card_to_list_item)",
+    "macos/bop/PreviewViewController.swift (BopCardMeta, CardTab, subtasksTab pattern)",
+    "dispatch.nu (write_approval, run_spec)"
+  ],
+  "patterns": {
+    "meta_field_pattern": "All optional fields use #[serde(default, skip_serializing_if = \"Option::is_none\")]; snake_case in JSON; added to Default impl as None",
+    "card_view_enrichment": "from_meta() builds CardView with defaults; caller enriches plan data afterward (phase_name, phase_frac currently None/0.0)",
+    "render_progress": "CardRenderer::render_progress(pct, phase, phase_frac) — 16-cell bar with █░, optional phase + moon glyph",
+    "swift_codable": "BopCardMeta uses CodingKeys enum for snake_case mapping; new fields are Optional with CodingKey entries",
+    "swift_tab_pattern": "CardTab enum CaseIterable; selectedTab state; ForEach over allCases with onTapGesture; @ViewBuilder methods per tab",
+    "watch_pattern": "list_cards_watch uses notify_debouncer_mini (100ms), tokio::select!, cursor-up ANSI for minimal redraw"
+  },
+  "existing_implementations": {
+    "phase_name_phase_frac": "CardView already has phase_name: Option<String> and phase_frac: f32 — used in full.rs render_progress and kanban.rs build_progress_line; currently always None/0.0 from from_meta()",
+    "moon_glyph": "Both full.rs and kanban.rs have moon_glyph(frac) → ◔◑◕● for 0-25/25-50/50-75/75-100 brackets",
+    "subtasks_tab_swift": "Quick Look already has subtasksTab with checkmark.circle.fill/circle SF Symbols, doneCount/totalCount, percentage",
+    "dispatch_write_approval": "dispatch.nu line 196: write_approval approves spec for AC runner; run_spec (line 236) calls write_approval then spawns pane"
+  },
+  "key_decisions": {
+    "spec_half_circle_glyphs": "Spec wants ○◔◑◕● at 0/1-33/34-66/67-99/100 thresholds — DIFFERENT from existing moon_glyph ◔◑◕● at 25/50/75 brackets. New function needed.",
+    "plan_data_source": "implementation_plan.json is found via: git_root/.auto-claude/specs/<ac_spec_id>-*/implementation_plan.json using glob/prefix match",
+    "enrichment_location": "Plan enrichment happens in collect_card_views() AFTER from_meta() — new acplan.rs module provides the parser and enrichment logic",
+    "card_view_extensions": "Need ac_subtasks_done/ac_subtasks_total on CardView for N/T display; progress overridden from plan completion %"
+  }
+}

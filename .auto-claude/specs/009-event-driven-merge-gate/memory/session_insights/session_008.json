@@ -1,0 +1,118 @@
+{
+  "session_number": 8,
+  "timestamp": "2026-03-06T16:34:37.029518+00:00",
+  "subtasks_completed": [
+    "subtask-2-4"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/main.rs",
+        "change_type": "enhancement",
+        "scope": "InstallHooks command variant and platform-specific handlers",
+        "modifications": [
+          "Added `uninstall: bool` field to InstallHooks enum variant with clap attribute",
+          "Refactored install_hooks_macos() signature to accept uninstall parameter",
+          "Refactored install_hooks_linux() signature to accept uninstall parameter",
+          "Implemented macOS uninstall logic: launchctl unload + fs::remove_file",
+          "Added conditional uninstall handling for Linux (stub only)",
+          "Updated main command dispatcher to extract and pass uninstall flag"
+        ],
+        "lines_added": 41,
+        "lines_removed": 7,
+        "complexity": "medium"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "name": "Bidirectional Service Management",
+        "description": "Added inverse operation to install_hooks by making uninstall a flag parameter rather than separate command variant",
+        "benefit": "Maintains cohesion between install and uninstall paths in single function"
+      },
+      {
+        "name": "Conditional Compilation for Platform Abstraction",
+        "description": "Leveraging #[cfg(target_os = \"..\")] to provide OS-specific implementations with graceful stubs",
+        "benefit": "Code compiles on all platforms but provides proper implementations only where applicable"
+      },
+      {
+        "name": "Graceful Service Lifecycle Management",
+        "description": "Using launchctl with output capture to detect and report unload failures without hard-failing",
+        "benefit": "Handles case where service is not loaded without breaking uninstall flow"
+      },
+      {
+        "name": "Path Resolution Hygiene",
+        "description": "Moved HOME environment variable resolution earlier in function to support both install and uninstall paths",
+        "benefit": "DRY principle: HOME resolved once at function start rather than duplicated"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Linux implementation deferred",
+        "severity": "medium",
+        "description": "Linux uninstall logic remains unimplemented with only eprintln stub",
+        "implication": "Users on Linux cannot uninstall merge-gate hooks; would require systemctl disable + stop"
+      },
+      {
+        "issue": "No idempotency safeguard for macOS uninstall",
+        "severity": "low",
+        "description": "Calling uninstall twice attempts launchctl unload on non-existent plist; handled gracefully but could warn earlier",
+        "implication": "Second uninstall will show 'no hook installed' message rather than success"
+      },
+      {
+        "issue": "No confirmation prompt for destructive operation",
+        "severity": "low",
+        "description": "Uninstall removes plist without requiring user confirmation",
+        "implication": "Accidental invocation of --uninstall will immediately remove service configuration"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "summary": "Implemented --uninstall flag for InstallHooks command with full macOS support and Linux stub",
+      "completeness": "Partial - macOS fully implemented, Linux deferred",
+      "quality_signals": [
+        "Symmetrical API design (uninstall as flag on install command)",
+        "Proper error context propagation",
+        "User-friendly console output with visual feedback",
+        "Handles edge case of non-loaded service gracefully",
+        "Single commit with clear message"
+      ]
+    },
+    "recommendations": [
+      {
+        "priority": "high",
+        "category": "completeness",
+        "action": "Implement Linux systemd uninstall logic",
+        "details": "Replace eprintln stub with: systemctl --user disable sh.bop.merge-gate && systemctl --user stop sh.bop.merge-gate, handling ENOENT gracefully"
+      },
+      {
+        "priority": "medium",
+        "category": "safety",
+        "action": "Add --force flag for uninstall without launchctl unload step",
+        "details": "Allow direct plist removal if launchctl fails or is unavailable"
+      },
+      {
+        "priority": "low",
+        "category": "testing",
+        "action": "Add integration tests for install/uninstall round-trip",
+        "details": "Verify plist created on install, removed on uninstall, and idempotent behavior"
+      },
+      {
+        "priority": "low",
+        "category": "documentation",
+        "action": "Document uninstall behavior in help text",
+        "details": "Clarify that --uninstall removes service configuration files"
+      }
+    ],
+    "subtask_id": "subtask-2-4",
+    "session_num": 8,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/main.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-2-4"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

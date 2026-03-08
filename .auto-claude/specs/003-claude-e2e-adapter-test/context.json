@@ -1,0 +1,38 @@
+{
+  "files_to_modify": {
+    "bop": ["scripts/test-real-adapters.nu"]
+  },
+  "files_to_reference": [
+    "adapters/claude.nu",
+    "adapters/mock.nu",
+    "scripts/test-real-adapters.nu"
+  ],
+  "patterns": {
+    "adapter_pattern": "Adapters receive: <workdir> <prompt_file> <stdout_log> <stderr_log> [memory_out]",
+    "adapter_exit_codes": "0=success, 75=transient (rate limit/timeout), 1+=failure",
+    "test_harness_pattern": "Test harness creates temp .cards dir, initializes with bop init, writes template, creates card, runs dispatcher, polls for completion",
+    "prompt_template_location": "Template spec.md content is written in write_template function (line 307-310)",
+    "verification_pattern": "assert_result checks for output/result.md existence and non-empty content"
+  },
+  "existing_implementations": {
+    "description": "Test infrastructure exists at scripts/test-real-adapters.nu. Mock adapter works. Claude adapter exists but may not be creating output/result.md due to prompt clarity.",
+    "relevant_files": [
+      "adapters/claude.nu",
+      "adapters/mock.nu",
+      "scripts/test-real-adapters.nu"
+    ],
+    "key_findings": [
+      "claude CLI is available at /Users/studio/.local/bin/claude",
+      "claude.nu adapter unsets CLAUDECODE env var to allow nested sessions",
+      "Test template prompt (line 307-310) says 'Use file creation tools' but spec suggests it should say 'Use the Write tool'",
+      "Mock adapter test passes - infrastructure works",
+      "Claude adapter test likely fails because Claude doesn't understand 'file creation tools' as clearly as 'Write tool'"
+    ]
+  },
+  "task_scope": {
+    "workflow_type": "simple",
+    "description": "Update the prompt template in test-real-adapters.nu to be more explicit about using the Write tool, then verify the test passes",
+    "affected_components": ["test harness prompt template"],
+    "verification_command": "nu --no-config-file scripts/test-real-adapters.nu --adapter claude --timeout 120"
+  }
+}

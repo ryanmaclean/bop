@@ -1,0 +1,32 @@
+{
+  "project_root": "/Users/studio/bop",
+  "project_type": "single",
+  "services": {
+    "bop": {
+      "path": ".",
+      "tech_stack": ["rust", "cargo", "nushell"],
+      "dev_command": "cargo build",
+      "test_command": "cargo test",
+      "lint_command": "cargo clippy -- -D warnings"
+    }
+  },
+  "infrastructure": {
+    "docker": false,
+    "ci": "none",
+    "vcs": "git+jj (colocated)"
+  },
+  "conventions": {
+    "linter": "clippy",
+    "formatter": "rustfmt",
+    "testing": "cargo test",
+    "scripts": "nushell (.nu)"
+  },
+  "dependency_locations": [
+    "Cargo.toml (workspace)",
+    "crates/bop-core/Cargo.toml",
+    "crates/bop-cli/Cargo.toml"
+  ],
+  "build_info": {
+    "workspace_members": ["bop-core", "bop-cli"]
+  }
+}

@@ -1,0 +1,195 @@
+{
+  "session_number": 4,
+  "timestamp": "2026-03-05T19:33:41.909630+00:00",
+  "subtasks_completed": [
+    "subtask-1-3"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/merge_gate.rs",
+        "changes": "Added support for team directories (.cards/team-*/) and .jobcard file extension format",
+        "impact": "Critical fix enabling merge-gate to process team-organized card structures",
+        "pattern": "Directory pattern matching now supports both flat and team-namespaced layouts"
+      },
+      {
+        "file": ".auto-claude/dispatch-state.json",
+        "changes": "Spec 005 (run-merge-gate) added to completed array",
+        "impact": "Sequential spec execution progressing normally",
+        "pattern": "Dispatch wave tracking spec completion across auto-claude ecosystem"
+      },
+      {
+        "file": ".auto-claude/specs/004-codex-e2e-adapter-test/implementation_plan.json",
+        "changes": "QA signoff section populated with rejection status and manual verification requirements",
+        "impact": "Blocks spec 004 completion pending user manual verification",
+        "pattern": "Environmental limitation (Nu policy restrictions) preventing automated QA closure"
+      },
+      {
+        "file": ".auto-claude/specs/004-codex-e2e-adapter-test/QA_FIX_REQUEST.md",
+        "changes": "New file documenting manual verification pathway for integration tests",
+        "impact": "Provides clear instructions for user to complete QA phase",
+        "pattern": "Fallback documentation when Auto-Claude environment cannot execute required verification"
+      },
+      {
+        "file": ".auto-claude/dispatch-lock.json",
+        "changes": "File deleted (lock released)",
+        "impact": "Dispatch wave completion clean-up",
+        "pattern": "Lock lifecycle: created on wave start, deleted on wave completion"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Team Directory Structure Support",
+        "description": "merge-gate.rs updated to handle .cards/team-{name}/ directory pattern alongside flat .cards/ layout",
+        "location": "crates/bop-cli/src/merge_gate.rs",
+        "relevance": "Essential for real-world team-based card organization as documented in MEMORY.md"
+      },
+      {
+        "pattern": "Sequential Spec Execution",
+        "description": "Auto-Claude dispatch executes specs in order (001\u2192002\u2192003\u2192004\u2192005), advancing state in dispatch-state.json after each completion",
+        "location": ".auto-claude/dispatch-state.json",
+        "relevance": "Wave-based orchestration model prevents out-of-order execution and dependency issues"
+      },
+      {
+        "pattern": "Environmental Verification Limitations",
+        "description": "Policy restrictions prevent Nu command execution in Auto-Claude environment; QA creates manual verification task with explicit commands for user to run",
+        "location": ".auto-claude/specs/004-codex-e2e-adapter-test/QA_FIX_REQUEST.md",
+        "relevance": "Acceptance criteria require test execution that environment cannot support; fallback is detailed manual verification instructions"
+      },
+      {
+        "pattern": "QA Signoff Structure",
+        "description": "implementation_plan.json now contains qa_signoff object with status, timestamp, issues_found array, and qa_iteration_history",
+        "location": ".auto-claude/specs/004-codex-e2e-adapter-test/implementation_plan.json",
+        "relevance": "Standardized QA tracking across auto-claude ecosystem with issue categorization and iteration history"
+      },
+      {
+        "pattern": "Code Infrastructure Verification vs Execution",
+        "description": "Spec 004 demonstrates pattern where all code is correct (unit tests pass, clippy clean, fmt clean) but integration test execution blocked by environment",
+        "location": "implementation_plan.json qa_signoff section",
+        "relevance": "Distinguishes code quality issues from environmental limitations; enables QA to pass verification of infrastructure while blocking on execution"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Policy blocks Nu command execution in Auto-Claude environment",
+        "impact": "Cannot automatically verify spec 004 acceptance criteria: test-real-adapters.nu execution",
+        "workaround": "QA_FIX_REQUEST.md provides explicit manual commands with expected outputs for user to run externally",
+        "prevention": "Document environmental limitations in spec upfront; pre-identify which acceptance criteria require manual verification"
+      },
+      {
+        "issue": "File extension and directory pattern assumptions in merge-gate.rs",
+        "impact": "Previous code expected flat .cards/ layout; team-based structure .cards/team-*/ was unhandled",
+        "workaround": "Enhanced merge-gate.rs to support both patterns via commit e770977",
+        "prevention": "When designing filesystem state machines, document and test against all directory structure variations upfront"
+      },
+      {
+        "issue": "QA iteration history shows rejection, not fix loop",
+        "impact": "Spec 004 marked as 'rejected' but this is architectural (requires manual verification), not a failure requiring code fix",
+        "workaround": "QA_FIX_REQUEST.md clarifies distinction: 'This is NOT a Code Defect'",
+        "prevention": "Distinguish QA status codes: 'rejected_environmental' vs 'rejected_code_issue' for clarity in dispatch workflows"
+      },
+      {
+        "issue": "merge-gate.rs must handle both .jobcard/ and legacy directory formats",
+        "impact": "Spec 005 (run-merge-gate) requires format compatibility to process all queued cards without failure",
+        "workaround": "Commit e770977 adds extension detection logic",
+        "prevention": "Add test coverage for format migrations; document breaking changes in state machine evolution"
+      }
+    ],
+    "approach_outcome": {
+      "subtask_id": "subtask-1-3",
+      "objective": "Run merge-gate repeatedly until all done/ cards are processed",
+      "status": "SUCCESS",
+      "completion_signal": "Spec 005 (run-merge-gate) entered completed array in dispatch-state.json; dispatch-lock.json deleted",
+      "key_achievement": "merge-gate.rs fixed to support team directory structure (.cards/team-*/) enabling real-world card processing",
+      "blockers_resolved": [
+        "File format compatibility (team directories + .jobcard extension)",
+        "Infinite retry loop prevention (spec 005 addresses merge-gate retry logic)"
+      ],
+      "downstream_impact": "Spec 006 (job-control-retry-kill-logs) can now proceed; team-based card workflow validated",
+      "qa_status": "Spec 004 QA pending manual user verification; code infrastructure verified correct"
+    },
+    "recommendations": [
+      {
+        "priority": "HIGH",
+        "recommendation": "User must execute manual verification for spec 004",
+        "action": "Run `nu --no-config-file scripts/test-real-adapters.nu --adapter codex --timeout 120` and provide output to QA_FIX_REQUEST.md",
+        "impact": "Unblocks spec 004 closure and enables spec 005+ to advance if all prior specs complete"
+      },
+      {
+        "priority": "HIGH",
+        "recommendation": "Add test coverage for team directory structure in merge_gate_harness.rs",
+        "action": "Create test case with .cards/team-{name}/ directory layout to prevent regression",
+        "impact": "Ensures merge-gate robustness against directory structure variations; prevents future gotchas"
+      },
+      {
+        "priority": "MEDIUM",
+        "recommendation": "Document environmental QA limitations in spec templates",
+        "action": "Add section in auto-claude spec template identifying which acceptance criteria require manual verification due to policy restrictions",
+        "impact": "Reduces surprise QA rejections; enables upfront planning of verification strategy"
+      },
+      {
+        "priority": "MEDIUM",
+        "recommendation": "Extend dispatch-state.json to track QA status separately from completion status",
+        "action": "Add qa_status field alongside spec completion to distinguish 'code_complete_awaiting_manual_qa' from 'complete'",
+        "impact": "Improves visibility into which specs are blocked on manual verification vs awaiting next spec"
+      },
+      {
+        "priority": "LOW",
+        "recommendation": "Monitor merge-gate behavior in production with team directories",
+        "action": "Add logging to track .cards/team-*/ path processing; watch for edge cases with deeply nested structures",
+        "impact": "Early detection of format-related issues; informs future state machine enhancements"
+      }
+    ],
+    "subtask_id": "subtask-1-3",
+    "session_num": 4,
+    "success": true,
+    "changed_files": [
+      ".auto-claude/dispatch-lock.json",
+      ".auto-claude/dispatch-state.json",
+      ".auto-claude/specs/004-codex-e2e-adapter-test/MANUAL_TEST_PLAN.md",
+      ".auto-claude/specs/004-codex-e2e-adapter-test/QA_FIX_REQUEST.md",
+      ".auto-claude/specs/004-codex-e2e-adapter-test/implementation_plan.json",
+      ".auto-claude/specs/004-codex-e2e-adapter-test/memory/attempt_history.json",
+      ".auto-claude/specs/004-codex-e2e-adapter-test/memory/build_commits.json",
+      ".auto-claude/specs/004-codex-e2e-adapter-test/memory/session_insights/session_001.json",
+      ".auto-claude/specs/004-codex-e2e-adapter-test/memory/session_insights/session_004.json",
+      ".auto-claude/specs/004-codex-e2e-adapter-test/memory/session_insights/session_005.json",
+      ".auto-claude/specs/004-codex-e2e-adapter-test/memory/session_insights/session_006.json",
+      ".auto-claude/specs/004-codex-e2e-adapter-test/memory/session_insights/session_007.json",
+      ".auto-claude/specs/004-codex-e2e-adapter-test/memory/session_insights/session_008.json",
+      ".auto-claude/specs/004-codex-e2e-adapter-test/qa_report.md",
+      ".auto-claude/specs/004-codex-e2e-adapter-test/task_logs.json",
+      ".auto-claude/specs/005-run-merge-gate/build-progress.txt",
+      ".auto-claude/specs/005-run-merge-gate/context.json",
+      ".auto-claude/specs/005-run-merge-gate/implementation_plan.json",
+      ".auto-claude/specs/005-run-merge-gate/init.sh",
+      ".auto-claude/specs/005-run-merge-gate/memory/attempt_history.json",
+      ".auto-claude/specs/005-run-merge-gate/memory/build_commits.json",
+      ".auto-claude/specs/005-run-merge-gate/memory/session_insights/session_002.json",
+      ".auto-claude/specs/005-run-merge-gate/memory/session_insights/session_003.json",
+      ".auto-claude/specs/005-run-merge-gate/review_state.json",
+      ".auto-claude/specs/005-run-merge-gate/spec.md",
+      ".auto-claude/specs/005-run-merge-gate/task_logs.json",
+      ".auto-claude/specs/006-job-control-retry-kill-logs/build-progress.txt",
+      ".auto-claude/specs/006-job-control-retry-kill-logs/context.json",
+      ".auto-claude/specs/006-job-control-retry-kill-logs/implementation_plan.json",
+      ".auto-claude/specs/006-job-control-retry-kill-logs/init.sh",
+      ".auto-claude/specs/006-job-control-retry-kill-logs/memory/attempt_history.json",
+      ".auto-claude/specs/006-job-control-retry-kill-logs/memory/build_commits.json",
+      ".auto-claude/specs/006-job-control-retry-kill-logs/memory/session_insights/session_002.json",
+      ".auto-claude/specs/006-job-control-retry-kill-logs/review_state.json",
+      ".auto-claude/specs/006-job-control-retry-kill-logs/spec.md",
+      ".auto-claude/specs/006-job-control-retry-kill-logs/task_logs.json",
+      ".auto-claude/specs/007-bop-clean-command/spec.md",
+      ".auto-claude/specs/008-shell-completions/spec.md",
+      ".auto-claude/specs/009-event-driven-merge-gate/spec.md",
+      "crates/bop-cli/src/merge_gate.rs",
+      "dispatch.nu"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-3"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

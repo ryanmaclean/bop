@@ -21,7 +21,7 @@
     "implement": 32000,
     "qa": 8000
   },
-  "provider_chain": ["claude", "codex", "ollama-local"],
+  "provider_chain": ["claude"],
   "acceptance_criteria": [
     "cargo test",
     "cargo clippy -- -D warnings"

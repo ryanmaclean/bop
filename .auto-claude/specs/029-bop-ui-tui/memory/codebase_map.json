@@ -1,0 +1,10 @@
+{
+  "discovered_files": {
+    "crates/bop-cli/src/ui/app.rs": {
+      "description": "TUI app state module created with AppEvent, Mode, KanbanColumn, and App structs. collect_card_views is pub(crate) for reuse. WIP limit comes from bop_core::config::read_config_file. COLUMN_STATES constant defines display order: pending, running, done, failed, merged.",
+      "category": "architecture",
+      "discovered_at": "2026-03-07T19:08:47.699277+00:00"
+    }
+  },
+  "last_updated": "2026-03-07T19:08:47.699287+00:00"
+}

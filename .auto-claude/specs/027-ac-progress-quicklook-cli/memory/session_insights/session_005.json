@@ -1,0 +1,96 @@
+{
+  "session_number": 5,
+  "timestamp": "2026-03-08T00:39:48.404028+00:00",
+  "subtasks_completed": [
+    "subtask-3-4"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/list.rs",
+        "function": "list_cards_watch",
+        "changes": "Added .auto-claude/specs/ directory to filesystem watcher; modified channel semantics to distinguish plan changes from card changes using bool signal (true=force redraw, false=conditional redraw)",
+        "scope": "Filesystem watching and event-driven display refresh logic",
+        "impact": "Plan changes now trigger immediate redraw even when card stats unchanged; minimal performance overhead from additional directory watch"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "name": "Boolean signaling through event channel",
+        "description": "Use single boolean value through channel (true=plan changed/force redraw, false=card changed/conditional redraw) instead of separate event type enum",
+        "benefit": "Reduces channel type complexity; clear semantic meaning at receiver end"
+      },
+      {
+        "name": "Two-tier event filtering",
+        "description": "First filter by event kind (DebouncedEventKind), then filter by path/filename; extracted is_event() helper",
+        "benefit": "Cleaner logic separation; reusable predicate function"
+      },
+      {
+        "name": "Conditional directory watching",
+        "description": "Only add .auto-claude/specs/ to watch list if directory exists and git root can be found",
+        "benefit": "Graceful degradation in repos without .auto-claude/ structure"
+      },
+      {
+        "name": "Display vs stats distinction",
+        "description": "Separate concerns: plan changes don't affect card stats but need redraw; card changes only redraw if stats differ",
+        "benefit": "Minimizes unnecessary redraws while ensuring UI stays in sync with plan updates"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Plan changes don't affect card statistics but still require redraw",
+        "context": "Implementation plan updates enriched display but leave prev_stats unchanged",
+        "resolution": "Added force_redraw flag to bypass stats-changed check when plan changes detected"
+      },
+      {
+        "issue": "Must find git root before adding specs directory to watch list",
+        "context": "Relative path resolution and directory existence checks",
+        "resolution": "Used acplan::find_git_root() with null-check and exists() before push"
+      },
+      {
+        "issue": "Event filtering needed refinement for new specs/ directory",
+        "context": "Original logic only checked for .bop extension; specs/ contains .json files",
+        "resolution": "Switched to filename-based check for implementation_plan.json specifically"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "approach_details": {
+      "strategy": "Extended existing filesystem watcher to track plan changes via separate signaling channel",
+      "implementation_quality": "Clean separation of concerns; backward compatible; well-commented",
+      "completeness": "Fully implemented - both plan watching and redraw logic integrated"
+    },
+    "recommendations": [
+      {
+        "priority": "medium",
+        "item": "Extract event classification logic into separate function (classify_event) to reduce list_cards_watch cognitive load"
+      },
+      {
+        "priority": "medium",
+        "item": "Document boolean channel semantics with type alias or newtype wrapper (e.g., enum RedrawKind { ForceRedraw, ConditionalRedraw })"
+      },
+      {
+        "priority": "low",
+        "item": "Consider adding tests for plan change detection under test harness"
+      },
+      {
+        "priority": "low",
+        "item": "Monitor if other .auto-claude/ files (specs metadata, locks, state) should trigger similar plan reloads"
+      },
+      {
+        "priority": "low",
+        "item": "Profile double-watch overhead (card + specs dirs) on large repos; consider coalescing if needed"
+      }
+    ],
+    "subtask_id": "subtask-3-4",
+    "session_num": 5,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/list.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-3-4"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

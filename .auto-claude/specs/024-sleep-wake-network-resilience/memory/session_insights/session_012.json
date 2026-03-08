@@ -1,0 +1,92 @@
+{
+  "session_number": 12,
+  "timestamp": "2026-03-07T09:27:28.901302+00:00",
+  "subtasks_completed": [
+    "subtask-5-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/power.rs",
+        "type": "modification",
+        "changes": [
+          {
+            "line_range": "7-8",
+            "change_type": "attribute_addition",
+            "content": "#[allow(dead_code)] // Used in tests; will be used in IOKit implementation (subtask-1-2)",
+            "impact": "Suppresses clippy dead_code warning for Sleeping enum variant"
+          }
+        ],
+        "context": "SleepState enum definition; Sleeping variant intentionally unused in current implementation"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "name": "pragmatic_lint_suppression",
+        "description": "Using #[allow(dead_code)] with future-use justification comments",
+        "relevance": "Bridges gap between current test usage and planned IOKit integration (subtask-1-2)",
+        "pattern_type": "lint_management"
+      },
+      {
+        "name": "roadmap_aware_comments",
+        "description": "Comments in suppress attributes reference specific future subtasks/features",
+        "relevance": "Maintains traceability between lint suppressions and architectural plans",
+        "pattern_type": "documentation_practice"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Dead code variants in test-only contexts trigger clippy warnings",
+        "severity": "medium",
+        "context": "Sleeping variant used in tests but not in production code path yet",
+        "resolution_applied": "Explicit allow attribute with forward reference to implementing subtask"
+      },
+      {
+        "gotcha": "Single allow attribute can suppress multiple clippy rules",
+        "severity": "low",
+        "context": "dead_code is the primary lint; other rules may silently pass",
+        "resolution_applied": "Specific allow(dead_code) targets precise lint rather than blanket allow"
+      }
+    ],
+    "approach_outcome": "SUCCESS - clippy/test failures resolved through targeted lint suppression with architectural justification",
+    "recommendations": [
+      {
+        "priority": "high",
+        "recommendation": "Document all #[allow(...)] suppressions with subtask references when code is intentionally unused",
+        "rationale": "Enables future developers to understand when unused code becomes active during phased implementation",
+        "applies_to": [
+          "power.rs",
+          "future IOKit implementations"
+        ]
+      },
+      {
+        "priority": "medium",
+        "recommendation": "Create a linting checklist that requires justification comments for all non-obvious suppressions",
+        "rationale": "Prevents accumulation of orphaned dead code; maintains intentionality in codebase",
+        "applies_to": [
+          "make check validation",
+          "code review process"
+        ]
+      },
+      {
+        "priority": "medium",
+        "recommendation": "Consider extracting test-only enum variants or gating them with #[cfg(test)] if separate from IOKit path",
+        "rationale": "Clearer intent than dead_code suppression; reduces confusion about production vs test code",
+        "applies_to": [
+          "SleepState enum and similar cross-purpose enums"
+        ]
+      }
+    ],
+    "subtask_id": "subtask-5-1",
+    "session_num": 12,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/power.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-5-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

@@ -1,0 +1,151 @@
+{
+  "session_number": 4,
+  "timestamp": "2026-03-05T19:57:22.273376+00:00",
+  "subtasks_completed": [
+    "subtask-1-3"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/cards.rs",
+        "changes_summary": "Added cleanup infrastructure: dir_size() helper, CleanupStats struct, perform_cleanup() function",
+        "lines_added": 101,
+        "key_additions": [
+          "dir_size(path: &Path) -> u64 - recursive directory size calculation",
+          "CleanupStats struct with 5 tracking fields (corrupt_cards_removed, old_failed_cards_removed, orphan_running_cards_removed, target_dirs_removed, bytes_freed)",
+          "perform_cleanup(scan_result: &ScanResult, dry_run: bool) - removal orchestrator with dry-run support"
+        ],
+        "removal_targets": [
+          "corrupt_cards",
+          "old_failed_cards",
+          "orphan_running_cards",
+          "target directories"
+        ]
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "name": "Dry-Run Branching",
+        "description": "Conditional println!() for dry-run vs actual fs::remove_dir_all() removal",
+        "impact": "Safe preview before destructive operations",
+        "locations": [
+          4,
+          4,
+          4,
+          4
+        ]
+      },
+      {
+        "name": "Error Context Propagation",
+        "description": "Use of .with_context() for detailed error messages including path display",
+        "impact": "Better debugging when cleanup fails",
+        "frequency": "Applied to all removal operations"
+      },
+      {
+        "name": "Accumulator Stats Pattern",
+        "description": "CleanupStats struct accumulates counts and bytes_freed across all removal categories",
+        "impact": "Single return value tracking all metrics",
+        "categories": 5
+      },
+      {
+        "name": "Recursive Directory Traversal",
+        "description": "dir_size() recursively walks directory tree to calculate total size",
+        "impact": "Accurate byte accounting for removal operations",
+        "optimization_note": "Called before removal in both dry-run and real paths"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Silent Error Suppression in dir_size()",
+        "description": "fs::metadata() errors are silently dropped via .flatten()",
+        "risk": "Permission errors or missing files could silently reduce reported bytes_freed accuracy",
+        "severity": "Medium",
+        "location": "dir_size() function, lines 140-149"
+      },
+      {
+        "issue": "Code Duplication in perform_cleanup()",
+        "description": "Four near-identical removal blocks: corrupt, old_failed, orphan_running, target_dirs",
+        "risk": "Maintenance burden; bugs in one block could be copied to others",
+        "severity": "Low",
+        "refactor_candidate": true
+      },
+      {
+        "issue": "Double Traversal Overhead",
+        "description": "dir_size() is called separately from removal, requiring two passes for each item",
+        "risk": "Performance impact on large trees; files could change between traversals in concurrent scenarios",
+        "severity": "Low",
+        "optimization_note": "Not critical for card cleanup but worth noting"
+      },
+      {
+        "issue": "Integration with Stale Target/ Artifacts",
+        "description": "target/ cleanup using fs::remove_dir_all() - memory from MEMORY.md shows this caused ENOENT in moved workspaces",
+        "risk": "Cargo incremental artifacts in moved directories could still fail if not cleaned properly",
+        "severity": "Medium",
+        "context": "Related to 2026-03-01 stale CARGO_MANIFEST_DIR fix"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "completion": "Full removal logic implemented with dry-run support",
+      "scope": [
+        "Corrupt card removal",
+        "Old failed card removal (age-based)",
+        "Orphan running card removal (missing process check)",
+        "target/ directory cleanup (addresses stale cargo artifacts)"
+      ],
+      "deliverables": [
+        "CleanupStats struct for metric tracking",
+        "perform_cleanup() function with dry-run branching",
+        "dir_size() helper for accurate byte accounting",
+        "[DRY-RUN] prefixed output for safe preview mode"
+      ],
+      "integration_readiness": "Function signature matches ScanResult from previous subtask-1-2; ready for CLI command binding"
+    },
+    "recommendations": [
+      {
+        "priority": "High",
+        "category": "Testing",
+        "action": "Add unit tests for dry-run mode ensuring no files are actually deleted",
+        "rationale": "Destructive operations require strict verification"
+      },
+      {
+        "priority": "Medium",
+        "category": "Refactoring",
+        "action": "Extract repeated removal pattern into closure or generic helper function",
+        "rationale": "Reduce duplication in corrupt/old_failed/orphan/target removal blocks",
+        "example": "fn remove_items<T: AsRef<Path>>(items: &[T], label: &str, dry_run: bool, stats: &mut CleanupStats) -> Result<()>"
+      },
+      {
+        "priority": "Medium",
+        "category": "Error Handling",
+        "action": "Add warning logging for silently skipped fs::metadata() errors in dir_size()",
+        "rationale": "Current implementation may mask permission or I/O issues",
+        "approach": "Log skipped entries; optionally add strict mode flag"
+      },
+      {
+        "priority": "Medium",
+        "category": "Integration",
+        "action": "Verify target/ cleanup works correctly with jj workspace moves",
+        "rationale": "MEMORY.md notes ENOENT issues when cargo creates subdirs in moved trees",
+        "validation": "Test cleanup after 'bop move' or 'jj workspace' operations"
+      },
+      {
+        "priority": "Low",
+        "category": "Documentation",
+        "action": "Document stats fields in CleanupStats struct",
+        "rationale": "Clarify meaning of each count for future maintainers"
+      }
+    ],
+    "subtask_id": "subtask-1-3",
+    "session_num": 4,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/cards.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-3"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

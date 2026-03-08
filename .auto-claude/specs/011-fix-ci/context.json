@@ -1,0 +1,43 @@
+{
+  "files_to_modify": {
+    "github_workflows": [
+      ".github/workflows/ai-coding-job.yml"
+    ],
+    "readme": [
+      "README.md"
+    ]
+  },
+  "files_to_create": {
+    "github_workflows": [
+      ".github/workflows/ci.yml"
+    ]
+  },
+  "files_to_reference": [
+    ".github/workflows/repo-health.yml",
+    ".github/workflows/release.yml"
+  ],
+  "patterns": {
+    "workflow_pattern": "GitHub Actions workflows use actions/checkout@v4, dtolnay/rust-toolchain@stable, and Swatinem/rust-cache@v2",
+    "ci_pattern": "Existing workflows (repo-health.yml, release.yml) run on cloud runners (macos-latest) and use 'make check' for validation",
+    "badge_pattern": "README.md starts with a title line, badges should be added after the title"
+  },
+  "existing_implementations": {
+    "description": "repo-health.yml already implements proper CI on macos-latest, running make check and policy checks. release.yml runs on macos-latest for building releases.",
+    "relevant_files": [
+      ".github/workflows/repo-health.yml",
+      ".github/workflows/release.yml",
+      "Makefile"
+    ],
+    "issues_found": {
+      "ai-coding-job.yml": "Requires self-hosted runner with bop daemon - dead without dedicated infrastructure, triggers on PR label events but does nothing useful in GHA cloud"
+    }
+  },
+  "makefile_check_command": {
+    "target": "check",
+    "commands": [
+      "cargo test",
+      "cargo clippy -- -D warnings",
+      "cargo fmt --check"
+    ]
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "files_to_modify": {},
+  "files_to_create": {
+    "bop": ["scripts/test-real-adapters.nu"]
+  },
+  "files_to_reference": [
+    "adapters/claude.nu",
+    "adapters/mock.nu",
+    "adapters/ollama-local.nu",
+    "scripts/record_make_check.nu",
+    "crates/bop-cli/tests/dispatcher_harness.rs"
+  ],
+  "patterns": {
+    "adapter_calling_convention": "adapter.nu <workdir> <prompt_file> <stdout_log> <stderr_log> [memory_out]",
+    "nushell_test_pattern": "--test flag triggers run_tests function, uses std/assert",
+    "card_structure": "meta.json (id, created, stage, provider_chain) + spec.md + prompt.md + logs/ + output/",
+    "providers_json_format": "{\"providers\": {\"name\": {\"command\": \"path/to/adapter.nu\", \"rate_limit_exit\": 75}}}",
+    "dispatcher_invocation": "bop --cards-dir <dir> dispatcher --poll-ms <ms> --adapter <path>",
+    "background_process": "Use ^sh -c \"... &\" for background processes in Nu",
+    "temp_dir_cleanup": "Use mktemp -d for isolated test dirs, rm -rf for cleanup"
+  },
+  "existing_implementations": {
+    "description": "Found mock.nu adapter with self-tests, dispatcher_harness.rs with test patterns, record_make_check.nu showing Nu script conventions",
+    "relevant_files": [
+      "adapters/mock.nu",
+      "adapters/claude.nu",
+      "adapters/ollama-local.nu",
+      "crates/bop-cli/tests/dispatcher_harness.rs",
+      "scripts/record_make_check.nu"
+    ]
+  },
+  "availability_checks": {
+    "claude": "(which claude | length) > 0",
+    "ollama": "(which ollama | length) > 0 AND curl -sf http://localhost:11434/api/tags",
+    "codex": "(which codex | length) > 0 AND \"OPENAI_API_KEY\" in $env"
+  },
+  "acceptance_criteria_from_spec": [
+    "nu --no-config-file scripts/test-real-adapters.nu --help",
+    "nu --no-config-file scripts/test-real-adapters.nu --adapter ollama --timeout 1",
+    "make check (cargo test + clippy + fmt)"
+  ]
+}

@@ -1,0 +1,13 @@
+[Unit]
+Description=bop merge-gate trigger
+
+[Path]
+PathChanged=%h/.cards/done
+PathChanged=%h/.cards/team-arch/done
+PathChanged=%h/.cards/team-cli/done
+PathChanged=%h/.cards/team-quality/done
+PathChanged=%h/.cards/team-intelligence/done
+PathChanged=%h/.cards/team-platform/done
+
+[Install]
+WantedBy=default.target

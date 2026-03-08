@@ -1,0 +1,123 @@
+{
+  "session_number": 2,
+  "timestamp": "2026-03-07T03:11:57.330308+00:00",
+  "subtasks_completed": [
+    "subtask-1-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "path": "crates/bop-cli/tests/serve_smoke.rs",
+        "type": "new_integration_test",
+        "size_lines": 137,
+        "purpose": "HTTP server integration test for bop serve endpoint",
+        "key_components": [
+          "repo_root() - calculates workspace root from CARGO_MANIFEST_DIR",
+          "build_jc() - builds binary before test",
+          "find_free_port() - obtains OS-assigned free port via TcpListener",
+          "wait_for_server() - polls server readiness with timeout",
+          "send_http_request() - raw HTTP/1.1 POST request builder",
+          "ServerGuard - RAII wrapper for process cleanup",
+          "test_serve_smoke() - integration test workflow"
+        ],
+        "dependencies": [
+          "tempfile crate",
+          "serde_json",
+          "std::net, std::process, std::io"
+        ]
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "name": "Compile-time path resolution",
+        "description": "Uses env!(\"CARGO\") and env!(\"CARGO_MANIFEST_DIR\") macros to bake paths at compile time",
+        "context": "Addresses stale path issue from 2026-03-01 memory - provides fallback to runtime discovery"
+      },
+      {
+        "name": "Server lifecycle management",
+        "description": "ServerGuard struct wraps Child process with Drop impl for guaranteed cleanup",
+        "benefit": "Ensures server process killed even if test panics"
+      },
+      {
+        "name": "Port availability polling",
+        "description": "find_free_port() binds random port, then wait_for_server() polls with 100ms intervals",
+        "benefit": "Avoids hardcoded ports and race conditions"
+      },
+      {
+        "name": "OS timing accommodation",
+        "description": "Sleep 200ms after port release to allow OS to fully release socket",
+        "context": "Handles OS delay in TIME_WAIT state cleanup"
+      },
+      {
+        "name": "Raw HTTP protocol handling",
+        "description": "Manual HTTP/1.1 request formatting and response reading without client library",
+        "tradeoff": "Zero external HTTP client dependency vs. more verbose code"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "name": "Stale binary paths",
+        "severity": "high",
+        "description": "repo_root() calculation via unwrap().parent().unwrap() assumes exact directory structure",
+        "mitigation": "Tested; structure is stable in workspace"
+      },
+      {
+        "name": "Server startup timeout",
+        "severity": "medium",
+        "description": "10-second timeout for server readiness may fail on heavily loaded systems",
+        "context": "Memory notes syspolicyd can reach 99% CPU on new binaries"
+      },
+      {
+        "name": "Port release race condition",
+        "severity": "medium",
+        "description": "TCP socket remains in TIME_WAIT after drop, requires sleep before reuse",
+        "evidence": "Explicit 200ms sleep added before server startup"
+      },
+      {
+        "name": "Missing auth token test",
+        "severity": "low",
+        "description": "Test does not validate BOP_SERVE_TOKEN authentication mentioned in memory",
+        "context": "Optional auth feature not exercised"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "test_coverage": "Basic HTTP server functionality validated: startup, POST /cards/new, HTTP 201 response, pending/ directory creation",
+      "completeness": "Smoke test only - covers happy path but not error cases, auth, or concurrent requests",
+      "robustness": "Handles process cleanup, port conflicts, and timeout scenarios appropriately"
+    },
+    "recommendations": [
+      {
+        "priority": "medium",
+        "suggestion": "Extract http_request_helpers into shared test module if multiple integration tests emerge",
+        "reasoning": "Avoid duplication as serve endpoint tests expand"
+      },
+      {
+        "priority": "low",
+        "suggestion": "Add test variant for BOP_SERVE_TOKEN authentication validation",
+        "reasoning": "Memory mentions optional BOP_SERVE_TOKEN auth - should verify protection works"
+      },
+      {
+        "priority": "low",
+        "suggestion": "Add negative case tests: malformed JSON, missing card fields, concurrent requests",
+        "reasoning": "Current test only validates success path; error handling untested"
+      },
+      {
+        "priority": "low",
+        "suggestion": "Consider extracting timeout constants (10s, 200ms) to module-level consts for tunability",
+        "reasoning": "CI environments may need different timeout thresholds than local development"
+      }
+    ],
+    "subtask_id": "subtask-1-1",
+    "session_num": 2,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/tests/serve_smoke.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

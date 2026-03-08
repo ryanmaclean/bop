@@ -1,0 +1,149 @@
+{
+  "session_number": 7,
+  "timestamp": "2026-03-06T00:06:29.688888+00:00",
+  "subtasks_completed": [
+    "subtask-1-6"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "adapters/README.md",
+        "type": "documentation",
+        "lines": 220,
+        "status": "created",
+        "sections": [
+          "Architecture Overview",
+          "VM-First Architecture (Target)",
+          "Current Adapters (Host-Side)",
+          "Adapter Calling Convention",
+          "Creating a New Adapter",
+          "Testing Adapters",
+          "Future: Full UEFI Boot Chain"
+        ],
+        "coverage": "Comprehensive architecture documentation bridging current (host-side Nushell adapters) and target (QEMU VM-based) states"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "VM-first execution model",
+        "context": "QEMU VMs with 9P filesystem mounts replace host-side process spawning",
+        "scope": "Architectural shift from Wave 1-4 to Wave 5+"
+      },
+      {
+        "pattern": "Standardized adapter calling convention",
+        "context": "5-argument Nushell signature: workdir, prompt_file, stdout_log, stderr_log, memory_out",
+        "invariant": "All adapters follow same interface regardless of underlying tool (claude, ollama, qemu, etc.)"
+      },
+      {
+        "pattern": "Exit code semantics for dispatcher routing",
+        "context": "0=done/, 75=pending/, 1+=failed/",
+        "detail": "Rate-limit escape hatch via exit 75 enables automatic retries"
+      },
+      {
+        "pattern": "9P filesystem as IPC boundary",
+        "context": "Card bundle mounted read-write into VM; zam reads prompt, writes output/result.md",
+        "alignment": "MICROCLAW principle: card bundle IS the IPC"
+      },
+      {
+        "pattern": "Nushell as canonical scripting layer",
+        "context": "All 8 adapters + 16 system scripts migrated to .nu (2026-03-03)",
+        "rationale": "Licensing (ZSH/Fish dropped), consistency, cross-platform support"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Path resolution before cd",
+        "detail": "Dispatcher may pass relative paths; adapters must resolve to absolute before changing directory",
+        "severity": "High",
+        "code_pattern": "let workdir_abs = if ($workdir | str starts-with \"/\") { $workdir } else { [$orig_dir $workdir] | path join }"
+      },
+      {
+        "gotcha": "Rate-limit detection requires dual checking",
+        "detail": "Must check both stderr content (\"429\", \"rate limit\") AND exit code (142\u219275 for timeout)",
+        "severity": "Medium",
+        "impact": "Incomplete detection leads to false permanent failures instead of retries"
+      },
+      {
+        "gotcha": "SIGALRM timeout handling is OS-specific",
+        "detail": "macOS uses perl alarm; Linux may differ. Exit code 142 (SIGALRM) must map to 75",
+        "severity": "Medium",
+        "snippet": "^perl -e 'alarm(shift); exec @ARGV or die $!' -- 3600 claude ..."
+      },
+      {
+        "gotcha": "Current adapters are stepping stones",
+        "detail": "Host-side adapters (claude.nu, ollama.nu, etc.) will be replaced by qemu.nu in Wave 5; not future-proof",
+        "severity": "Low",
+        "note": "Documentation marks them as \"valid\" but temporary"
+      },
+      {
+        "gotcha": "Full UEFI boot chain deferred",
+        "detail": "dub (UEFI bootloader with TPM attestation) integration planned Wave 6+; qemu.nu currently boots zam directly",
+        "severity": "Low",
+        "impact": "Current VM architecture lacks measured boot security layer"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "task": "Create adapters/README.md documenting VM architecture",
+      "result": "Comprehensive documentation establishing VM-first architecture as target state, with clear transition path from current host-side adapters",
+      "quality_signals": [
+        "Clear ASCII diagrams showing dispatcher \u2192 adapter \u2192 VM flow",
+        "Concrete examples of calling convention, path resolution, rate-limit detection",
+        "9P filesystem semantics explained with directory structure example",
+        "Exit code contract fully specified (0/75/1+)",
+        "Testing guidance (unit + integration)",
+        "Future roadmap (dub \u2192 zam boot chain in Wave 6)"
+      ],
+      "alignment_with_memory": "Adheres to bop project memory: MICROCLAW (card=IPC, UART=stdout), Nushell canonical, zam/dub references correct"
+    },
+    "recommendations": [
+      {
+        "recommendation": "Add end-to-end workflow diagram",
+        "rationale": "Current architecture diagrams show components; readers need complete flow: card pending \u2192 dispatcher \u2192 adapter spawn \u2192 qemu-system-x86_64 \u2192 zam reads 9P \u2192 result.md written \u2192 VM exit \u2192 card moved to done/",
+        "effort": "Low",
+        "impact": "Reduces cognitive load for new contributors"
+      },
+      {
+        "recommendation": "Document UART output structure (JSON lines format)",
+        "rationale": "README mentions \"zam outputs JSON to UART\" but doesn't specify schema; critical for metrics/telemetry pipeline",
+        "effort": "Medium",
+        "impact": "Enables structured logging, dispatch status tracking, rate-limit detection"
+      },
+      {
+        "recommendation": "Add troubleshooting section for adapter failures",
+        "rationale": "Common issues: relative path not resolved, stderr parsing fails, qemu not in PATH, 9P mount permission denied",
+        "effort": "Medium",
+        "impact": "Reduces debugging friction for operator and developer"
+      },
+      {
+        "recommendation": "Link to zam/dub project wikis or CONTRIBUTINGs",
+        "rationale": "\"See /Users/studio/zam/\" is opaque; explicit links to auto-claude specs, Wave roadmaps help contributors prioritize",
+        "effort": "Low",
+        "impact": "Cross-project navigation, alignment visibility"
+      },
+      {
+        "recommendation": "Document performance characteristics of 9P mount",
+        "rationale": "9P latency, throughput, and cold-start VM time affect card SLA; MICROCLAW trades process spawning overhead for isolation overhead",
+        "effort": "Medium",
+        "impact": "Informs Wave 5 rollout decision (when is qemu.nu faster than host-side adapters?)"
+      },
+      {
+        "recommendation": "Add adapter status table (deprecation timeline)",
+        "rationale": "Current table lists 8 adapters; readers don't know which are actively used vs deprecated (goose.nu, opencode.nu marked unclear)",
+        "effort": "Low",
+        "impact": "Prevents selection of unmaintained adapters"
+      }
+    ],
+    "subtask_id": "subtask-1-6",
+    "session_num": 7,
+    "success": true,
+    "changed_files": [
+      "adapters/README.md"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-6"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

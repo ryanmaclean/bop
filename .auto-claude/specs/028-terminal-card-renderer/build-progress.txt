@@ -1,0 +1,50 @@
+=== AUTO-BUILD PROGRESS ===
+
+Project: Terminal card renderer with progressive degradation
+Workspace: managed by orchestrator
+Started: 2026-03-07
+
+Workflow Type: feature
+Rationale: New rendering subsystem adding 7 files (termcaps.rs + render/*.rs),
+  modifying 3 existing files (Cargo.toml, main.rs, list.rs), and updating the
+  vibekanban provider. Clear dependency chain: trait → impls → wiring.
+
+Session 1 (Planner):
+- Created implementation_plan.json
+- Phases: 4
+- Total subtasks: 10
+- Created init.sh
+- Created context.json
+
+Phase Summary:
+- Phase 1 (Foundation): 2 subtasks, depends on [] — termcaps.rs + render/mod.rs scaffold
+- Phase 2 (Simple Renderers): 2 subtasks, depends on [phase-1] — dumb.rs + basic.rs
+- Phase 3 (Advanced Renderers): 3 subtasks, depends on [phase-2] — extended.rs + full.rs + truecolor.rs
+- Phase 4 (Integration): 3 subtasks, depends on [phase-3] — wire list.rs + vibekanban + make check
+
+Services Involved:
+- bop-cli: All Rust rendering code (termcaps, render module, list.rs integration)
+- vibekanban: Python provider update with additional Meta fields
+
+Parallelism Analysis:
+- Max parallel phases: 1
+- Recommended workers: 1
+- Parallel groups: None (sequential dependency chain within single crate)
+- Rationale: All phases within same Rust crate compile unit; trait must exist
+  before impls, impls must exist before wiring.
+
+Key Decisions:
+- NO ratatui/crossterm — this is pure ANSI string formatting, not a TUI
+- terminal_size crate for width detection (cleaner than existing ioctl in util.rs)
+- CardView is a flat struct assembled by caller, renderer never reads files
+- Existing util::term_width() kept intact; TermCaps uses terminal_size crate separately
+- render/mod.rs owns CardRenderer trait + dispatch; each level in its own file
+- Fallback default is Extended (not Dumb) per spec requirement
+
+=== STARTUP COMMAND ===
+
+To continue building this spec, run:
+
+  source .auto-claude/.venv/bin/activate && python .auto-claude/run.py --spec 028 --parallel 1
+
+=== END SESSION 1 ===

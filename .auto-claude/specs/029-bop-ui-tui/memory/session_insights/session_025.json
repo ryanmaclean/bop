@@ -1,0 +1,151 @@
+{
+  "session_number": 25,
+  "timestamp": "2026-03-07T20:58:47.963900+00:00",
+  "subtasks_completed": [
+    "subtask-7-3"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "output/result.md",
+        "change_type": "complete_replacement",
+        "old_purpose": "Storage resilience JSONL WAL + checksum implementation results",
+        "new_purpose": "ASCII screenshot documentation for bop ui TUI (spec 029)",
+        "content_sections": [
+          "Summary with implementation stats (13 source files, 15 tests, 7 phases/20 subtasks)",
+          "5 ASCII screenshot sections with visual demos and feature descriptions",
+          "Keybinding reference (Normal mode: h/l cols, j/k cards, Shift+H/L move, / filter)",
+          "Context-sensitive footer documentation (changes per overlay mode)",
+          "Technical details on newline-gated log streaming, progress bar rendering, collapsed column glyphs"
+        ],
+        "size_change": "expanded from ~400 lines to ~450 lines (truncated in diff)",
+        "documentation_quality": "production-grade with visual examples, keyboard bindings, and interaction patterns"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "ASCII art TUI documentation via code blocks",
+        "context": "Terminal UI projects need visual reference",
+        "implementation": "Box-drawing Unicode chars (\u251c\u2500\u250c\u2518\u2502), glyphs (\u25b8\u25cf\u25c9\u25cb\u2713\u2717\u2699~), progress bars (\u2588\u2591), formatted text",
+        "benefit": "Users can understand layout before running the tool"
+      },
+      {
+        "pattern": "Mode-switching with context-sensitive keybindings",
+        "context": "Normal mode vs overlay modes (detail, logs, filter, actions)",
+        "implementation": "Footer shows different keybindings per mode; overlays replace body zone or appear as right-side panel",
+        "benefit": "Prevents key collision confusion; users see only relevant actions"
+      },
+      {
+        "pattern": "Progressive disclosure for empty states",
+        "context": "Kanban columns with zero items",
+        "implementation": "Collapsed to 3-character divider (glyph + vertical bars) when empty",
+        "benefit": "Maximizes horizontal space for columns with content"
+      },
+      {
+        "pattern": "Layered overlay architecture",
+        "context": "Multiple concurrent views (detail, logs, filter, action menu)",
+        "implementation": "Right-side panel (detail 50% width) or full-height overlay (logs), action popup centered with Clear",
+        "benefit": "Follows lazygit/mc patterns; inspectable without losing kanban context"
+      },
+      {
+        "pattern": "Two-line card entries for running tasks",
+        "context": "Showing progress within list view without expanding height",
+        "implementation": "Title line + progress bar line (\u2588\u2588\u2591\u2591 NN%); providers shown inline",
+        "benefit": "Compact density with visual feedback on progress"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Newline-gated log streaming is critical for ANSI correctness",
+        "risk": "Partial lines from ANSI sequences cause visual flicker and cursor position errors",
+        "mitigation": "Only emit complete lines (ending in \\n); buffer incomplete lines until newline arrives",
+        "scope": "Log tail overlay, any streaming output view"
+      },
+      {
+        "gotcha": "Footer keybindings must change per mode",
+        "risk": "Users attempt to use Normal mode keys (e.g., j/k) inside overlay, nothing happens",
+        "mitigation": "Explicitly document in footer which keys are active; handle Esc for mode exit universally",
+        "scope": "All modal overlays"
+      },
+      {
+        "gotcha": "Collapsed column glyphs must match state semantics",
+        "risk": "Wrong glyph (e.g., \u2713 for RUNNING instead of \u2699) confuses user about what column is collapsed",
+        "mitigation": "State \u2194 glyph mapping: PENDING(\u00b7), RUNNING(\u2699), DONE(\u2713), FAILED(\u2717), MERGED(~)",
+        "scope": "Kanban column rendering"
+      },
+      {
+        "gotcha": "Progress bar rendering requires exact width calculation",
+        "risk": "Overflow breaks layout if bar width exceeds available space",
+        "mitigation": "Reserve fixed width for percentage (e.g., 3 chars), cap filled chars to (width - 2)",
+        "scope": "Progress bars in running cards and detail overlay"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "commit_hash": "b1a700a",
+      "deliverables_completed": [
+        "Normal kanban view with horizontal columns, card count labels, WIP limit, collapsed glyphs",
+        "Collapsed empty columns section showing 3-char divider behavior",
+        "Detail overlay with card metadata, progress bar, AC plan phase/subtask tree (when applicable)",
+        "Log tail overlay with newline-gated streaming, FOLLOW toggle, clear and scroll modes",
+        "Filter mode section (partially shown in truncated diff; full content not visible)"
+      ],
+      "test_coverage": "15 insta snapshot tests across all views",
+      "final_checks_passed": [
+        "make check: 797+ tests pass",
+        "clippy: clean",
+        "fmt: clean"
+      ],
+      "phase_completion": "7 phases, 20 subtasks all completed"
+    },
+    "recommendations": [
+      {
+        "category": "documentation",
+        "recommendation": "Add interaction flow diagram showing mode transitions (Normal \u2192 Detail/Logs/Filter/Actions \u2192 Normal)",
+        "rationale": "Users new to the TUI benefit from visual state machine showing how to navigate between modes",
+        "priority": "medium"
+      },
+      {
+        "category": "testing",
+        "recommendation": "Add stress test for log streaming with 10k+ lines; measure newline-gated buffer performance",
+        "rationale": "High-volume logs could reveal latency or memory issues; verify streaming doesn't block UI refresh",
+        "priority": "high"
+      },
+      {
+        "category": "accessibility",
+        "recommendation": "Document Unicode glyph usage (\u25b8\u25cf\u25c9\u25cb\u2713\u2717\u2699~) with fallback ASCII equivalents for terminal limitations",
+        "rationale": "Some terminals or fonts may not render box-drawing chars correctly; fallback ensures usability",
+        "priority": "medium"
+      },
+      {
+        "category": "documentation",
+        "recommendation": "Add keybinding cheat sheet table in docs/ with sections per mode (Normal, Detail, Logs, Filter, Actions)",
+        "rationale": "Single reference page improves discoverability over embedded footer hints",
+        "priority": "low"
+      },
+      {
+        "category": "implementation",
+        "recommendation": "Verify Shift+H/L card movement (fs::rename between columns) correctly updates card.jobcard/meta.json and JSONL event log",
+        "rationale": "State machine atomicity is critical; card must not be duplicated or lost during move",
+        "priority": "high"
+      },
+      {
+        "category": "ux",
+        "recommendation": "Consider `Tab` multi-select with bulk actions (yazi pattern) for batch state transitions (e.g., retry all failed)",
+        "rationale": "Already planned in spec 029 architecture notes; implement if time permits",
+        "priority": "low"
+      }
+    ],
+    "subtask_id": "subtask-7-3",
+    "session_num": 25,
+    "success": true,
+    "changed_files": [
+      "output/result.md"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-7-3"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

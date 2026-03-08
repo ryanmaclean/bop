@@ -1,0 +1,215 @@
+{
+  "session_number": 3,
+  "timestamp": "2026-03-07T19:09:19.866384+00:00",
+  "subtasks_completed": [
+    "subtask-1-2"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/ui/app.rs",
+        "type": "new",
+        "lines": 510,
+        "key_structures": [
+          {
+            "name": "AppEvent",
+            "type": "enum",
+            "variants": [
+              "Key(KeyEvent)",
+              "Resize(u16, u16)",
+              "Tick",
+              "Cards(Vec<KanbanColumn>)",
+              "LogLine(String)"
+            ],
+            "purpose": "Unified async event type for TUI loop"
+          },
+          {
+            "name": "Mode",
+            "type": "enum",
+            "variants": [
+              "Normal",
+              "Filter",
+              "ActionPopup",
+              "Detail",
+              "LogTail",
+              "NewCard",
+              "Subshell"
+            ],
+            "purpose": "Interaction mode determining active keybindings and overlays"
+          },
+          {
+            "name": "KanbanColumn",
+            "type": "struct",
+            "fields": [
+              "state: String",
+              "cards: Vec<CardView>",
+              "list_state: ListState",
+              "wip_limit: Option<usize>",
+              "collapsed: bool"
+            ],
+            "methods": [
+              "new()",
+              "is_at_wip_limit()",
+              "wip_saturation()"
+            ]
+          },
+          {
+            "name": "App",
+            "type": "struct",
+            "fields": [
+              "columns: Vec<KanbanColumn>",
+              "col_focus: usize",
+              "filter: Option<String>",
+              "mode: Mode",
+              "log_buf: VecDeque<String>",
+              "throughput: VecDeque<u8>",
+              "cards_root: PathBuf"
+            ],
+            "methods": [
+              "new()",
+              "focused_column()",
+              "focused_column_mut()",
+              "selected_card()",
+              "total_cards()",
+              "push_log_line()",
+              "push_throughput()",
+              "refresh_columns()"
+            ]
+          }
+        ]
+      },
+      {
+        "file": "crates/bop-cli/src/ui/mod.rs",
+        "type": "modified",
+        "changes": "Added module declaration for app.rs"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Async event unification",
+        "description": "AppEvent enum consolidates keyboard input, terminal resize, timer ticks, filesystem changes, and log lines into single tokio::sync::mpsc stream",
+        "significance": "Enables non-blocking event loop with background tasks"
+      },
+      {
+        "pattern": "Circular buffer for metrics",
+        "description": "VecDeque<String> for log_buf (capacity 200) and VecDeque<u8> for throughput (8 samples) with automatic eviction",
+        "significance": "Memory-bounded circular buffers prevent unbounded growth while maintaining recent history"
+      },
+      {
+        "pattern": "WIP limit tracking with saturation",
+        "description": "KanbanColumn tracks optional wip_limit and provides is_at_wip_limit() and wip_saturation() methods",
+        "significance": "Enables WIP limit alerts and visual indicators (header turns red at saturation)"
+      },
+      {
+        "pattern": "Filesystem mirroring of list.rs",
+        "description": "collect_card_views() and collect_state_cards() reuse patterns from list.rs for card collection",
+        "significance": "Maintains consistency across CLI subcommands (list vs. ui)"
+      },
+      {
+        "pattern": "Team-based directory hierarchy",
+        "description": "Card collection scans both root-level and team-* prefixed directories for .bop/.jobcard bundles",
+        "significance": "Supports multi-team card organization without central registry"
+      },
+      {
+        "pattern": "Config fallback chain",
+        "description": "read_wip_limit() checks project config first (.bop/config.json), then global config",
+        "significance": "Allows per-project and global defaults for WIP limits"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Selection state preservation during refresh",
+        "description": "refresh_columns() loops to preserve old selection but doesn't actually restore it \u2014 caller must handle this",
+        "mitigation": "Code comment indicates caller responsibility; next phase must implement proper selection handoff during refresh"
+      },
+      {
+        "gotcha": "Empty column auto-collapse detection",
+        "description": "collapsed field is set once at KanbanColumn::new() but never updated when cards are added/removed",
+        "mitigation": "Future event handlers must call KanbanColumn::refresh() or recalculate collapsed state after filesystem changes"
+      },
+      {
+        "gotcha": "List selection state initialization",
+        "description": "ListState defaults to no selection; manual select(Some(0)) required if cards non-empty",
+        "mitigation": "Implemented correctly in KanbanColumn::new(), but refresh_columns() does not reinitialize selections"
+      },
+      {
+        "gotcha": "No synchronization between App.mode and UI state",
+        "description": "Switching modes (Normal \u2192 Filter \u2192 ActionPopup) is stateless; filter query and popup context not tied together",
+        "mitigation": "Event handlers must maintain invariants (e.g., Filter mode without filter query should revert to Normal)"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "completeness": 1.0,
+      "test_coverage": {
+        "unit_tests": 8,
+        "test_scenarios": [
+          "empty workspace",
+          "card loading",
+          "column focusing",
+          "WIP limits",
+          "log buffer capacity",
+          "throughput samples"
+        ]
+      },
+      "code_quality": {
+        "comments": "Comprehensive doc comments on all public items",
+        "organization": "Clear separation: events \u2192 modes \u2192 data structures \u2192 helpers \u2192 tests",
+        "error_handling": "anyhow::Result used throughout; graceful fallbacks for missing config/directories"
+      },
+      "integration": {
+        "dependencies": [
+          "crossterm",
+          "ratatui",
+          "bop_core",
+          "serde"
+        ],
+        "existing_patterns": "Mirrors list.rs card collection; reuses CardView and Meta types"
+      }
+    },
+    "recommendations": [
+      {
+        "type": "immediate",
+        "priority": "high",
+        "item": "Implement event handler skeleton in main loop to consume AppEvent variants and dispatch to mode handlers",
+        "rationale": "App and AppEvent structures are now ready; next phase (subtask-1-3) must implement the event-to-state mutation machinery"
+      },
+      {
+        "type": "immediate",
+        "priority": "high",
+        "item": "Add AppState update methods (move_card_between_states, toggle_mode, update_log_tail) before rendering phase",
+        "rationale": "Render layer will be read-only; mutation layer must be complete before ratatui widgets consume this data"
+      },
+      {
+        "type": "follow-up",
+        "priority": "medium",
+        "item": "Implement selection state handoff during refresh_columns() to prevent focus loss on filesystem changes",
+        "rationale": "Current stub only preserves old column references; must track selected card ID and restore selection in new data"
+      },
+      {
+        "type": "follow-up",
+        "priority": "medium",
+        "item": "Add refresh() method to KanbanColumn to recalculate collapsed state and re-sort cards without rebuilding",
+        "rationale": "Filesystem changes should update card lists without full App::new() re-scan"
+      },
+      {
+        "type": "follow-up",
+        "priority": "low",
+        "item": "Consider Mode::ActionPopup context struct to store popup-specific state (selected action index, confirmation state)",
+        "rationale": "Current Mode enum is stateless; action popup overlay will need to track which action user is hovering over"
+      }
+    ],
+    "subtask_id": "subtask-1-2",
+    "session_num": 3,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/ui/app.rs",
+      "crates/bop-cli/src/ui/mod.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-2"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

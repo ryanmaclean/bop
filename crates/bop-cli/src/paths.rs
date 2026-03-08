@@ -130,6 +130,11 @@ pub fn find_card(root: &Path, id: &str) -> Option<PathBuf> {
     None
 }
 
+/// Find a card by ID or return an error with a helpful hint.
+pub fn require_card(root: &Path, id: &str) -> anyhow::Result<PathBuf> {
+    find_card(root, id).with_context(|| format!("card not found: {}\nTry: bop list", id))
+}
+
 pub fn find_card_in_dir(state_dir: &Path, id: &str) -> Option<PathBuf> {
     let exact = state_dir.join(format!("{}.bop", id));
     if exact.exists() {

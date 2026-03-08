@@ -9,6 +9,23 @@
 #   75  transient (rate-limited, SIGALRM timeout) → back to pending/
 #   1+  failure → failed/
 
+const NETWORK_ERROR_PATTERNS = [
+    "connection refused",
+    "network unreachable",
+    "connection reset",
+    "connection timed out",
+    "no route to host",
+    "host is unreachable",
+    "could not resolve host",
+    "name resolution failed",
+    "failed to connect",
+    "network is down",
+    "socket error",
+    "ssl connection",
+    "tls handshake",
+    "temporary failure in name resolution"
+]
+
 def main [
     workdir: string = "",
     prompt_file: string = "",
@@ -37,7 +54,7 @@ def main [
     cd $workdir
 
     # Allow spawning claude from within a Claude Code session
-    hide-env CLAUDECODE
+    if "CLAUDECODE" in $env { hide-env CLAUDECODE }
 
     # MCP config: merge .cards/mcp.json (global) + card-level mcp.json if present
     let mcp_args = (
@@ -63,6 +80,13 @@ def main [
 
     if ($stderr_abs | path exists) {
         let stderr_text = open --raw $stderr_abs
+
+        # Check network errors first (using NETWORK_ERROR_PATTERNS)
+        if (is_network_error $stderr_text) {
+            exit 75
+        }
+
+        # Then check rate limiting
         if (($stderr_text | str contains --ignore-case "rate limit")
             or ($stderr_text | str contains "429")
             or ($stderr_text | str contains --ignore-case "too many requests")) {
@@ -71,6 +95,12 @@ def main [
     }
 
     exit $rc
+}
+
+def is_network_error [stderr_text: string]: string -> bool {
+    $NETWORK_ERROR_PATTERNS | any { |pattern|
+        $stderr_text | str contains --ignore-case $pattern
+    }
 }
 
 def run_tests []: nothing -> nothing {
@@ -98,6 +128,22 @@ def run_tests []: nothing -> nothing {
     let stderr_text = "Error: 429 Too Many Requests"
     let is_rate_limited = (($stderr_text | str contains "429") or ($stderr_text | str contains --ignore-case "rate limit"))
     assert $is_rate_limited "should detect rate limiting from stderr content"
+
+    # test 6: network error detection — connection refused
+    let net_err1 = "Error: Connection refused by server"
+    assert (is_network_error $net_err1) "should detect 'connection refused' as network error"
+
+    # test 7: network error detection — DNS failure
+    let net_err2 = "Error: Could not resolve host: api.example.com"
+    assert (is_network_error $net_err2) "should detect DNS resolution failure as network error"
+
+    # test 8: network error detection — no error
+    let no_err = "Success: Request completed"
+    assert (not (is_network_error $no_err)) "should not detect success message as network error"
+
+    # test 9: network error detection — case insensitive
+    let net_err3 = "ERROR: NETWORK UNREACHABLE"
+    assert (is_network_error $net_err3) "should detect network errors case-insensitively"
 
     print "PASS: claude.nu"
 }

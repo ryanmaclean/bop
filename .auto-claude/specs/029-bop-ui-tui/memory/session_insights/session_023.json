@@ -1,0 +1,136 @@
+{
+  "session_number": 23,
+  "timestamp": "2026-03-07T20:50:38.534436+00:00",
+  "subtasks_completed": [
+    "subtask-7-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/ui/mod.rs",
+        "changes": "Added snapshot_tests module with 14 test functions",
+        "key_patterns": [
+          "Helper functions for test data (test_card, rich_card, test_app, build_test_columns)",
+          "Buffer-to-string conversion utility for snapshot content extraction",
+          "Tests cover kanban views, overlays, footers in all modes, and headers",
+          "Uses ratatui TestBackend for deterministic rendering"
+        ],
+        "lines_added": 553
+      },
+      {
+        "file": "crates/bop-cli/src/ui/snapshots/*.snap",
+        "changes": "Generated 15 snapshot files via insta",
+        "key_patterns": [
+          "Snapshot naming follows test function names (e.g., bop__ui__snapshot_tests__kanban_normal_view.snap)",
+          "Each snapshot captures rendered terminal output as text",
+          "Snapshots preserve terminal dimensions and visual layout"
+        ]
+      }
+    ],
+    "patterns_discovered": [
+      "Test-driven UI validation: using ratatui TestBackend provides deterministic, headless rendering without display requirements",
+      "Snapshot-based regression testing: insta snapshots enable visual diff detection for UI changes, reducing manual review burden",
+      "Helper function isolation: separate test data builders (test_card, rich_card, test_app) decouple test setup from assertions",
+      "Terminal dimension parametrization: tests vary width/height to validate layout behavior at different sizes",
+      "Buffer-to-string abstraction: centralizes rendering-to-text conversion logic, enabling consistent snapshot format across all tests",
+      "Mode-specific footer testing: separate test per UI mode (Normal, Detail, LogTail, Filter, ActionPopup, NewCard) ensures each mode's footer behavior is captured",
+      "Empty column collapse validation: explicit test for collapsed empty columns verifies space-saving UI logic",
+      "Provider meter visualization: header test includes provider status meters (Available, Busy, RateLimited) to validate status indicators",
+      "Time stabilization pattern: dynamic time values in headers replaced with fixed placeholders for snapshot determinism"
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Dynamic time values break snapshot consistency",
+        "solution": "Implement stabilize_time() function to replace time-dependent output with fixed placeholder before snapshot assertion"
+      },
+      {
+        "issue": "Trailing whitespace in rendered buffers creates noise in snapshots",
+        "solution": "buffer_to_string() trims trailing spaces per row while preserving empty rows for dimensional fidelity"
+      },
+      {
+        "issue": "Terminal dimensions are critical to layout rendering",
+        "solution": "Tests parametrize terminal_width and terminal_height to match expected viewport; mismatches cause layout shifts"
+      },
+      {
+        "issue": "No filesystem access in tests requires mock data structures",
+        "solution": "test_app() builds in-memory KanbanColumn vectors without touching cards_root directory"
+      },
+      {
+        "issue": "Buffer content extraction from ratatui TestBackend requires cell iteration",
+        "solution": "buffer_to_string() iterates (x, y) coordinates within Rect area to rebuild multi-line output"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "completion": "All 14 snapshot tests implemented and snapshots generated",
+      "test_coverage": [
+        "kanban_normal_view - 2 pending cards, 1 running card, 1 done card",
+        "kanban_collapsed_empty_columns - single pending card, 4 empty columns collapsed",
+        "detail_overlay - rich card with priority and elapsed time",
+        "header_with_providers - 3 provider meters (Available, Busy, RateLimited) + throughput histogram",
+        "footer_normal_mode, footer_detail_mode, footer_logtail_mode, footer_filter_mode, footer_action_popup_mode, footer_newcard_mode",
+        "footer_with_fkey_bar - F-key legend triggered at terminal_height > 30",
+        "logtail_overlay - 5 log lines with mixed severity",
+        "kanban_with_filter - 3 pending + 1 running filtered by search term"
+      ],
+      "snapshot_files_generated": 15,
+      "test_functions": 14
+    },
+    "recommendations": [
+      {
+        "priority": "HIGH",
+        "recommendation": "Add update strategy documentation: document how to regenerate snapshots when UI changes intentionally (INSTA_UPDATE=overwrite) vs. review mismatches"
+      },
+      {
+        "priority": "HIGH",
+        "recommendation": "Implement CI snapshot review: integrate insta with CI/CD to prevent unreviewed UI changes from merging (e.g., fail on snapshot mismatch, require review approval)"
+      },
+      {
+        "priority": "MEDIUM",
+        "recommendation": "Extend test coverage: add edge case tests (very long card titles, hundreds of cards, deep nesting) and error states (disconnected provider, failed card with reason text)"
+      },
+      {
+        "priority": "MEDIUM",
+        "recommendation": "Create snapshot baseline documentation: generate a visual guide or markdown table mapping snapshot files to UI components/states for onboarding new developers"
+      },
+      {
+        "priority": "MEDIUM",
+        "recommendation": "Add performance baseline tests: snapshot test render times for different column/card densities to detect performance regressions early"
+      },
+      {
+        "priority": "LOW",
+        "recommendation": "Consider parameterized test macros: use Rust test macros to reduce boilerplate in mode-specific footer tests (currently 6 similar functions)"
+      },
+      {
+        "priority": "LOW",
+        "recommendation": "Archive snapshot history: track snapshot changes in git to enable visual diff review and regression detection across releases"
+      }
+    ],
+    "subtask_id": "subtask-7-1",
+    "session_num": 23,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/ui/mod.rs",
+      "crates/bop-cli/src/ui/snapshots/bop__ui__snapshot_tests__detail_overlay.snap",
+      "crates/bop-cli/src/ui/snapshots/bop__ui__snapshot_tests__footer_action_popup_mode.snap",
+      "crates/bop-cli/src/ui/snapshots/bop__ui__snapshot_tests__footer_detail_mode.snap",
+      "crates/bop-cli/src/ui/snapshots/bop__ui__snapshot_tests__footer_filter_mode.snap",
+      "crates/bop-cli/src/ui/snapshots/bop__ui__snapshot_tests__footer_logtail_mode.snap",
+      "crates/bop-cli/src/ui/snapshots/bop__ui__snapshot_tests__footer_newcard_mode.snap",
+      "crates/bop-cli/src/ui/snapshots/bop__ui__snapshot_tests__footer_normal_mode.snap",
+      "crates/bop-cli/src/ui/snapshots/bop__ui__snapshot_tests__footer_with_fkey_bar.snap",
+      "crates/bop-cli/src/ui/snapshots/bop__ui__snapshot_tests__full_tui_layout.snap",
+      "crates/bop-cli/src/ui/snapshots/bop__ui__snapshot_tests__header_with_providers.snap",
+      "crates/bop-cli/src/ui/snapshots/bop__ui__snapshot_tests__kanban_collapsed_empty_columns.snap",
+      "crates/bop-cli/src/ui/snapshots/bop__ui__snapshot_tests__kanban_normal_view.snap",
+      "crates/bop-cli/src/ui/snapshots/bop__ui__snapshot_tests__kanban_with_filter.snap",
+      "crates/bop-cli/src/ui/snapshots/bop__ui__snapshot_tests__logtail_overlay.snap",
+      "crates/bop-cli/src/ui/snapshots/bop__ui__snapshot_tests__minimal_status.snap"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-7-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

@@ -1,0 +1,136 @@
+{
+  "session_number": 8,
+  "timestamp": "2026-03-07T05:53:00.630696+00:00",
+  "subtasks_completed": [
+    "subtask-1-7-rate-limiting"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/serve.rs",
+        "changes": [
+          "Added RateLimiter struct with sliding window implementation using HashMap<String, Vec<Instant>>",
+          "Added rate_limit_middleware function to enforce rate limits before route handlers",
+          "Integrated RateLimiter into AppState",
+          "Added necessary imports: ConnectInfo, HashMap, Mutex, Duration, Instant",
+          "Modified axum::serve() call to use .into_make_service_with_connect_info::<SocketAddr>() to enable IP extraction",
+          "Added comprehensive test_rate_limiting() test covering: 10 requests allowed, 11th blocked, different IPs isolated"
+        ],
+        "impact": "MAJOR - adds new security feature affecting all requests"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Sliding Window Rate Limiting",
+        "description": "Uses Instant timestamps in a Vec per IP, removes expired timestamps, checks count against max_requests",
+        "benefit": "Fair and precise rate limiting that accounts for actual request distribution within the window"
+      },
+      {
+        "pattern": "Middleware-based Request Interception",
+        "description": "rate_limit_middleware applied as .layer() before route handlers using axum's middleware::from_fn_with_state",
+        "benefit": "Centralized enforcement that applies to all routes without per-handler boilerplate"
+      },
+      {
+        "pattern": "IP Extraction via ConnectInfo",
+        "description": "Uses axum::extract::ConnectInfo(addr): ConnectInfo<SocketAddr> and .into_make_service_with_connect_info()",
+        "benefit": "Proper socket-level IP extraction works with load balancers and proxies (when X-Forwarded-For not needed)"
+      },
+      {
+        "pattern": "Thread-Safe Shared State",
+        "description": "Arc<Mutex<HashMap>> for state + Arc<AppState> pattern with cloning for middleware",
+        "benefit": "Safe concurrent access to request history across tokio tasks"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Mutex Poisoning Risk",
+        "severity": "MEDIUM",
+        "description": ".unwrap() on Mutex lock can panic if previous holder panicked, poisoning the lock",
+        "location": "RateLimiter::check_rate_limit(), line with 'let mut requests = self.requests.lock().unwrap()'",
+        "impact": "Entire rate limiter goes down if any request handler panics"
+      },
+      {
+        "issue": "Unbounded Memory Growth",
+        "severity": "MEDIUM",
+        "description": "HashMap entries for IPs persist indefinitely even after their request histories are cleaned. IPs that appear once never get removed.",
+        "location": "RateLimiter::check_rate_limit() - entry() creates HashMap entries that are never evicted",
+        "impact": "Memory leak in long-running servers with many unique client IPs"
+      },
+      {
+        "issue": "ConnectInfo Socket Binding Requirement",
+        "severity": "LOW",
+        "description": "ConnectInfo extraction requires explicit .into_make_service_with_connect_info::<SocketAddr>() during server setup",
+        "location": "axum::serve() call, line ~321",
+        "impact": "Easy to miss - forgetting this breaks IP extraction silently"
+      },
+      {
+        "issue": "Relative Time vs Wall Clock",
+        "severity": "LOW",
+        "description": "Uses Instant (monotonic clock) instead of SystemTime; Instant doesn't support serialization and resets on system sleep",
+        "location": "RateLimiter uses Instant throughout",
+        "impact": "Rate limit window resets if system sleeps; can't log absolute timestamps"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "approach_details": {
+      "strategy": "In-memory sliding window with per-IP request timestamp tracking",
+      "completion": "Complete - all requirements met",
+      "features_implemented": [
+        "Max 10 requests per 60-second window per IP",
+        "Middleware integration returning 429 TOO_MANY_REQUESTS",
+        "Proper IP extraction via ConnectInfo",
+        "Cleanup of stale timestamps within window",
+        "Unit tests with edge cases"
+      ],
+      "test_coverage": [
+        "10 requests allowed from same IP",
+        "11th request blocked from same IP",
+        "Different IPs have independent limits",
+        "Integration with middleware chain"
+      ]
+    },
+    "recommendations": [
+      {
+        "priority": "HIGH",
+        "category": "Robustness",
+        "recommendation": "Replace .unwrap() on Mutex with .unwrap_or() or convert to Result to handle poisoning gracefully",
+        "rationale": "Prevents complete service failure if any request handler panics"
+      },
+      {
+        "priority": "HIGH",
+        "category": "Memory Efficiency",
+        "recommendation": "Add periodic cleanup of empty IP entries (e.g., via background task every 5 minutes)",
+        "rationale": "Prevents unbounded HashMap growth in production with many client IPs"
+      },
+      {
+        "priority": "MEDIUM",
+        "category": "Observability",
+        "recommendation": "Add debug/warn logging for rate limit violations with IP and request count",
+        "rationale": "Helps identify DoS attacks or misbehaving clients"
+      },
+      {
+        "priority": "MEDIUM",
+        "category": "Configuration",
+        "recommendation": "Make rate limit values (10 requests, 60 secs) configurable via environment variables or CLI flags",
+        "rationale": "Allows tuning without recompilation; production may need different limits than development"
+      },
+      {
+        "priority": "LOW",
+        "category": "Distributed Deployment",
+        "recommendation": "If scaling to multiple bop serve instances, consider Redis-backed rate limiting",
+        "rationale": "Current implementation is per-process; distributed systems need shared state"
+      }
+    ],
+    "subtask_id": "subtask-1-7-rate-limiting",
+    "session_num": 8,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/serve.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-7-rate-limiting"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

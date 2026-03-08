@@ -1,0 +1,33 @@
+{
+  "files_to_modify": {
+    "bop-core": ["crates/bop-core/src/lib.rs"],
+    "bop-cli": [
+      "crates/bop-cli/src/providers.rs",
+      "crates/bop-cli/src/dispatcher.rs",
+      "crates/bop-cli/src/main.rs",
+      "crates/bop-cli/src/reaper.rs"
+    ]
+  },
+  "files_to_reference": [
+    "crates/bop-cli/src/reaper.rs"
+  ],
+  "patterns": {
+    "atomic_write_pattern": "Use PathBuf::with_extension to create temp path, fs::write to temp, then fs::rename for atomic commit",
+    "reaper_pattern": "reap_orphans function reads running/, checks PID liveness via kill -0, handles meta.json parsing errors, moves cards to pending/ or failed/",
+    "cli_pattern": "Commands are enum variants in Command enum, handled in main() match statement",
+    "error_handling": "Functions return anyhow::Result<()>, use ? for propagation"
+  },
+  "existing_implementations": {
+    "description": "reap_orphans already exists in reaper.rs and handles orphaned cards with dead PIDs during runtime",
+    "relevant_files": [
+      "crates/bop-cli/src/reaper.rs",
+      "crates/bop-cli/src/dispatcher.rs"
+    ]
+  },
+  "crash_safety_context": {
+    "problem": "fs::write truncates file before writing, leaving empty/partial file on crash",
+    "solution": "write-to-temp-then-rename pattern is atomic on POSIX/APFS",
+    "affected_functions": ["write_meta", "write_providers"],
+    "recovery_mechanism": "Startup scan of running/ directory before dispatcher loop begins"
+  }
+}

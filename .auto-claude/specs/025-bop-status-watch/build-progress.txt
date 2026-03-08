@@ -1,0 +1,158 @@
+=== AUTO-BUILD PROGRESS ===
+
+Project: bop status --watch (live updating terminal view)
+Workspace: /Users/studio/bop
+Started: 2026-03-07
+
+Workflow Type: simple
+Rationale: Single-service task adding a watch mode to an existing CLI command. No multi-service coordination or architectural changes needed. All work is in the bop-cli crate.
+
+Session 1 (Planner):
+- Created implementation_plan.json
+- Phases: 1
+- Total subtasks: 8
+- Created init.sh
+- Created context.json
+
+Phase Summary:
+- Implementation: 8 subtasks, no dependencies
+
+Services Involved:
+- bop-cli: Add --watch flag to Status command, implement live updating display with notify watcher
+
+Parallelism Analysis:
+- Max parallel phases: 1
+- Recommended workers: 1
+- Parallel groups: None (sequential implementation required)
+
+Key Implementation Details:
+1. Add --watch/-w flag to Status command in main.rs
+2. Extract term_width() from gantt.rs to util.rs for shared usage
+3. Create list_cards_watch() with notify-debouncer-mini (100ms debounce)
+4. Implement ANSI cursor positioning (\\x1b[{N}A) for in-place redraw
+5. Re-query terminal width on every redraw (do not cache)
+6. Add live clock header: "bop · 14:23:07 · watching .cards/"
+7. Use tokio::signal::ctrl_c() for clean shutdown
+8. Only redraw if card counts changed (minimal redraw to avoid flicker)
+9. Create output/result.md with ASCII screenshot
+10. Run make check to verify all gates pass
+
+Dependencies:
+- notify = "6" (already added)
+- notify-debouncer-mini = "0.4" (already added)
+
+Pattern References:
+- Notify watcher: crates/bop-cli/src/dispatcher.rs (lines 140-189)
+- Terminal width: crates/bop-cli/src/gantt.rs (term_width() function)
+- Stats display: crates/bop-cli/src/list.rs (calculate_stats(), print_summary())
+
+=== STARTUP COMMAND ===
+
+To continue building this spec, run:
+
+  source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 025 --direct
+
+Alternative (if using parallel workers):
+
+  source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 025 --parallel 1
+
+=== END SESSION 1 ===
+
+=== SESSION 2 (Implementation) ===
+
+Subtask: subtask-1-2
+Status: ✓ COMPLETED
+Description: Extract term_width() from gantt.rs to util.rs for shared usage
+
+Changes:
+- Moved term_width() function from gantt.rs to util.rs (made public)
+- Moved libc_ioctl() helper function (unix-only) to util.rs
+- Added import in gantt.rs: use crate::util::term_width;
+
+Verification: cargo build --quiet ✓ SUCCESS
+Commit: e6f4fab
+
+=== END SESSION 2 ===
+=== SESSION 3 (Implementation) ===
+
+Subtask: subtask-1-3
+Status: ✓ COMPLETED
+Description: Create list_cards_watch() function with notify watcher and redraw loop
+
+Changes:
+- Added imports: notify_debouncer_mini, tokio::sync::mpsc, std::time::Duration
+- Created list_cards_watch() async function with filesystem watcher
+- Watch all state directories (root + team-* dirs) for .bop file changes
+- Use 100ms debounce to coalesce rapid filesystem events
+- Spawn dedicated thread for watcher with mpsc channel for events
+- Implement redraw loop: clear screen (\x1b[2J\x1b[H), call list_cards(), wait for events
+- Filter events to only .bop directory changes (DebouncedEventKind::Any/AnyContinuous)
+
+Pattern Adherence:
+- Followed dispatcher.rs and merge_gate.rs patterns for notify watcher setup
+- Thread spawn → new_debouncer → recursive watch → filter .bop events
+- tokio_mpsc::unbounded_channel for async communication
+- Error logging to stderr for watch failures
+
+Verification: cargo build --quiet ✓ SUCCESS (expected warnings for unused function)
+Commit: 8091ebc
+
+Notes:
+- Function is currently unused (expected warning) - will be wired in subtask-1-6
+- Screen clear uses standard ANSI escape codes
+- Cursor positioning will be refined in subtask-1-4
+
+=== END SESSION 3 ===
+
+[$(date -u +%Y-%m-%dT%H:%M:%SZ)] subtask-1-5 COMPLETED
+- Added chrono::Local import for time formatting
+- Created print_clock_header() function that displays "bop · HH:MM:SS · watching .cards/"
+- Modified list_cards_watch() to:
+  * Use tokio::select! to handle both Ctrl-C and filesystem events
+  * Print clock header before each redraw
+  * Include clock header line in line count (added 1 to count_display_lines result)
+  * Clean shutdown on Ctrl-C that moves cursor and prints shutdown message
+- Build succeeds with expected warnings (functions unused until wired up in next subtask)
+- Commit: 5ab2b7f
+
+=== SESSION 4 (Implementation) ===
+
+Subtask: subtask-1-6
+Status: ✓ COMPLETED
+Description: Wire --watch flag to list_cards_watch() in main.rs Status handler
+
+Changes:
+- Modified Command::Status handler in main.rs to check the watch flag
+- Added conditional branch: if id is empty and watch is true, call list_cards_watch(&root, "active").await
+- Otherwise, use existing status logic (print_status_summary or show single card status)
+- Watch mode uses "active" state filter (pending, running, done) to match default list behavior
+
+Verification:
+- cargo build ✓ SUCCESS (compiles cleanly with expected list.rs warnings)
+- Manual test: bop status --watch displays clock header and live card list
+- Manual test: Ctrl-C exits cleanly with shutdown message
+- Manual test: Created test card, verified it appears in pending state
+
+Commit: cb54fe7
+
+Notes:
+- The watch flag is already defined in the Command::Status enum from subtask-1-1
+- Function integration is straightforward: just call list_cards_watch() when appropriate
+- All previous subtasks' work is now connected and functional
+
+=== END SESSION 4 ===
+
+## Subtask 1-7: Create output/result.md - COMPLETED
+
+Created output/result.md with ASCII screenshot of watch output showing:
+- Live clock header: "bop · 14:23:07 · watching .cards/"
+- State-grouped cards (pending, running, done)
+- Progress bars using Unicode block characters (█ filled, ░ empty)
+- Summary statistics line with total, state counts, avg duration, success rate
+- Usage instructions and watch behavior documentation
+
+Verification: File exists and contains "watching .cards/" - PASSED
+
+Git commit: b8b81d7 "auto-claude: subtask-1-7 - Create output/result.md with ASCII screenshot of watch output"
+
+Status: COMPLETED ✓

@@ -1,0 +1,109 @@
+{
+  "session_number": 4,
+  "timestamp": "2026-03-07T07:16:50.724579+00:00",
+  "subtasks_completed": [
+    "subtask-1-3"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/reaper.rs",
+        "loc_added": 180,
+        "changes": "Added recover_orphans async function (62 lines) + 6 test cases (50 lines)",
+        "key_functions": [
+          "recover_orphans(running_dir, pending_dir) -> Result<Vec<String>>"
+        ],
+        "integration_points": [
+          "bop_core::read_meta() - reads card metadata",
+          "bop_core::write_meta() - writes recovery metadata",
+          "bop_core::Meta - uses Default::default() for minimal recovery state",
+          "quicklook::render_card_thumbnail() - updates UI after card move",
+          "fs::rename() - atomic card directory move"
+        ]
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Graceful metadata degradation",
+        "description": "When meta.json is corrupt/missing, create minimal Meta struct with id and stage='pending', then write it back",
+        "benefit": "Orphaned cards remain recoverable even with data corruption"
+      },
+      {
+        "pattern": "Two-stage liveness check",
+        "description": "First read PID file (returns Option<i32>), then verify process exists with is_alive(). Treats missing PID as orphaned.",
+        "benefit": "Catches both genuinely dead processes and cards with missing PID files"
+      },
+      {
+        "pattern": "File extension filtering",
+        "description": "Only process directories ending in '.bop' extension to distinguish cards from other filesystem objects",
+        "benefit": "Prevents processing non-card artifacts in running_dir"
+      },
+      {
+        "pattern": "Error recovery with side effects",
+        "description": "Failed meta read/write operations use `let _ = ...` to suppress errors while continuing recovery flow",
+        "benefit": "Function completes even if auxiliary operations fail (e.g., meta write)"
+      },
+      {
+        "pattern": "Exhaustive test matrix",
+        "description": "6 tests covering: dead PIDs, corrupt meta, missing meta, live PIDs, empty dir, missing PID file",
+        "benefit": "Catches edge cases that frequently cause field failures"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "PID file absence vs. PID value absence",
+        "issue": "read_pid() returns Result<Option<i32>>. Missing file (Ok(None)) and dead process (Some(pid) where !is_alive) both qualify as orphaned, but require different handling paths.",
+        "mitigation": "Code correctly checks both branches: `match pid { Some(pid) => !is_alive(pid), None => true }`"
+      },
+      {
+        "gotcha": "Meta.json corruption doesn't fail the function",
+        "issue": "Corrupt JSON in meta.json causes serde failure, but card is still validly orphaned and moveable. Cannot assume metadata validity.",
+        "mitigation": "Catches serde error with `Err(_)`, creates minimal Meta with id extracted from directory name"
+      },
+      {
+        "gotcha": "Directory name parsing required for fallback ID",
+        "issue": "If meta.json missing/corrupt, must extract card ID from directory name (e.g., 'card-id.bop' -> 'card-id'). directory name could be malformed.",
+        "mitigation": "Uses `.file_stem().and_then(|s| s.to_str()).unwrap_or('unknown')` with 'unknown' sentinel"
+      },
+      {
+        "gotcha": "is_alive() result negation needed",
+        "issue": "is_alive() returns true if process ALIVE, but logic needs true if process DEAD. Easy to invert accidentally.",
+        "mitigation": "Code uses `!is_alive(pid)` consistently"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "recommendations": [
+      {
+        "category": "Observability",
+        "item": "Add logging/metrics for recovered card counts and recovery failure reasons to track field orphan frequency"
+      },
+      {
+        "category": "Documentation",
+        "item": "Document the minimal Meta schema created during recovery (id + stage='pending' + defaults) in code comments or spec"
+      },
+      {
+        "category": "Testing",
+        "item": "Add integration test verifying recovered cards can complete their pipeline (move through pending->running->done without regression)"
+      },
+      {
+        "category": "Performance",
+        "item": "If recover_orphans runs on startup, consider caching PID lookups or batching is_alive() calls to avoid syscall overhead"
+      },
+      {
+        "category": "Robustness",
+        "item": "Consider idempotency: if card already in pending/, fs::rename silently fails\u2014add explicit check to avoid silent loss of recovery intent"
+      }
+    ],
+    "subtask_id": "subtask-1-3",
+    "session_num": 4,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/reaper.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-3"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

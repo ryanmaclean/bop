@@ -3,6 +3,11 @@
 > This template skips spec/plan stages and goes straight to code.
 > Use for well-understood tasks where the requirements are already clear.
 
+## Pre-flight (delete this section when filling in the spec)
+> Is there a contradiction? (making X better makes Y worse?)
+> What is the IFR — the ideal outcome with no extra parts?
+> Which constraint table row does this touch?
+
 ## Overview
 Describe what needs to be built or changed.
 

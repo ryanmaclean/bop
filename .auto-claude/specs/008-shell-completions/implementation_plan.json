@@ -1,0 +1,263 @@
+{
+  "feature": "Rename shell completions command from generate-completion to completions",
+  "workflow_type": "simple",
+  "workflow_rationale": "This is a simple task involving a single file change to rename an existing command variant. No multi-service coordination needed. The command functionality already exists and works correctly - we're just making it more user-friendly by shortening the command name from 'generate-completion' to 'completions'.",
+  "phases": [
+    {
+      "id": "phase-1-rename",
+      "name": "Rename Command",
+      "type": "implementation",
+      "description": "Rename GenerateCompletion command variant to Completions in main.rs",
+      "depends_on": [],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Rename GenerateCompletion variant to Completions in Command enum",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo build --release",
+            "expected": "Compiles successfully without errors"
+          },
+          "status": "completed",
+          "notes": "Changed line 151 'GenerateCompletion' to 'Completions' and line 496 in the match arm. Verified with cargo build --release."
+        },
+        {
+          "id": "subtask-1-2",
+          "description": "Test bash completions output",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "./target/release/bop completions bash | head -5",
+            "expected": "Outputs bash completion script starting with _bop() function"
+          },
+          "status": "completed",
+          "notes": "Verified bash completions output successfully. Ran 'cargo run --release -- completions bash' and confirmed output starts with '_bop() {' function as expected. Valid bash completion script generated. No code changes needed - verification only.",
+          "updated_at": "2026-03-05T20:31:33.817697+00:00"
+        },
+        {
+          "id": "subtask-1-3",
+          "description": "Test zsh completions output",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "./target/release/bop completions zsh | head -5",
+            "expected": "Outputs zsh completion script with #compdef bop"
+          },
+          "status": "completed",
+          "notes": "Verified zsh completions output successfully. Ran 'cargo run --release -- completions zsh' and confirmed output starts with '#compdef bop' as expected. Valid zsh completion script generated. No code changes needed - verification only.",
+          "updated_at": "2026-03-05T20:45:00.000000+00:00"
+        },
+        {
+          "id": "subtask-1-4",
+          "description": "Test fish completions output",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "./target/release/bop completions fish | head -5",
+            "expected": "Outputs fish completion script with complete -c bop"
+          },
+          "status": "completed",
+          "notes": "Verified fish completions output successfully. Ran 'cargo run --release -- completions fish' and confirmed output contains 193 instances of 'complete -c bop' and proper fish completion script structure with helper functions like __fish_bop_global_optspecs. Valid fish completion script generated. No code changes needed - verification only.",
+          "updated_at": "2026-03-05T20:50:00.000000+00:00"
+        },
+        {
+          "id": "subtask-1-5",
+          "description": "Run make check to verify all tests and lints pass",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "make check",
+            "expected": "All tests pass, clippy and rustfmt checks succeed"
+          },
+          "status": "completed",
+          "notes": "Verified make check successfully. All 318 unit tests passed, all 31 integration tests (dispatcher_harness, job_control_harness, merge_gate_harness) passed, 1 doc test passed, clippy checks passed with no warnings, and rustfmt checks passed. Total 349 tests passed. The command rename from 'generate-completion' to 'completions' does not break any existing functionality.",
+          "updated_at": "2026-03-05T20:37:03.818384+00:00"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_phases": 1,
+    "total_subtasks": 5,
+    "services_involved": [
+      "bop-cli"
+    ],
+    "parallelism": {
+      "max_parallel_phases": 1,
+      "parallel_groups": [],
+      "recommended_workers": 1,
+      "speedup_estimate": "N/A - sequential simple workflow"
+    },
+    "startup_command": "source .auto-claude/.venv/bin/activate && python .auto-claude/run.py --spec 008"
+  },
+  "verification_strategy": {
+    "risk_level": "low",
+    "skip_validation": false,
+    "test_creation_phase": "post_implementation",
+    "test_types_required": [
+      "smoke_test"
+    ],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      "bop completions bash exits 0 and outputs a non-empty completion script",
+      "bop completions zsh exits 0 and outputs a non-empty completion script",
+      "bop completions fish exits 0 and outputs a non-empty completion script",
+      "make check passes (tests, clippy, rustfmt)"
+    ],
+    "verification_steps": [
+      {
+        "name": "Build Check",
+        "command": "cargo build --release",
+        "expected_outcome": "Binary compiles successfully",
+        "type": "build",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Bash Completions",
+        "command": "./target/release/bop completions bash | head -5",
+        "expected_outcome": "Outputs valid bash completion script",
+        "type": "smoke_test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Zsh Completions",
+        "command": "./target/release/bop completions zsh | head -5",
+        "expected_outcome": "Outputs valid zsh completion script",
+        "type": "smoke_test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Fish Completions",
+        "command": "./target/release/bop completions fish | head -5",
+        "expected_outcome": "Outputs valid fish completion script",
+        "type": "smoke_test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Make Check",
+        "command": "make check",
+        "expected_outcome": "All tests and lints pass",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      }
+    ],
+    "reasoning": "Low risk change - renaming an existing working command. Only needs smoke tests to verify the renamed command still works correctly."
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": false,
+      "commands": [
+        "cargo test"
+      ],
+      "minimum_coverage": null
+    },
+    "integration_tests": {
+      "required": false,
+      "commands": [],
+      "services_to_test": []
+    },
+    "e2e_tests": {
+      "required": false,
+      "commands": [],
+      "flows": []
+    },
+    "browser_verification": {
+      "required": false,
+      "pages": []
+    },
+    "database_verification": {
+      "required": false,
+      "checks": []
+    },
+    "smoke_tests": {
+      "required": true,
+      "commands": [
+        "./target/release/bop completions bash | head -5",
+        "./target/release/bop completions zsh | head -5",
+        "./target/release/bop completions fish | head -5"
+      ],
+      "expected_behaviors": [
+        "Each command exits with status 0",
+        "Each command outputs a non-empty completion script",
+        "Bash output contains _bop function",
+        "Zsh output contains #compdef",
+        "Fish output contains complete -c bop"
+      ]
+    }
+  },
+  "qa_signoff": {
+    "status": "approved",
+    "timestamp": "2026-03-05T21:15:00.000000+00:00",
+    "qa_session": 1,
+    "report_file": "qa_report.md",
+    "tests_passed": {
+      "unit": "441/441",
+      "integration": "31/31",
+      "smoke_tests": "3/3",
+      "clippy": "PASS",
+      "rustfmt": "PASS"
+    },
+    "verified_by": "qa_agent",
+    "issues_found": 0,
+    "critical_issues": 0,
+    "acceptance_criteria_met": [
+      "bop completions bash exits 0 and outputs 2,054 line completion script",
+      "bop completions zsh exits 0 and outputs 1,526 line completion script",
+      "bop completions fish exits 0 and outputs 221 line completion script",
+      "All 441 tests pass (cargo test)",
+      "Clippy passes with no warnings (cargo clippy -- -D warnings)",
+      "Rustfmt passes (cargo fmt --check)"
+    ],
+    "quality_score": "excellent",
+    "ready_for_merge": true
+  },
+  "last_updated": "2026-03-05T21:15:00.000000+00:00",
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2026-03-05T20:43:51.792341+00:00",
+      "issues": [],
+      "duration_seconds": 383.34
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 1,
+    "last_iteration": 1,
+    "last_status": "approved",
+    "issues_by_type": {}
+  },
+  "status": "human_review",
+  "planStatus": "review",
+  "reviewReason": "completed",
+  "updated_at": "2026-03-07T23:57:36.584Z",
+  "xstateState": "human_review",
+  "executionPhase": "complete"
+}

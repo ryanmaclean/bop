@@ -1,0 +1,30 @@
+{
+  "project_type": "single",
+  "services": {
+    "bop-cli": {
+      "path": "crates/bop-cli",
+      "tech_stack": ["rust", "clap", "tokio"],
+      "build_command": "cargo build -p bop-cli",
+      "test_command": "cargo test -p bop-cli",
+      "main_binary": "bop"
+    },
+    "bop-core": {
+      "path": "crates/bop-core",
+      "tech_stack": ["rust", "serde"],
+      "build_command": "cargo build -p bop-core",
+      "test_command": "cargo test -p bop-core",
+      "description": "Core types and utilities shared across crates"
+    }
+  },
+  "infrastructure": {
+    "docker": false,
+    "database": "filesystem",
+    "build_system": "cargo"
+  },
+  "conventions": {
+    "formatter": "cargo fmt",
+    "linter": "cargo clippy",
+    "testing": "cargo test",
+    "quality_gate": "make check"
+  }
+}

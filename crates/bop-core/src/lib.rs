@@ -6,17 +6,68 @@ pub mod worktree;
 
 pub use config::{load_config, Config};
 
+use anyhow::Context as _;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
 pub enum BopError {
     #[error("invalid bop: {0}")]
     Invalid(String),
+}
+
+/// Configuration for the .cards/ directory, stored in .cards/config.json
+/// All fields are Option so partial configs can be merged.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct CardsConfig {
+    /// Zellij session name for live attach (e.g. "bop" or "pmr").
+    /// Set by `bop init` when run inside a Zellij session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zellij_session: Option<String>,
+}
+
+/// Parse JSON bytes into CardsConfig, returning a clear error on bad schema.
+pub fn parse_cards_config(json: &str) -> anyhow::Result<CardsConfig> {
+    if json.trim().is_empty() {
+        return Ok(CardsConfig::default());
+    }
+    serde_json::from_str(json).context(
+        "malformed .cards/config.json: expected schema with optional fields: \
+        zellij_session",
+    )
+}
+
+/// Return the cards config path: <cwd>/.cards/config.json
+pub fn cards_config_path() -> PathBuf {
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(".cards")
+        .join("config.json")
+}
+
+/// Read config from .cards/config.json (used by `bop init`).
+pub fn read_cards_config_file(path: &Path) -> anyhow::Result<CardsConfig> {
+    let json = std::fs::read_to_string(path)
+        .with_context(|| format!("cannot read .cards config: {}", path.display()))?;
+    parse_cards_config(&json)
+        .with_context(|| format!("invalid .cards config at {}", path.display()))
+}
+
+/// Write config to .cards/config.json (used by `bop init`).
+pub fn write_cards_config_file(path: &Path, cfg: &CardsConfig) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("cannot create .cards config dir: {}", parent.display()))?;
+    }
+    let json = serde_json::to_string_pretty(cfg).context("failed to serialize .cards config")?;
+    std::fs::write(path, json)
+        .with_context(|| format!("cannot write .cards config: {}", path.display()))?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -242,6 +293,12 @@ pub struct Meta {
     pub failure_reason: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paused_at: Option<DateTime<Utc>>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub validation_summary: Option<realtime::ValidationSummary>,
 
     // ── planning poker ────────────────────────────────────────────────────────
@@ -261,6 +318,13 @@ pub struct Meta {
     /// Zellij pane ID within the session (for direct focus).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zellij_pane: Option<String>,
+
+    // ── Auto-Claude linkage ─────────────────────────────────────────────────
+    /// Auto-Claude spec ID (e.g. "022") linking this card to an AC
+    /// implementation plan. Quick Look and CLI resolve the full path:
+    /// `<git_root>/.auto-claude/specs/<ac_spec_id>-*/implementation_plan.json`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ac_spec_id: Option<String>,
 
     // ── stage pipeline (factory engine) ─────────────────────────────────────
     /// Ordered stage pipeline this card progresses through.
@@ -283,6 +347,11 @@ pub struct Meta {
     /// Execution provenance records (OpenLineage-style) for each run attempt.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub runs: Vec<RunRecord>,
+
+    /// SHA256 checksum of the canonical JSON serialization (excluding this field).
+    /// Used to detect corruption in meta.json; absent checksums trigger JSONL replay.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checksum: Option<String>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -328,16 +397,20 @@ impl Default for Meta {
             policy_result: None,
             retry_count: None,
             failure_reason: None,
+            exit_code: None,
+            paused_at: None,
             validation_summary: None,
             poker_round: None,
             estimates: BTreeMap::new(),
             zellij_session: None,
             zellij_pane: None,
+            ac_spec_id: None,
             stage_chain: Vec::new(),
             stage_models: BTreeMap::new(),
             stage_providers: BTreeMap::new(),
             stage_budgets: BTreeMap::new(),
             runs: Vec::new(),
+            checksum: None,
         }
     }
 }
@@ -566,6 +639,29 @@ fn hydrate_typed_metadata(card_dir: &Path, meta: &mut Meta) {
 pub fn read_meta(card_dir: &Path) -> anyhow::Result<Meta> {
     let bytes = fs::read(meta_path(card_dir))?;
     let mut meta: Meta = serde_json::from_slice(&bytes)?;
+
+    // Validate checksum if present
+    if let Some(stored_checksum) = meta.checksum.clone() {
+        // Set checksum to None and reserialize to compute expected hash
+        let mut meta_without_checksum = meta.clone();
+        meta_without_checksum.checksum = None;
+        let canonical_bytes = serde_json::to_vec(&meta_without_checksum)?;
+        let computed_hash = blake3::hash(&canonical_bytes).to_hex().to_string();
+
+        if computed_hash != stored_checksum {
+            eprintln!(
+                "[warn] meta.json checksum mismatch on {}: expected {}, got {}",
+                meta.id, stored_checksum, computed_hash
+            );
+            return Err(anyhow::anyhow!(
+                "meta.json checksum mismatch on {}: stored={}, computed={}",
+                meta.id,
+                stored_checksum,
+                computed_hash
+            ));
+        }
+    }
+
     hydrate_typed_metadata(card_dir, &mut meta);
     meta.validate()
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
@@ -573,10 +669,121 @@ pub fn read_meta(card_dir: &Path) -> anyhow::Result<Meta> {
 }
 
 pub fn write_meta(card_dir: &Path, meta: &Meta) -> anyhow::Result<()> {
+    use std::io::Write;
+
     meta.validate()
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-    let bytes = serde_json::to_vec_pretty(meta)?;
-    fs::write(meta_path(card_dir), bytes)?;
+
+    // Compute checksum: serialize with checksum=None, hash, then set checksum
+    let mut meta_with_checksum = meta.clone();
+    meta_with_checksum.checksum = None;
+    let canonical_bytes = serde_json::to_vec(&meta_with_checksum)?;
+    let hash = blake3::hash(&canonical_bytes);
+    meta_with_checksum.checksum = Some(hash.to_hex().to_string());
+
+    // Canonical form is compact JSON (eliminates whitespace ambiguity)
+    let bytes = serde_json::to_vec(&meta_with_checksum)?;
+    let target = meta_path(card_dir);
+
+    // Atomic write: temp file + rename
+    // Create temp file in same directory to ensure atomic rename on same filesystem
+    let temp_dir = target
+        .parent()
+        .with_context(|| format!("meta.json path has no parent: {}", target.display()))?;
+    let mut temp_file = tempfile::Builder::new()
+        .prefix(".meta.json.")
+        .suffix(".tmp")
+        .tempfile_in(temp_dir)
+        .with_context(|| format!("failed to create temp file in {}", temp_dir.display()))?;
+
+    temp_file
+        .write_all(&bytes)
+        .context("failed to write meta.json to temp file")?;
+
+    temp_file
+        .persist(&target)
+        .map_err(|e| anyhow::anyhow!("failed to persist meta.json: {}", e))?;
+
+    // Best-effort: log the meta_written event to JSONL audit log
+    let _ = append_event(
+        card_dir,
+        &Event {
+            ts: Utc::now().to_rfc3339(),
+            event: "meta_written".into(),
+            stage: None,
+            provider: None,
+            pid: None,
+            exit_code: None,
+            from: None,
+            to: None,
+        },
+    );
+
+    Ok(())
+}
+
+/// A single event record for the append-only JSONL audit log.
+/// All fields are optional to support different event types.
+/// Event records MUST stay under 512 bytes when serialized.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Event {
+    /// RFC3339 timestamp
+    pub ts: String,
+    /// Event type: "meta_written", "stage_transition", etc.
+    pub event: String,
+    /// Optional fields for event context (stage, provider, pid, exit_code, from, to)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+}
+
+/// Append an event to the card's JSONL audit log at logs/events.jsonl.
+/// This is best-effort: failures are returned as Err but should be ignored
+/// by callers (use `let _ = append_event(...)`).
+///
+/// O_APPEND is atomic for writes ≤ PIPE_BUF (4096 bytes on Linux/macOS),
+/// so no locking is needed if event records stay under 512 bytes.
+pub fn append_event(card_dir: &Path, event: &Event) -> anyhow::Result<()> {
+    let logs_dir = card_dir.join("logs");
+    fs::create_dir_all(&logs_dir)
+        .with_context(|| format!("failed to create logs dir: {}", logs_dir.display()))?;
+
+    let events_path = logs_dir.join("events.jsonl");
+
+    // Serialize to compact JSON (not pretty)
+    let mut json_line = serde_json::to_vec(event).context("failed to serialize event")?;
+
+    // Verify size constraint
+    if json_line.len() > 512 {
+        anyhow::bail!(
+            "event record too large ({} bytes, max 512): {}",
+            json_line.len(),
+            event.event
+        );
+    }
+
+    // Append newline
+    json_line.push(b'\n');
+
+    // Append to file (O_APPEND ensures atomicity for small writes)
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&events_path)
+        .with_context(|| format!("failed to open events.jsonl: {}", events_path.display()))?;
+
+    file.write_all(&json_line)
+        .with_context(|| format!("failed to write to events.jsonl: {}", events_path.display()))?;
+
     Ok(())
 }
 
@@ -870,6 +1077,52 @@ mod tests {
     }
 
     #[test]
+    fn meta_ac_spec_id_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = Meta {
+            id: "ac1".into(),
+            created: chrono::Utc::now(),
+            stage: "implement".into(),
+            ac_spec_id: Some("022".into()),
+            ..Default::default()
+        };
+        write_meta(dir.path(), &m).unwrap();
+
+        // Verify JSON key is 'ac_spec_id'
+        let raw = fs::read_to_string(meta_path(dir.path())).unwrap();
+        assert!(
+            raw.contains("\"ac_spec_id\""),
+            "field should serialize as 'ac_spec_id'"
+        );
+
+        // Verify round-trip
+        let back = read_meta(dir.path()).unwrap();
+        assert_eq!(back.ac_spec_id.as_deref(), Some("022"));
+    }
+
+    #[test]
+    fn meta_ac_spec_id_omitted_when_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = Meta {
+            id: "ac-none".into(),
+            created: chrono::Utc::now(),
+            stage: "implement".into(),
+            ..Default::default()
+        };
+        write_meta(dir.path(), &m).unwrap();
+
+        let raw = fs::read_to_string(meta_path(dir.path())).unwrap();
+        assert!(
+            !raw.contains("ac_spec_id"),
+            "ac_spec_id should be omitted when None"
+        );
+
+        // Should still round-trip fine
+        let back = read_meta(dir.path()).unwrap();
+        assert_eq!(back.ac_spec_id, None);
+    }
+
+    #[test]
     fn meta_stage_pipeline_round_trips() {
         let dir = tempfile::tempdir().unwrap();
         let mut models = BTreeMap::new();
@@ -1019,6 +1272,54 @@ mod tests {
     }
 
     #[test]
+    fn parse_valid_cards_config() {
+        let json = r#"{"zellij_session": "bop"}"#;
+        let cfg = parse_cards_config(json).unwrap();
+        assert_eq!(cfg.zellij_session, Some("bop".to_string()));
+    }
+
+    #[test]
+    fn parse_empty_cards_config() {
+        let cfg = parse_cards_config("").unwrap();
+        assert_eq!(cfg, CardsConfig::default());
+    }
+
+    #[test]
+    fn parse_malformed_cards_config_returns_error() {
+        let result = parse_cards_config(r#"{"zellij_session": 123}"#);
+        assert!(result.is_err(), "expected error for bad schema");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("zellij_session") || msg.contains("invalid") || msg.contains("expected"),
+            "error message should hint at the field: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn roundtrip_cards_config_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".cards").join("config.json");
+        let cfg = CardsConfig {
+            zellij_session: Some("pmr".to_string()),
+        };
+        write_cards_config_file(&path, &cfg).unwrap();
+        let back = read_cards_config_file(&path).unwrap();
+        assert_eq!(back.zellij_session, Some("pmr".to_string()));
+    }
+
+    #[test]
+    fn cards_config_empty_fields_omitted() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".cards").join("config.json");
+        let cfg = CardsConfig::default();
+        write_cards_config_file(&path, &cfg).unwrap();
+        let raw = fs::read_to_string(&path).unwrap();
+        // Empty/None fields should be skipped by serde
+        assert!(!raw.contains("zellij_session"));
+    }
+
+    #[test]
     fn read_meta_hydrates_roadmap_type_from_roadmap_json() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(
@@ -1110,5 +1411,287 @@ mod tests {
             .labels
             .iter()
             .any(|l| l.kind.as_deref() == Some("phase") && l.name == "Production Foundation"));
+    }
+
+    #[test]
+    fn append_event_creates_logs_dir_and_jsonl_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let event = Event {
+            ts: "2026-03-07T12:00:00Z".into(),
+            event: "meta_written".into(),
+            stage: Some("running".into()),
+            provider: Some("claude".into()),
+            pid: Some(12345),
+            exit_code: None,
+            from: None,
+            to: None,
+        };
+
+        append_event(dir.path(), &event).unwrap();
+
+        let events_path = dir.path().join("logs").join("events.jsonl");
+        assert!(events_path.exists());
+
+        let content = fs::read_to_string(&events_path).unwrap();
+        assert!(content.contains("\"event\":\"meta_written\""));
+        assert!(content.contains("\"stage\":\"running\""));
+        assert!(content.contains("\"pid\":12345"));
+        assert!(content.ends_with('\n'));
+    }
+
+    #[test]
+    fn append_event_appends_multiple_events() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let event1 = Event {
+            ts: "2026-03-07T12:00:00Z".into(),
+            event: "stage_transition".into(),
+            stage: None,
+            provider: None,
+            pid: None,
+            exit_code: Some(0),
+            from: Some("pending".into()),
+            to: Some("running".into()),
+        };
+
+        let event2 = Event {
+            ts: "2026-03-07T12:05:00Z".into(),
+            event: "stage_transition".into(),
+            stage: None,
+            provider: None,
+            pid: None,
+            exit_code: Some(0),
+            from: Some("running".into()),
+            to: Some("done".into()),
+        };
+
+        append_event(dir.path(), &event1).unwrap();
+        append_event(dir.path(), &event2).unwrap();
+
+        let events_path = dir.path().join("logs").join("events.jsonl");
+        let content = fs::read_to_string(&events_path).unwrap();
+
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("\"from\":\"pending\""));
+        assert!(lines[1].contains("\"from\":\"running\""));
+    }
+
+    #[test]
+    fn append_event_compact_json_no_pretty_print() {
+        let dir = tempfile::tempdir().unwrap();
+        let event = Event {
+            ts: "2026-03-07T12:00:00Z".into(),
+            event: "meta_written".into(),
+            stage: Some("qa".into()),
+            provider: None,
+            pid: None,
+            exit_code: None,
+            from: None,
+            to: None,
+        };
+
+        append_event(dir.path(), &event).unwrap();
+
+        let events_path = dir.path().join("logs").join("events.jsonl");
+        let content = fs::read_to_string(&events_path).unwrap();
+
+        // Compact JSON should not have newlines inside the object
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 1);
+        assert!(!lines[0].contains("\n  "));
+    }
+
+    #[test]
+    fn append_event_skips_none_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let event = Event {
+            ts: "2026-03-07T12:00:00Z".into(),
+            event: "test_event".into(),
+            stage: Some("running".into()),
+            provider: None,
+            pid: None,
+            exit_code: None,
+            from: None,
+            to: None,
+        };
+
+        append_event(dir.path(), &event).unwrap();
+
+        let events_path = dir.path().join("logs").join("events.jsonl");
+        let content = fs::read_to_string(&events_path).unwrap();
+
+        // None fields should be omitted from JSON
+        assert!(!content.contains("\"provider\""));
+        assert!(!content.contains("\"pid\""));
+        assert!(!content.contains("\"exit_code\""));
+        assert!(content.contains("\"stage\":\"running\""));
+    }
+
+    #[test]
+    fn append_event_rejects_oversized_records() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Create an event with a very long string that exceeds 512 bytes
+        let long_string = "a".repeat(600);
+        let event = Event {
+            ts: "2026-03-07T12:00:00Z".into(),
+            event: long_string,
+            stage: None,
+            provider: None,
+            pid: None,
+            exit_code: None,
+            from: None,
+            to: None,
+        };
+
+        let result = append_event(dir.path(), &event);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("too large"));
+        assert!(err_msg.contains("512"));
+    }
+
+    #[test]
+    fn write_meta_appends_event_to_jsonl() {
+        let dir = tempfile::tempdir().unwrap();
+        let card_dir = dir.path();
+
+        let meta = Meta {
+            id: "test-write-123".into(),
+            created: Utc::now(),
+            stage: "pending".into(),
+            glyph: Some("🃏".into()),
+            title: Some("Test Write Meta".into()),
+            ..Default::default()
+        };
+
+        // Call write_meta
+        write_meta(card_dir, &meta).unwrap();
+
+        // Verify meta.json was created
+        let meta_path = card_dir.join("meta.json");
+        assert!(meta_path.exists());
+
+        // Verify logs/events.jsonl was created
+        let events_path = card_dir.join("logs").join("events.jsonl");
+        assert!(
+            events_path.exists(),
+            "logs/events.jsonl should be created by write_meta"
+        );
+
+        // Verify the event contains meta_written
+        let content = fs::read_to_string(&events_path).unwrap();
+        assert!(content.contains("\"event\":\"meta_written\""));
+
+        // Verify it's valid JSONL (one line, ends with newline)
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 1);
+        assert!(content.ends_with('\n'));
+    }
+
+    #[test]
+    fn write_meta_checksum() {
+        let dir = tempfile::tempdir().unwrap();
+        let card_dir = dir.path();
+
+        let meta = Meta {
+            id: "test-checksum-123".into(),
+            created: Utc::now(),
+            stage: "pending".into(),
+            glyph: Some("🃏".into()),
+            title: Some("Test Checksum".into()),
+            ..Default::default()
+        };
+
+        // Call write_meta
+        write_meta(card_dir, &meta).unwrap();
+
+        // Read the written file
+        let meta_path = card_dir.join("meta.json");
+        let content = fs::read_to_string(&meta_path).unwrap();
+
+        // Verify checksum field exists in the JSON
+        assert!(
+            content.contains("\"checksum\":"),
+            "meta.json should contain checksum field"
+        );
+
+        // Parse and verify the checksum is a valid hex string
+        let written_meta: Meta = serde_json::from_str(&content).unwrap();
+        assert!(
+            written_meta.checksum.is_some(),
+            "checksum should be set after write_meta"
+        );
+
+        let checksum = written_meta.checksum.as_ref().unwrap();
+        assert_eq!(
+            checksum.len(),
+            64,
+            "blake3 checksum should be 64 hex characters"
+        );
+        assert!(
+            checksum.chars().all(|c| c.is_ascii_hexdigit()),
+            "checksum should be hex-encoded"
+        );
+
+        // Verify checksum matches recomputation
+        let mut verify_meta = written_meta.clone();
+        verify_meta.checksum = None;
+        let canonical_bytes = serde_json::to_vec(&verify_meta).unwrap();
+        let expected_hash = blake3::hash(&canonical_bytes).to_hex().to_string();
+
+        assert_eq!(
+            *checksum, expected_hash,
+            "checksum should match recomputation"
+        );
+    }
+
+    #[test]
+    fn read_meta_checksum() {
+        let dir = tempfile::tempdir().unwrap();
+        let card_dir = dir.path();
+
+        // Create and write a valid meta with checksum
+        let meta = Meta {
+            id: "test-read-checksum-456".into(),
+            created: Utc::now(),
+            stage: "pending".into(),
+            glyph: Some("🃏".into()),
+            title: Some("Test Read Checksum".into()),
+            ..Default::default()
+        };
+
+        write_meta(card_dir, &meta).unwrap();
+
+        // Read it back - should succeed with valid checksum
+        let read_back = read_meta(card_dir);
+        assert!(
+            read_back.is_ok(),
+            "read_meta should succeed with valid checksum"
+        );
+
+        // Corrupt the checksum by manually editing meta.json
+        let meta_path = card_dir.join("meta.json");
+        let content = fs::read_to_string(&meta_path).unwrap();
+        let mut corrupted_meta: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        // Replace checksum with an invalid one
+        corrupted_meta["checksum"] = serde_json::Value::String("0".repeat(64));
+        fs::write(&meta_path, serde_json::to_vec(&corrupted_meta).unwrap()).unwrap();
+
+        // Read should now fail due to checksum mismatch
+        let result = read_meta(card_dir);
+        assert!(
+            result.is_err(),
+            "read_meta should fail with invalid checksum"
+        );
+
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("checksum mismatch"),
+            "error message should mention checksum mismatch, got: {}",
+            err_msg
+        );
     }
 }

@@ -1,0 +1,249 @@
+{
+  "feature": "bop serve smoke test integration",
+  "workflow_type": "simple",
+  "workflow_rationale": "Single service (bop binary), single test file to create, no multi-service coordination needed",
+  "phases": [
+    {
+      "id": "phase-1-test",
+      "name": "Create Integration Test",
+      "type": "implementation",
+      "description": "Create serve_smoke.rs integration test that starts the server, POSTs a card, and verifies it appears in pending/",
+      "depends_on": [],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Create serve_smoke.rs integration test file",
+          "service": "bop",
+          "files_to_modify": [],
+          "files_to_create": [
+            "crates/bop-cli/tests/serve_smoke.rs"
+          ],
+          "patterns_from": [
+            "crates/bop-cli/tests/merge_gate_harness.rs",
+            "crates/bop-cli/src/serve.rs"
+          ],
+          "implementation_notes": [
+            "Use repo_root(), build_jc(), bop_bin() helper pattern",
+            "Create tempdir with initialized .cards layout",
+            "Spawn 'bop serve' process on port 18080",
+            "Wait for server readiness by attempting TCP connection",
+            "Use reqwest or similar HTTP client to POST to /cards/new",
+            "Assert HTTP 201 response",
+            "Assert .cards/pending/smoke-test-serve.bop directory exists",
+            "Kill server process and clean up tempdir"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo test -p bop test_serve_smoke",
+            "expected": "test result: ok"
+          },
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "id": "phase-2-validate",
+      "name": "Full Test Suite Validation",
+      "type": "integration",
+      "description": "Run full test suite and linting to ensure nothing broke",
+      "depends_on": [
+        "phase-1-test"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-2-1",
+          "description": "Run cargo test for all tests",
+          "service": "bop",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cargo test -p bop",
+            "expected": "All tests pass"
+          },
+          "status": "completed",
+          "notes": "All 355 tests passed successfully. Unit tests: 323 passed (1 ignored), dispatcher_harness: 10 passed, job_control_harness: 17 passed, merge_gate_harness: 4 passed, serve_smoke: 1 passed. No failures detected. Test suite is healthy.",
+          "updated_at": "2026-03-07T03:13:20.609282+00:00"
+        },
+        {
+          "id": "subtask-2-2",
+          "description": "Run make check (test + lint + fmt)",
+          "service": "bop",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "make check",
+            "expected": "Exit code 0"
+          },
+          "status": "completed",
+          "notes": "Successfully ran make check after fixing formatting issue in serve_smoke.rs. All tests, clippy lints, and formatting checks now pass with exit code 0.",
+          "updated_at": "2026-03-07T03:14:55.608625+00:00"
+        },
+        {
+          "id": "subtask-2-3",
+          "description": "Create output/result.md with test results",
+          "service": "bop",
+          "files_to_modify": [],
+          "files_to_create": [
+            ".auto-claude/specs/015-bop-serve-smoke-test/output/result.md"
+          ],
+          "patterns_from": [],
+          "verification": {
+            "type": "manual",
+            "instructions": "Verify result.md documents what was tested and the results"
+          },
+          "status": "completed",
+          "notes": "Created output/result.md documenting the serve_smoke integration test, test results (355 tests passed), and acceptance criteria validation. File includes detailed breakdown of what was tested, test coverage, and quality checks.",
+          "updated_at": "2026-03-07T03:16:23.415955+00:00"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_phases": 2,
+    "total_subtasks": 4,
+    "services_involved": [
+      "bop"
+    ],
+    "parallelism": {
+      "max_parallel_phases": 1,
+      "parallel_groups": [],
+      "recommended_workers": 1,
+      "speedup_estimate": "Sequential execution required"
+    },
+    "startup_command": "source .auto-claude/.venv/bin/activate && python .auto-claude/run.py --spec 015 --parallel 1"
+  },
+  "verification_strategy": {
+    "risk_level": "low",
+    "skip_validation": false,
+    "test_creation_phase": "implementation",
+    "test_types_required": [
+      "integration"
+    ],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      "cargo test -p bop passes including the new serve_smoke test",
+      "make check exits 0 (test + clippy + rustfmt)",
+      "output/result.md exists and documents test results",
+      "Server can start, accept POST requests, and create cards in pending/"
+    ],
+    "verification_steps": [
+      {
+        "name": "Integration Test",
+        "command": "cargo test -p bop test_serve_smoke",
+        "expected_outcome": "Test passes - server accepts POST and creates card",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Full Test Suite",
+        "command": "cargo test -p bop",
+        "expected_outcome": "All tests pass",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Lint Check",
+        "command": "cargo clippy -- -D warnings",
+        "expected_outcome": "No warnings",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Format Check",
+        "command": "cargo fmt --check",
+        "expected_outcome": "Code is formatted",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      }
+    ],
+    "reasoning": "Low risk - adding a new test file only, no changes to production code. Integration test verifies the existing serve functionality works correctly."
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": false,
+      "commands": [],
+      "minimum_coverage": null
+    },
+    "integration_tests": {
+      "required": true,
+      "commands": [
+        "cargo test -p bop test_serve_smoke",
+        "cargo test -p bop"
+      ],
+      "services_to_test": [
+        "bop"
+      ]
+    },
+    "e2e_tests": {
+      "required": false,
+      "commands": [],
+      "flows": []
+    },
+    "browser_verification": {
+      "required": false,
+      "pages": []
+    },
+    "database_verification": {
+      "required": false,
+      "checks": []
+    },
+    "manual_checks": [
+      "Verify serve_smoke.rs test actually spawns the server process",
+      "Verify test cleans up after itself (no orphaned processes or temp files)",
+      "Verify test is not flaky (run multiple times)"
+    ]
+  },
+  "qa_signoff": {
+    "status": "approved",
+    "timestamp": "2026-03-07T03:20:00.000000+00:00",
+    "qa_session": 1,
+    "report_file": "qa_report.md",
+    "tests_passed": {
+      "unit": "323/323 (1 ignored)",
+      "integration": "32/32",
+      "e2e": "N/A"
+    },
+    "manual_checks_verified": [
+      "Test spawns server process - verified via ServerGuard with Command::spawn()",
+      "Test cleanup verified - ServerGuard implements Drop trait (kill + wait)",
+      "Test not flaky - ran 3 consecutive times, all passed (0.78s-0.88s)"
+    ],
+    "security_review": "passed",
+    "pattern_compliance": "passed - follows merge_gate_harness.rs pattern exactly",
+    "regression_check": "passed - all 355 tests passing, no regressions",
+    "verified_by": "qa_agent"
+  },
+  "last_updated": "2026-03-07T03:20:00.000000+00:00",
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2026-03-07T03:21:15.181290+00:00",
+      "issues": [],
+      "duration_seconds": 242.05
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 1,
+    "last_iteration": 1,
+    "last_status": "approved",
+    "issues_by_type": {}
+  },
+  "status": "human_review",
+  "planStatus": "review",
+  "reviewReason": "completed",
+  "updated_at": "2026-03-07T23:57:36.592Z",
+  "xstateState": "human_review",
+  "executionPhase": "complete"
+}

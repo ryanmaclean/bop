@@ -1,0 +1,102 @@
+{
+  "session_number": 2,
+  "timestamp": "2026-03-07T07:11:57.518604+00:00",
+  "subtasks_completed": [
+    "subtask-1-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "path": "crates/bop-core/Cargo.toml",
+        "change_type": "dependency_addition",
+        "key_change": "Added tempfile = \"3\" dependency",
+        "purpose": "Enables atomic file operations via temp + rename pattern",
+        "impact": "Minimal; single new dependency for stdlib file safety"
+      },
+      {
+        "path": "crates/bop-core/src/lib.rs",
+        "change_type": "function_refactor",
+        "function": "write_meta",
+        "key_change": "Replaced fs::write() with tempfile::Builder + persist() pattern",
+        "purpose": "Ensure metadata writes are atomic; prevents corruption on partial writes or crashes",
+        "error_handling": "Added context() annotations for temp file creation and persistence steps"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "atomic_file_write",
+        "implementation": "Create temp file in same directory \u2192 write payload \u2192 persist (atomic rename)",
+        "key_detail": "Temp file in same directory guarantees atomic rename on same filesystem",
+        "builder_usage": "tempfile::Builder with prefix='.meta.json.', suffix='.tmp'"
+      },
+      {
+        "pattern": "contextual_error_handling",
+        "details": "Each step (parent check, temp creation, write, persist) has descriptive error context",
+        "benefit": "Debugging clarity on which phase failed"
+      },
+      {
+        "pattern": "single_filesystem_guarantee",
+        "details": "Parent directory resolution ensures temp file stays on same filesystem as target",
+        "reason": "Rename(2) syscall atomicity requires same filesystem"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Temp file location",
+        "issue": "If temp file created in /tmp and target in /home, atomic rename fails (cross-filesystem)",
+        "mitigation": "Used target.parent() to place temp file in same directory as target"
+      },
+      {
+        "gotcha": "Parent directory existence",
+        "issue": "meta_path(card_dir) might have no parent (edge case)",
+        "mitigation": "Added .with_context() check for parent existence"
+      },
+      {
+        "gotcha": "Temp file cleanup",
+        "issue": "Manual rename leaves orphaned temp files on error",
+        "mitigation": "Used tempfile::persist() which handles cleanup via Drop trait"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "attempts": 1,
+      "implementation_strategy": "Replaced synchronous fs::write with atomic temp+rename via tempfile crate",
+      "verification": "Single commit landed; no test failures reported",
+      "deployment_readiness": "Complete; atomic pattern now protects metadata against corruption"
+    },
+    "recommendations": [
+      {
+        "priority": "high",
+        "recommendation": "Apply atomic write pattern to other metadata-bearing operations in dispatcher",
+        "rationale": "Meta corruption is a silent failure vector; same pattern should protect all critical state writes"
+      },
+      {
+        "priority": "medium",
+        "recommendation": "Extract into reusable helper function: write_atomic_json(path, value)",
+        "rationale": "Reduces duplication if pattern spreads; centralizes atomic semantics"
+      },
+      {
+        "priority": "low",
+        "recommendation": "Document temp file naming convention in code comment",
+        "rationale": "Facilitates debugging if temp files accumulate (e.g., due to early exit)"
+      },
+      {
+        "priority": "low",
+        "recommendation": "Monitor tempfile crate for updates; currently v3 is stable",
+        "rationale": "Dependency maintenance; no immediate action needed"
+      }
+    ],
+    "subtask_id": "subtask-1-1",
+    "session_num": 2,
+    "success": true,
+    "changed_files": [
+      "crates/bop-core/Cargo.toml",
+      "crates/bop-core/src/lib.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

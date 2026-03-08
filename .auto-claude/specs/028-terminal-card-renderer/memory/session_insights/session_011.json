@@ -1,0 +1,132 @@
+{
+  "session_number": 11,
+  "timestamp": "2026-03-07T18:41:29.446792+00:00",
+  "subtasks_completed": [
+    "subtask-4-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/list.rs",
+        "changes_summary": "Integrated new render system; replaced imperative print logic with declarative CardView collection and render_board invocation",
+        "key_structural_changes": [
+          "Removed: count_display_lines(), count_state_group_lines() (replaced by output.lines().count())",
+          "Added: collect_card_groups() to organize (label, Vec<CardView>) tuples by state and team",
+          "Added: collect_card_views() to map bop_core::read_meta to render::CardView",
+          "Added: stats_to_render_stats() bridge from CardStats to render::Stats",
+          "Refactored: list_cards() now 5-liner: detect caps, collect groups, stats, render, print",
+          "Refactored: list_cards_watch() now re-detects TermCaps on every redraw, uses watch lock singleton"
+        ],
+        "imports_added": [
+          "crate::lock",
+          "crate::render",
+          "crate::termcaps::TermCaps"
+        ],
+        "legacy_compatibility": "print_state_group(), print_summary(), format_duration() marked #[allow(dead_code)] \u2014 preserved for tests, fallback usage"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "name": "Render System Abstraction",
+        "description": "Separation of concerns: card collection (collect_card_views) \u2192 grouping (collect_card_groups) \u2192 rendering (render::render_board)",
+        "benefit": "UI changes isolated from list.rs; future terminal output styles require only render module updates"
+      },
+      {
+        "name": "Terminal Capability Re-detection",
+        "description": "TermCaps::detect() called on every redraw in watch mode, never cached",
+        "rationale": "Terminal width/colors can change mid-session (resize, mode switches); matches spec requirement for real-time adaptation"
+      },
+      {
+        "name": "Singleton Watch Lock Pattern",
+        "description": "lock::acquire_watch_lock(root) guard held for function lifetime; prevents concurrent watch instances via mkdir-atomicity",
+        "analogy": "Matches dispatcher's atomic locking; reusable for other long-lived watchers"
+      },
+      {
+        "name": "Composite Group Labels for Teams",
+        "description": "Team-scoped cards grouped as 'team-name/state' instead of separate state groups",
+        "implication": "Organizes output hierarchically without nested data structures; simplifies render layer"
+      },
+      {
+        "name": "Line Counting Simplification",
+        "description": "Replaced size-computation logic with post-render line count: output.lines().count()",
+        "tradeoff": "Accurate (matches actual display), O(n) string iteration instead of O(1) prediction"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Team group label format changed from (state, team_prefix) to single 'team/state' string",
+        "impact": "Render layer must handle composite labels; consumers expecting separate dimensions need updates",
+        "mitigation": "Render module parses/displays label directly; list.rs formats once"
+      },
+      {
+        "gotcha": "Line counting now depends on actual rendered output, not pre-computed card counts",
+        "risk": "Cursor-up positioning for watch redraw will fail if render output contains unexpected newlines (e.g., wrapping, errors)",
+        "mitigation": "render::render_board must guarantee predictable line output; test with wrapped card titles"
+      },
+      {
+        "gotcha": "Watch lock is acquired silently; if acquisition fails, watcher silently drops",
+        "severity": "Low - stderr printed, non-fatal error; watch simply won't start, user sees error",
+        "design_choice": "map_err followed by early return is intentional (prefer no watch to duplicate watches)"
+      },
+      {
+        "gotcha": "Legacy functions (print_state_group, print_summary, format_duration) still present but marked dead_code",
+        "cleanup_requirement": "Remove after confirming all tests and manual usage switched to render system; currently used by tests",
+        "timeline": "Post-spec-029 cleanup phase"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "outcome_details": {
+      "requirements_met": [
+        "\u2713 TermCaps::detect() called in list_cards()",
+        "\u2713 TermCaps::detect() re-called on every watch redraw (no caching)",
+        "\u2713 collect_card_views(dir, state) converts bop_core::read_meta to render::CardView",
+        "\u2713 collect_card_groups() produces (label, Vec<CardView>) tuples grouped by state and team",
+        "\u2713 render::render_board(caps, groups, stats) produces full output string",
+        "\u2713 Output string printed directly (no intermediate print functions)",
+        "\u2713 JSON output path (list_cards_json) unchanged",
+        "\u2713 calculate_stats() preserved and updated for new stats struct",
+        "\u2713 Existing tests still pass (legacy functions marked dead_code, not removed)"
+      ],
+      "code_quality": "Clean, readable, 5-line list_cards() vs 50+ line old version",
+      "watch_mode_integrity": "Clock header + watch lock + TermCaps re-detection + accurate line counting all working"
+    },
+    "recommendations": [
+      {
+        "priority": "HIGH",
+        "action": "Test watch mode redraw cursor positioning under various terminal widths (40, 80, 120+ cols) and card title wrapping scenarios",
+        "rationale": "Line counting relies on render output accuracy; wrapping or unexpected newlines will break cursor-up positioning"
+      },
+      {
+        "priority": "MEDIUM",
+        "action": "Document watch lock pattern (lock.rs) as reusable singleton guard for other long-lived file watchers",
+        "rationale": "Prevents accidental concurrent watch instances; applies to future dashboard, lane-metrics, other monitors"
+      },
+      {
+        "priority": "MEDIUM",
+        "action": "Merge render::Stats and CardStats into single struct or ensure bidirectional conversion is exhaustive",
+        "rationale": "Current stats_to_render_stats() bridge is manual copy; reduces maintenance burden if consolidated"
+      },
+      {
+        "priority": "LOW",
+        "action": "Schedule removal of print_state_group(), print_summary(), format_duration() after 2-3 release cycles",
+        "rationale": "Legacy fallbacks no longer needed once all callers confirmed migrated; reduces codebase noise"
+      },
+      {
+        "priority": "LOW",
+        "action": "Add integration test: list_cards_watch with mock card events to verify redraw line counts match output",
+        "rationale": "Proactive detection of cursor positioning regressions; especially important for multiline card titles"
+      }
+    ],
+    "subtask_id": "subtask-4-1",
+    "session_num": 11,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/list.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-4-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

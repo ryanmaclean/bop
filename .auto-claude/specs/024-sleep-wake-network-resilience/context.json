@@ -1,0 +1,45 @@
+{
+  "files_to_modify": {
+    "dispatcher": [
+      "crates/bop-cli/src/dispatcher.rs",
+      "crates/bop-cli/Cargo.toml"
+    ],
+    "adapters": [
+      "adapters/claude.nu",
+      "adapters/codex.nu"
+    ]
+  },
+  "files_to_create": {
+    "dispatcher": [
+      "crates/bop-cli/src/power.rs"
+    ]
+  },
+  "files_to_reference": [
+    "crates/bop-cli/src/reaper.rs",
+    "crates/bop-cli/src/providers.rs",
+    "adapters/mock.nu"
+  ],
+  "patterns": {
+    "platform_specific": "Use #[cfg(target_os = \"macos\")] for macOS-only code, #[cfg(target_os = \"linux\")] for Linux",
+    "async_spawning": "Use std::thread::spawn for OS threads, tokio::spawn for tokio tasks",
+    "channel_communication": "Use tokio::sync::watch::Sender/Receiver for broadcasting state changes",
+    "exit_code_convention": "Exit code 75 = transient failure (already used for rate-limiting)",
+    "adapter_pattern": "Nushell scripts in adapters/, take 5 args: workdir, prompt_file, stdout_log, stderr_log, memory_out",
+    "error_detection": "Check stderr content for network patterns, map to exit code 75",
+    "provider_config": "providers.json at cards_dir root, has rate_limit_exit field and env map"
+  },
+  "existing_implementations": {
+    "description": "Exit code 75 handling already exists for rate-limiting; reaper.rs handles orphan recovery; adapters already detect '429' and 'rate limit' in stderr",
+    "relevant_files": [
+      "crates/bop-cli/src/dispatcher.rs:357 (is_rate_limited check)",
+      "crates/bop-cli/src/reaper.rs (orphan recovery pattern)",
+      "adapters/claude.nu:62-73 (rate-limit detection)",
+      "adapters/codex.nu:36-42 (rate-limit detection)",
+      "crates/bop-cli/src/providers.rs (provider configuration)"
+    ]
+  },
+  "platform_constraints": {
+    "macos": "IOKit power notifications MUST run on dedicated OS thread (not tokio task) to avoid sleep transition hangs",
+    "linux": "Use zbus for D-Bus logind PrepareForSleep signal, or stub if not feasible"
+  }
+}

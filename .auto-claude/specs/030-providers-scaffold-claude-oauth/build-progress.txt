@@ -1,0 +1,59 @@
+=== AUTO-BUILD PROGRESS ===
+
+Project: bop providers: scaffold Provider trait + Claude OAuth quota monitor
+Workspace: /Users/studio/bop
+Started: 2026-03-07
+
+Workflow Type: feature
+Rationale: New feature adding Provider trait, Claude OAuth quota monitoring, JSONL history, and CLI subcommand. Single Rust crate (bop-cli) with multiple logical layers.
+
+Session 1 (Planner):
+- Created implementation_plan.json
+- Phases: 5
+- Total subtasks: 7
+- Created init.sh
+- Created context.json
+
+Phase Summary:
+- Phase 1 (Provider Module Scaffold): 3 subtasks, depends on []
+  - 1.1: Add reqwest + async-trait deps
+  - 1.2: Convert providers.rs → providers/mod.rs, rename Provider struct to AdapterConfig
+  - 1.3: Add ProviderSnapshot struct + Provider trait
+- Phase 2 (Claude OAuth Provider): 2 subtasks, depends on [phase-1]
+  - 2.1: Create claude.rs with credential parsing + detect() + macOS Keychain
+  - 2.2: Implement fetch() with OAuth usage API call + unit tests
+- Phase 3 (Provider History): 1 subtask, depends on [phase-1]
+  - 3.1: Create history.rs with JSONL append/read + unit tests
+- Phase 4 (CLI Command Wiring): 1 subtask, depends on [phase-2, phase-3]
+  - 4.1: Add Providers variant to Command enum, ANSI table + --json + --watch
+- Phase 5 (Final Verification): 1 subtask, depends on [phase-4]
+  - 5.1: Full acceptance criteria check (build, test, clippy, fmt)
+
+Services Involved:
+- bop-cli: All code changes in crates/bop-cli/
+
+Key Design Decisions:
+- Rename existing Provider struct → AdapterConfig to free name for new Provider trait
+- Use reqwest (async HTTP, matches existing tokio runtime) — no existing HTTP client in project
+- History file at ~/.bop/provider-history.jsonl (dirs::home_dir() pattern from bop-core)
+- macOS Keychain detection via `security find-generic-password` subprocess
+- CLI follows existing pattern: Command enum variant → handler function in module
+
+Parallelism Analysis:
+- Max parallel phases: 2 (phase-2 and phase-3 can run concurrently)
+- Recommended workers: 1 (phases are small, parallelism overhead not worth it)
+- Parallel groups: [phase-2-claude, phase-3-history] — both depend on phase-1 only
+
+Critical Naming Conflict:
+- Existing providers.rs has `pub struct Provider` (adapter selection config in .cards/providers.json)
+- Spec 030 wants `pub trait Provider` (quota monitoring trait)
+- Resolution: rename existing struct to `AdapterConfig`, update all references in:
+  dispatcher.rs, merge_gate.rs, main.rs, and the 16 existing tests
+
+=== STARTUP COMMAND ===
+
+To continue building this spec, run:
+
+  PYTHONPATH=$(python3 -c 'import site; print(site.getsitepackages()[0])') env -u CLAUDECODE python3 /Applications/Auto-Claude.app/Contents/Resources/backend/run.py --spec 030 --project-dir /Users/studio/bop --direct
+
+=== END SESSION 1 ===

@@ -1,0 +1,139 @@
+{
+  "session_number": 7,
+  "timestamp": "2026-03-07T19:30:45.486958+00:00",
+  "subtasks_completed": [
+    "subtask-2-2"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/ui/app.rs",
+        "changes": [
+          "Enhanced refresh_columns() to intelligently preserve selection state across filesystem refreshes, clamping to valid bounds",
+          "Added update_collapse() to mark empty columns as collapsed, called after every refresh and mutation",
+          "Implemented fallback logic to find nearest non-collapsed column when focused column becomes empty"
+        ],
+        "complexity": "medium",
+        "key_logic": "Selection preservation with bounds-clamping; collapsed state tracking and navigation recovery"
+      },
+      {
+        "file": "crates/bop-cli/src/ui/input.rs",
+        "changes": [
+          "Created new 451-line module with dispatcher-based key handling by Mode",
+          "Implemented Normal mode navigation: h/l moves column focus (wrapping, skipping collapsed); j/k moves card selection (wrapping within column)",
+          "Added comprehensive test suite with 13 test cases covering edge cases: wrapping, collapsed column skipping, empty columns, arrow key fallbacks"
+        ],
+        "complexity": "high",
+        "key_logic": "rem_euclid() for wrapping with negative steps; dual iteration strategies for collapsed column skipping; ListState integration"
+      },
+      {
+        "file": "crates/bop-cli/src/ui/mod.rs",
+        "changes": [
+          "Wire input module and KanbanWidget into render loop (details truncated in diff)"
+        ],
+        "complexity": "low"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Vim-style modal input dispatching",
+        "description": "handle_key() dispatches to mode-specific handlers; placeholder handlers for unimplemented modes (Filter, ActionPopup, etc.) allow incremental wiring without crashes",
+        "benefit": "Scalable architecture for multi-mode input \u2014 can add modes without touching dispatcher"
+      },
+      {
+        "pattern": "Wrapping navigation with skip-logic",
+        "description": "rem_euclid((idx + step).rem_euclid(len)) for circular navigation; loop-based skipping of collapsed columns with 'all collapsed' fallback",
+        "benefit": "Handles edge cases (negative wraps, exhausted non-collapsed columns) cleanly without branching"
+      },
+      {
+        "pattern": "Selection state preservation during refresh",
+        "description": "refresh_columns() clamped old selection indices to new column bounds; update_collapse() called unconditionally after refresh",
+        "benefit": "Prevents phantom selection indices when cards are deleted; keeps column-state synchronized"
+      },
+      {
+        "pattern": "Test fixture builder pattern",
+        "description": "test_card(), test_app() helper functions construct minimal CardView and App instances for isolated unit tests",
+        "benefit": "Decouples tests from filesystem I/O and complex App initialization"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Selection index preservation needs both preservation AND clamping",
+        "symptom": "If old column had selection at index 5 and new column has 3 cards, index 5 becomes invalid",
+        "resolution": "Use old_idx.min(new_col.cards.len() - 1) to clamp; handle empty column case separately (select(None))",
+        "severity": "high"
+      },
+      {
+        "gotcha": "Wrapping navigation with negative steps requires rem_euclid, not % operator",
+        "symptom": "Plain % in Rust with negative operands gives negative results; h from index 0 in 3-column layout yields -1 instead of 2",
+        "resolution": "Use (candidate + step).rem_euclid(len as isize) to handle negative wraps correctly",
+        "severity": "high"
+      },
+      {
+        "gotcha": "All columns collapsed edge case needs explicit fallback",
+        "symptom": "Loop to find non-collapsed column exhausts all candidates; col_focus movement fails silently",
+        "resolution": "After loop, col_focus stays at current index (implicit no-op) rather than panicking or wrapping incorrectly",
+        "severity": "medium"
+      },
+      {
+        "gotcha": "ListState selection defaults to None, not 0",
+        "symptom": "Pressing j/k on a column with no selection unwraps to Some(0), jumping to first card; expected no-op",
+        "resolution": "Use unwrap_or(0) to initialize; None is a valid state for unselected column",
+        "severity": "low"
+      },
+      {
+        "gotcha": "Test KeyEvent construction requires explicit Kind and State enums",
+        "symptom": "Can't construct KeyEvent with shorthand; requires KeyEventKind::Press, KeyEventState::NONE",
+        "resolution": "Created test helper key() function to reduce boilerplate across 13 tests",
+        "severity": "low"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "approach_rationale": [
+      "Separated concerns: app.rs handles state mutations, input.rs handles key dispatch and navigation logic",
+      "Test-driven: 13 unit tests validate wrapping, selection updates, and collapsed column behavior before wiring into event loop",
+      "Future-proof: placeholder handlers for Filter, ActionPopup, Detail modes allow this commit to land without breaking other subtasks",
+      "Preserved UX invariants: selection clamping, collapsed-column skipping, and 'stay-put-on-all-collapsed' fallback all protect against invalid states"
+    ],
+    "recommendations": [
+      {
+        "area": "Input handling architecture",
+        "recommendation": "Establish a shared test utilities module (e.g. ui/test_helpers.rs) to avoid duplication of test_card(), test_app(), key() across future input tests for Filter, ActionPopup, etc.",
+        "priority": "medium"
+      },
+      {
+        "area": "Navigation consistency",
+        "recommendation": "As other modes are wired (subtasks 4-1, 4-2, 4-3, 5-1, 5-2), ensure they follow the same wrapping + skip-collapsed pattern for consistency. Consider extracting move_col_focus and move_card_selection into shared utilities if reused by Detail or ActionPopup mode.",
+        "priority": "medium"
+      },
+      {
+        "area": "Selection state invariants",
+        "recommendation": "Add a property test or invariant checker: after any App mutation (refresh_columns, card movement via Shift+H/L in later subtasks), assert that col_focus < columns.len(), selected index < focused_column.cards.len(), and collapsed matches cards.is_empty(). Consider a validate_invariants() debug helper.",
+        "priority": "high"
+      },
+      {
+        "area": "Collapsed column visibility",
+        "recommendation": "Current logic skips collapsed columns during navigation but does not render them (they collapse to 3-char glyphs per spec 029). When implementing visual rendering, verify that collapsed column glyphs are keyboard-accessible via Shift+H/L (card movement keybinds not yet wired), or consider allowing arrow key focus on glyph as a preview.",
+        "priority": "medium"
+      },
+      {
+        "area": "Test coverage gaps",
+        "recommendation": "Current tests focus on Normal mode h/j/k/l. Once other modes (Detail, ActionPopup, etc.) are wired, add integration tests that switch modes and verify handlers are called correctly. Example: enter Detail mode, press keys, verify no navigation occurs.",
+        "priority": "low"
+      }
+    ],
+    "subtask_id": "subtask-2-2",
+    "session_num": 7,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/ui/app.rs",
+      "crates/bop-cli/src/ui/input.rs",
+      "crates/bop-cli/src/ui/mod.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-2-2"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

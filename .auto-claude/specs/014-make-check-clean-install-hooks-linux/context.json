@@ -1,0 +1,45 @@
+{
+  "files_to_modify": {
+    "bop": []
+  },
+  "files_to_reference": [
+    "crates/bop-cli/src/factory.rs",
+    "crates/bop-cli/src/main.rs",
+    "Makefile"
+  ],
+  "patterns": {
+    "clippy_lint": "cargo clippy -- -D warnings (denies all warnings)",
+    "make_check": "make check runs: cargo test, cargo clippy, cargo fmt --check",
+    "install_hooks": "bop install-hooks delegates to factory::cmd_factory_install",
+    "systemd_pattern": "Linux hooks use systemd user units (.service + .path files)"
+  },
+  "existing_implementations": {
+    "description": "install-hooks feature was completed in Wave 6 (commit 3f3f219). Both macOS (launchd) and Linux (systemd) implementations exist.",
+    "relevant_files": [
+      "crates/bop-cli/src/factory.rs:359-415 (install_hooks_linux)",
+      "crates/bop-cli/src/factory.rs:607-681 (uninstall)",
+      "crates/bop-cli/src/main.rs:248-252 (InstallHooks command)",
+      "crates/bop-cli/src/main.rs:373-379 (install_hooks_linux wrapper)"
+    ],
+    "verification_status": {
+      "make_check": "PASSING (verified 2024-03-06)",
+      "clippy_warnings": "ZERO warnings",
+      "install_hooks_linux_complete": true,
+      "uninstall_logic_complete": true,
+      "systemd_service_file": "Generated via generate_systemd_service()",
+      "systemd_path_file": "Generated via generate_systemd_path()",
+      "daemon_reload": "Implemented",
+      "enable_units": "Implemented for both .service and .path",
+      "start_units": "Implemented for both .service and .path",
+      "uninstall_stop": "Implemented",
+      "uninstall_disable": "Implemented",
+      "uninstall_remove": "Implemented"
+    }
+  },
+  "task_assessment": {
+    "work_required": "minimal",
+    "reason": "All functionality is already complete. Task is to verify and document the existing implementation.",
+    "clippy_fixes_needed": false,
+    "implementation_gaps": []
+  }
+}

@@ -1,0 +1,129 @@
+{
+  "session_number": 6,
+  "timestamp": "2026-03-07T06:19:46.901724+00:00",
+  "subtasks_completed": [
+    "subtask-5-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": ".auto-claude/specs/020-event-driven-dispatcher/build-progress.txt",
+        "type": "progress_log",
+        "changes": "Added session 2-5 documentation (sessions 2-4 were prior work; session 5 documents verification results)",
+        "significance": "Tracks implementation progress across 5 coding sessions for event-driven dispatcher refactor"
+      },
+      {
+        "file": ".auto-claude/specs/020-event-driven-dispatcher/implementation_plan.json",
+        "type": "project_plan",
+        "changes": "Updated 4 subtask statuses from 'pending' to 'completed' (subtasks 2-1, 3-1, 4-1, 5-1)",
+        "significance": "Marks completion of dispatcher event-driven refactor, merge_gate refactor, release profile optimization, and verification phases"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "name": "Event-driven watcher pattern",
+        "description": "Replaced polling loops with notify-debouncer-mini watchers (100ms debounce) + tokio::sync::mpsc channels",
+        "files": [
+          "dispatcher.rs",
+          "merge_gate.rs"
+        ],
+        "variants": [
+          "Single watcher on pending/ directory (dispatcher)",
+          "Multiple watchers on flat and team-based done/ directories (merge_gate)"
+        ]
+      },
+      {
+        "name": "Async multiplexing",
+        "description": "Uses tokio::select! to multiplex filesystem events against timer intervals (reaper in dispatcher)",
+        "reusability": "High - applicable to any async event handling requiring multiple concurrent sources"
+      },
+      {
+        "name": "Thread + channel bridge",
+        "description": "Watchers spawned in separate OS threads to avoid blocking async runtime; events sent via tokio channels",
+        "rationale": "notify-debouncer-mini requires blocking thread; channels decouple from async context"
+      },
+      {
+        "name": "API compatibility maintenance",
+        "description": "Kept poll_ms parameter but renamed to _poll_ms when no longer used (not removed)",
+        "purpose": "Preserves function signature for backward compatibility"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Cargo.toml opt-level syntax",
+        "description": "opt-level value must be unquoted integer (3) not string (\"3\") in release profile",
+        "impact": "Type mismatch causes parse error; discovered in subtask-4-1",
+        "mitigation": "Verified binary builds after fix"
+      },
+      {
+        "issue": "Async runtime blocking",
+        "description": "notify watcher operations block; cannot run directly in tokio async context",
+        "impact": "Would cause executor to hang if watcher spawned on async task",
+        "mitigation": "Spawned watcher in std::thread with channel communication"
+      },
+      {
+        "issue": "Multiple done/ directories in merge_gate",
+        "description": "Must watch both flat (.cards/done/) and team-based (.cards/team-*/done/) directories",
+        "impact": "Missed events if only one watcher set up; implementation required collecting all directories first",
+        "severity": "High - would cause race condition"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "completion_summary": "All 5 subtasks completed across event-driven refactor (phases 2-5)",
+      "verification_results": {
+        "test_total": 465,
+        "test_pass_rate": "100%",
+        "test_breakdown": {
+          "bop-core_lib": 337,
+          "dispatcher_harness": 10,
+          "job_control_harness": 17,
+          "merge_gate_harness": 4,
+          "serve_smoke": 5,
+          "bop-core_unit": 91,
+          "doc_tests": 1
+        },
+        "clippy": "PASSED (-D warnings)",
+        "fmt": "PASSED",
+        "make_check": "PASSED"
+      },
+      "no_regressions": true,
+      "code_changes_in_this_session": 0,
+      "reason_no_changes": "All implementations from prior sessions passed verification; no fixes needed"
+    },
+    "recommendations": [
+      {
+        "priority": "immediate",
+        "action": "Execute subtask-5-2: Write output/result.md with latency measurements",
+        "context": "Verification phase complete; measurement documentation needed for project closure"
+      },
+      {
+        "priority": "medium",
+        "action": "Consider watcher pattern as library pattern for future bop filesystem monitors",
+        "context": "notify-debouncer-mini + tokio channel bridge is reusable across project; successful in dispatcher and merge_gate"
+      },
+      {
+        "priority": "medium",
+        "action": "Document thread-safety guarantees of notify watcher thread spawning",
+        "context": "Pattern works but thread lifecycle (watcher thread outlives main thread during --once mode) should be explicitly verified"
+      },
+      {
+        "priority": "low",
+        "action": "Monitor release binary performance under Wave 5 load tests",
+        "context": "opt-level=3 + lto=thin optimization applied; actual latency improvement vs. previous builds unknown without benchmarking"
+      }
+    ],
+    "subtask_id": "subtask-5-1",
+    "session_num": 6,
+    "success": true,
+    "changed_files": [
+      ".auto-claude/specs/020-event-driven-dispatcher/build-progress.txt",
+      ".auto-claude/specs/020-event-driven-dispatcher/implementation_plan.json"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-5-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

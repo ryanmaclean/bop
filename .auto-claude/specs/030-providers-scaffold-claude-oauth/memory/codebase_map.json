@@ -1,0 +1,15 @@
+{
+  "discovered_files": {
+    "crates/bop-cli/src/providers.rs": {
+      "description": "Existing Provider struct in providers.rs is for adapter selection (.cards/providers.json), NOT quota monitoring. Must rename to AdapterConfig when adding the new Provider trait for spec 030. 16 existing unit tests must continue passing.",
+      "category": "naming_conflict",
+      "discovered_at": "2026-03-08T00:12:24.972678+00:00"
+    },
+    "crates/bop-cli/Cargo.toml": {
+      "description": "No HTTP client crate (reqwest, ureq) currently in project. Spec 030 needs one for Claude OAuth usage API. tokio is already present, so reqwest (async) is the natural choice. Also needs async-trait crate for Provider trait.",
+      "category": "dependencies",
+      "discovered_at": "2026-03-08T00:12:27.231261+00:00"
+    }
+  },
+  "last_updated": "2026-03-08T00:12:27.231275+00:00"
+}

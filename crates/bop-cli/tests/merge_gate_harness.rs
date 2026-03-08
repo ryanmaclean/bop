@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn repo_root() -> PathBuf {
@@ -9,11 +9,6 @@ fn repo_root() -> PathBuf {
         .parent()
         .unwrap()
         .to_path_buf()
-}
-
-fn run(cmd: &mut Command) {
-    let status = cmd.status().expect("failed to start command");
-    assert!(status.success());
 }
 
 fn build_jc() {
@@ -30,7 +25,7 @@ fn bop_bin() -> PathBuf {
     repo_root().join("target").join("debug").join("bop")
 }
 
-fn write_card(cards_dir: &PathBuf, id: &str, acceptance: &[&str]) {
+fn write_card(cards_dir: &Path, id: &str, acceptance: &[&str]) {
     let card_dir = cards_dir.join("done").join(format!("{}.bop", id));
     fs::create_dir_all(card_dir.join("logs")).unwrap();
     fs::create_dir_all(card_dir.join("output")).unwrap();

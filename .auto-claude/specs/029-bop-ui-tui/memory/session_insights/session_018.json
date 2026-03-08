@@ -1,0 +1,140 @@
+{
+  "session_number": 18,
+  "timestamp": "2026-03-07T20:28:42.692373+00:00",
+  "subtasks_completed": [
+    "subtask-6-2"
+  ],
+  "discoveries": {
+    "file_insights": {
+      "crates/bop-cli/src/ui/app.rs": {
+        "type": "Core data model expansion",
+        "additions": [
+          "Added HashSet<String> field 'marked_cards' to App struct",
+          "Three new public methods: toggle_mark(), clear_marks(), action_target_ids()"
+        ],
+        "pattern": "Multi-select state tracking using efficient set membership",
+        "initialization": "marked_cards initialized as empty HashSet in App::new()"
+      },
+      "crates/bop-cli/src/ui/input.rs": {
+        "type": "Input handler expansion",
+        "additions": [
+          "Tab key handler: calls app.toggle_mark()",
+          "Esc key handler: calls app.clear_marks() in Normal mode",
+          "Bulk action support in handle_action_popup: iterate over app.action_target_ids()"
+        ],
+        "bulk_action_flow": "For Pause/Kill/Retry: get targets, loop dispatch, clear marks, return to Normal",
+        "special_case": "Logs action remains single-card only (enters LogTail mode)"
+      },
+      "crates/bop-cli/src/ui/widgets/kanban.rs": {
+        "type": "Rendering layer update",
+        "additions": [
+          "card_to_list_item() now accepts is_marked: bool parameter",
+          "render_column() accepts marked_cards: &HashSet<String>",
+          "Mark indicator: '\u25a0 ' prefix in Cyan color prepended to card line"
+        ],
+        "visual_output": "Marked cards display as: \u25a0 [marker] [title] [provider] [elapsed]",
+        "rendering_optimization": "Clone marked_cards set before column loop to avoid borrow conflicts"
+      }
+    },
+    "patterns_discovered": [
+      {
+        "name": "Yazi-style multi-select",
+        "implementation": "Tab toggles membership in HashSet, Esc clears all, visual indicator (\u25a0) shows state",
+        "benefit": "Familiar UX for users of yazi file manager"
+      },
+      {
+        "name": "Bulk action dispatcher pattern",
+        "implementation": "action_target_ids() returns Vec of IDs: either marked_cards or single selected card",
+        "benefit": "Single code path handles both single and bulk operations"
+      },
+      {
+        "name": "Borrow conflict avoidance in render loop",
+        "implementation": "Clone HashSet before entering mutable column iteration",
+        "rationale": "marked_cards is typically small; clone cost is negligible vs borrow complexity"
+      },
+      {
+        "name": "Selective bulk operation support",
+        "implementation": "Logs action is single-card only, Pause/Kill/Retry apply to all marked",
+        "constraint": "LogTail mode only makes sense for one card's stream"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Borrow checker conflict in render_column loop",
+        "root_cause": "Mutable borrow of app.columns[i] conflicts with immutable borrow of app.marked_cards",
+        "solution": "Clone marked_cards set before loop (O(n) where n is typically 1-10 cards)",
+        "severity": "Compile-time blocking"
+      },
+      {
+        "issue": "Test signature changes cascade",
+        "root_cause": "card_to_list_item() signature changed to include is_marked parameter",
+        "impact": "6 test functions require is_marked argument updates",
+        "lesson": "Signature changes in heavily-tested functions require systematic test updates"
+      },
+      {
+        "issue": "Single-card Logs action incompatible with bulk operations",
+        "root_cause": "LogTail reads a single card's log stream; cannot meaningfully show multiple streams",
+        "solution": "Logs explicitly calls app.enter_log_tail() on selected_card() only, skips bulk dispatch",
+        "design_tradeoff": "Asymmetric action behavior (Logs vs Pause/Kill/Retry)"
+      },
+      {
+        "issue": "Mark persistence across card navigation",
+        "status": "Not addressed in this subtask",
+        "future_consideration": "Marks clear on Esc; behavior when card is deleted/moved TBD"
+      }
+    ],
+    "approach_outcome": {
+      "result": "SUCCESS",
+      "completeness": "Full implementation of yazi-pattern multi-select",
+      "quality_metrics": [
+        "3 clean methods added to App for multi-select logic",
+        "2 input handlers (Tab, Esc) with clear semantics",
+        "Rendering layer updated with visual indicator",
+        "All 6 affected tests updated to match new signature",
+        "No unsafe code or complexity hotspots"
+      ],
+      "architectural_cleanliness": "State (marked_cards) in App, input handling in input.rs, rendering in kanban.rs \u2014 proper separation of concerns",
+      "backward_compatibility": "Marked state is optional; single-card workflow unaffected when no marks set"
+    },
+    "recommendations": [
+      {
+        "category": "User feedback",
+        "action": "Add optional status_message when mark is toggled (e.g., 'Card marked', 'Card unmarked')",
+        "justification": "Visual feedback for mark state change improves discoverability"
+      },
+      {
+        "category": "Documentation",
+        "action": "Document that Logs action is single-card only due to UART stream semantics",
+        "justification": "Prevents user confusion when Logs doesn't bulk-apply like other actions"
+      },
+      {
+        "category": "Integration testing",
+        "action": "Add test_multi_select_flow() in input.rs tests: Tab \u2192 mark card \u2192 action popup \u2192 Pause \u2192 verify marks cleared",
+        "justification": "End-to-end test of multi-select + bulk action interaction"
+      },
+      {
+        "category": "Performance",
+        "action": "Consider using Arc<HashSet<String>> if marked_cards is cloned frequently in future rendering",
+        "justification": "Current clone is fine for typical 1-10 cards; larger worksets might benefit from shared ownership"
+      },
+      {
+        "category": "Edge case handling",
+        "action": "Verify behavior when marked card is deleted/moved by dispatcher between mark toggle and action execution",
+        "justification": "Race condition: dispatch_action_* might fail silently on missing card ID"
+      }
+    ],
+    "subtask_id": "subtask-6-2",
+    "session_num": 18,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/ui/app.rs",
+      "crates/bop-cli/src/ui/input.rs",
+      "crates/bop-cli/src/ui/widgets/kanban.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-6-2"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

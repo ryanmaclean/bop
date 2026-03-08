@@ -1,0 +1,47 @@
+{
+  "files_to_modify": {
+    "bop-cli": [
+      "crates/bop-cli/src/factory.rs"
+    ]
+  },
+  "files_to_reference": [
+    "crates/bop-cli/src/icons.rs"
+  ],
+  "patterns": {
+    "plist_generation": "Use format! macro to generate XML plist strings with proper structure",
+    "watchpaths_pattern": "WatchPaths array with paths, ThrottleInterval: 1, KeepAlive: false",
+    "launchd_lifecycle": "write plist, then launchctl load -w to install and start",
+    "path_handling": "Use repo_root.join() for relative paths, .display() for string interpolation"
+  },
+  "existing_implementations": {
+    "description": "icons.rs (lines 152-197) already implements WatchPaths correctly for the icon sync service",
+    "relevant_files": [
+      "crates/bop-cli/src/icons.rs"
+    ],
+    "key_elements": [
+      "WatchPaths array with single or multiple paths",
+      "No RunAtLoad key needed (WatchPaths triggers on change)",
+      "StandardOutPath and StandardErrorPath for logging",
+      "launchctl load/unload pattern for lifecycle management"
+    ]
+  },
+  "directory_structure": {
+    "cards_root": ".cards/",
+    "root_state_dirs": ["pending", "done", "running", "failed", "merged"],
+    "team_dirs": ["team-arch", "team-cli", "team-intelligence", "team-platform", "team-quality"],
+    "dispatcher_watches": [
+      ".cards/pending",
+      ".cards/team-*/pending"
+    ],
+    "merge_gate_watches": [
+      ".cards/done",
+      ".cards/team-*/done"
+    ]
+  },
+  "acceptance_criteria": {
+    "plist_content": "Generated plists must contain WatchPaths, not KeepAlive: true",
+    "service_status": "bop factory status shows services loaded",
+    "tests": "make check passes (test + clippy + fmt)",
+    "manual_test": "Drop card in .cards/pending/, dispatcher fires within 2s without --loop"
+  }
+}

@@ -58,6 +58,22 @@ When multiple agents are active, use JJ as the collaboration layer and treat Git
 4. Publish to Git only from green JJ changes (`jj git push --all`).
 5. If a change is partially renamed or mid-refactor, do not land it; queue it behind a decision card.
 
+### Storage — HARD RULES (do not re-litigate)
+
+**NO SQLite. NO Dolt. NO additional JSON files. NO new databases of any kind.**
+
+The storage model is: filesystem as state machine + JSONL append-only event log per card.
+This decision is final. Do not propose alternatives. Do not sneak in new dependencies
+(rusqlite, sqlx, dolt, sled, redb, etc.). If you think you need a database, you are wrong —
+reach for `logs/events.jsonl` (append-only) or `meta.json` (guarded by checksum + readonly perms).
+
+Rationale (also in `docs/storage-decision.md`):
+- `fs::rename` is atomic — that IS the transaction
+- COW clone (`cp -c`) works on directory bundles, not database rows
+- JSONL O_APPEND is atomic for writes < 4096 bytes — no locking needed
+- sha256 checksum in `meta.json` detects corruption; JSONL replay recovers it
+- Zero external runtime dependencies
+
 ### Card State Machine
 
 The filesystem is the state machine. `.cards/` subdirectories represent states; state transitions are atomic `fs::rename` calls:

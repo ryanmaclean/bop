@@ -1,0 +1,81 @@
+{
+  "session_number": 7,
+  "timestamp": "2026-03-07T07:23:34.112507+00:00",
+  "subtasks_completed": [
+    "subtask-2-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "CLAUDE.md",
+        "change_type": "documentation_addition",
+        "significance": "major",
+        "details": "Added 'Storage \u2014 HARD RULES' section codifying non-negotiable architectural constraints around storage layer. Section explicitly rejects SQLite, Dolt, and custom databases in favor of filesystem state machine + JSONL event log model.",
+        "impact_scope": "team-wide enforcement of storage architecture"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "explicit_constraint_documentation",
+        "description": "Use of strong, unambiguous language ('do not re-litigate', 'do not sneak', 'you are wrong') to enforce architectural decisions and prevent future regressions",
+        "context": "Storage decisions that have been thoroughly debated and must not resurface in team discussions"
+      },
+      {
+        "pattern": "rejection_list_specification",
+        "description": "Explicit enumeration of prohibited technologies (rusqlite, sqlx, sled, redb, etc.) rather than principle-only guidance",
+        "context": "Prevents developers from proposing alternatives that technically fit the described constraints"
+      },
+      {
+        "pattern": "rationale_referencing",
+        "description": "Hard rules section references detailed rationale document (docs/storage-decision.md) for deeper understanding",
+        "context": "Balances brevity of constraint with access to full decision context"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "undocumented_decisions_resurface",
+        "description": "Architectural decisions, even when thoroughly decided, will be repeatedly proposed by team members unless explicitly documented as non-negotiable",
+        "mitigation": "Include 'hard rules' sections in team documentation with explicit 'do not re-open' language"
+      },
+      {
+        "gotcha": "implicit_constraints_create_friction",
+        "description": "Without documented hard rules, developers waste effort proposing storage alternatives, leading to unproductive discussions",
+        "severity": "medium"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "action": "Documentation enforcement of architectural constraint",
+      "test_results": "make check passed (test + clippy + fmt all green)",
+      "delivery": "Single commit codifying storage layer decision with rationale and prohibition list"
+    },
+    "recommendations": [
+      {
+        "recommendation": "apply_hard_rules_pattern_to_other_decisions",
+        "rationale": "Other architectural decisions (VM-first dispatch, Nushell canonicalization, jj-only VCS) could benefit from similar hard-rule documentation with explicit rejection lists",
+        "priority": "medium"
+      },
+      {
+        "recommendation": "link_hard_rules_in_commit_messages",
+        "rationale": "Include 'Refs: CLAUDE.md Storage HARD RULES' in commits touching storage to maintain traceability",
+        "priority": "low"
+      },
+      {
+        "recommendation": "create_per_subsystem_hard_rules",
+        "rationale": "Consider similar sections for: VCS workflow (jj only), shell scripting (Nushell only), deployment model (VM-first only)",
+        "priority": "medium"
+      }
+    ],
+    "subtask_id": "subtask-2-1",
+    "session_num": 7,
+    "success": true,
+    "changed_files": [
+      "CLAUDE.md"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-2-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

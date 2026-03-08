@@ -1,0 +1,153 @@
+{
+  "session_number": 3,
+  "timestamp": "2026-03-05T17:08:58.628424+00:00",
+  "subtasks_completed": [
+    "subtask-2-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "adapters/ollama.nu",
+        "type": "new_file",
+        "purpose": "Ollama adapter for dispatcher - enables card prompts to be processed by local Ollama models",
+        "key_features": [
+          "Health check on ollama endpoint (exit 75 if unreachable - transient)",
+          "Model availability verification before processing",
+          "Curl-based API communication with ollama daemon",
+          "Structured file extraction from JSON responses embedded in LLM output",
+          "Self-test capability via --test flag",
+          "Configurable via OLLAMA_MODEL and OLLAMA_HOST env vars"
+        ],
+        "exit_codes": {
+          "0": "success",
+          "75": "transient failure (ollama not running/model not loaded)",
+          "1": "permanent failure"
+        }
+      },
+      {
+        "file": "scripts/test-real-adapters.nu",
+        "type": "modified",
+        "changes": [
+          "Keep temp_dir on failure for debugging (don't cleanup on error)",
+          "Unset CLAUDECODE before dispatcher launch (was blocking bop execution)",
+          "Fix sleep duration syntax from bare number to explicit 'ms' unit",
+          "Add missing 'false' return at end of poll_for_state function",
+          "Fix assertion expressions with proper parentheses",
+          "Add 'ignore' to pkill call to suppress non-zero exit when no process found"
+        ]
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "name": "Adapter configuration pattern",
+        "description": "Adapters use environment variables for configuration with sensible defaults",
+        "examples": [
+          "OLLAMA_MODEL defaults to qwen2.5-coder:7b",
+          "OLLAMA_HOST defaults to http://localhost:11434"
+        ]
+      },
+      {
+        "name": "Exit code convention",
+        "description": "Dispatcher adapters use specific exit codes for different failure modes",
+        "codes": {
+          "0": "success",
+          "75": "transient (retry eligible)",
+          "1": "permanent failure"
+        }
+      },
+      {
+        "name": "Path resolution in Nushell",
+        "description": "Check absolute with str starts-with '/', otherwise join with pwd",
+        "code_pattern": "if ($path | str starts-with '/') { $path } else { [$orig_dir $path] | path join }"
+      },
+      {
+        "name": "Structured output extraction",
+        "description": "Extract JSON blocks from markdown code blocks or raw JSON objects in LLM responses",
+        "approach": "Use regex to find ```json...``` and {\"files\": [...]} patterns"
+      },
+      {
+        "name": "Self-testing in adapters",
+        "description": "Adapters include --test flag for local verification without dispatcher",
+        "purpose": "Enable CI/testing without full dispatcher infrastructure"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "CLAUDECODE env var blocks nested dispatcher execution",
+        "context": "Test harness was failing because bop subprocess inherited CLAUDECODE from parent claude session",
+        "solution": "Explicitly unset CLAUDECODE before dispatcher launch: unset CLAUDECODE; nohup bop..."
+      },
+      {
+        "issue": "Nu sleep syntax requires duration unit",
+        "context": "200 is treated as dimensionless number, not milliseconds",
+        "solution": "Use explicit unit: sleep 200ms (not sleep 200 or sleep '200ms')"
+      },
+      {
+        "issue": "pkill returns exit code 1 when no process matches",
+        "context": "Non-fatal operation but caused script to fail if no dispatcher was running",
+        "solution": "Use 'do { ^pkill ... } | complete | ignore' to suppress exit code"
+      },
+      {
+        "issue": "Loop missing explicit false return",
+        "context": "poll_for_state function had loop but no return statement after loop exit",
+        "solution": "Add explicit 'false' return at end of function"
+      },
+      {
+        "issue": "Complex expressions in assertions need parentheses",
+        "context": "Nu syntax: assert ($expr) not assert $expr for compound conditions",
+        "solution": "Wrap all assertions: assert (($available | describe) =~ 'list')"
+      },
+      {
+        "issue": "nohup redirect syntax differs in Nu",
+        "context": "nohup bop ... o>> file e>&1 & doesn't work as expected",
+        "solution": "Wrap in sh -c: ^sh -c 'unset VAR; nohup cmd >> file 2>&1 &'"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "approach_summary": "Successfully implemented ollama adapter following established adapter patterns (health checks, model validation, exit codes), integrated into test harness with proper environment handling, and fixed multiple Nu syntax issues in test infrastructure. Adapter supports structured file output extraction and includes self-tests.",
+    "recommendations": [
+      {
+        "priority": "high",
+        "area": "Documentation",
+        "suggestion": "Document adapter interface contract: parameter order, exit codes, env var naming convention"
+      },
+      {
+        "priority": "high",
+        "area": "Testing",
+        "suggestion": "Add integration test ensuring OLLAMA_MODEL and OLLAMA_HOST defaults are respected when env vars not set"
+      },
+      {
+        "priority": "medium",
+        "area": "Robustness",
+        "suggestion": "Add timeout handling for curl calls to ollama API (currently unlimited)"
+      },
+      {
+        "priority": "medium",
+        "area": "Performance",
+        "suggestion": "Consider connection pooling or persistent curl connection for repeated API calls in same card processing"
+      },
+      {
+        "priority": "medium",
+        "area": "Validation",
+        "suggestion": "Add URL validation for OLLAMA_HOST to catch typos early (e.g., ensure http/https scheme)"
+      },
+      {
+        "priority": "low",
+        "area": "Debugging",
+        "suggestion": "Keep temp dirs on failure\u2014already implemented. Document in test script comments."
+      }
+    ],
+    "subtask_id": "subtask-2-1",
+    "session_num": 3,
+    "success": true,
+    "changed_files": [
+      "adapters/ollama.nu",
+      "scripts/test-real-adapters.nu"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-2-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

@@ -1,0 +1,102 @@
+{
+  "session_number": 8,
+  "timestamp": "2026-03-07T12:48:20.524526+00:00",
+  "subtasks_completed": [
+    "subtask-4-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/cards.rs",
+        "changes": "Added stage_transition event logging calls at fs::rename points for card state transitions (pending\u2192running\u2192done\u2192merged/failed)",
+        "significance": "Core implementation of audit trail for all card lifecycle state changes; enables recovery and forensics"
+      },
+      {
+        "file": "crates/bop-cli/src/dispatcher.rs",
+        "changes": "Instrumented all 5+ fs::rename operations in merge-gate logic with stage_transition event logging; added unique_failed_path() helper for failed state tracking",
+        "significance": "Fixes merge-gate infinite retry loop (ffb59e4 reference); prevents silent failures when cards already in failed/ directory"
+      },
+      {
+        "file": ".auto-claude/specs/026-storage-resilience-wal-events/memory/session_insights/session_007.json",
+        "changes": "Session 7 completion snapshot documenting stage_transition logging implementation and JSONL append-only event log pattern",
+        "significance": "Progress tracking for WAL/storage resilience spec; confirms CARGO_INCREMENTAL=0 and target/ cleanup pattern working"
+      },
+      {
+        "file": ".auto-claude/dispatch-state.json",
+        "changes": "Spec 025 marked complete in dispatch queue (added to 'completed' list)",
+        "significance": "Orchestration state updated; spec 025 (bop-status-watch) finished before spec 026 (storage-resilience-wal-events) began"
+      }
+    ],
+    "patterns_discovered": [
+      "fs::rename is the atomic transaction primitive; all state transitions must be logged before/after rename for idempotency",
+      "JSONL append-only event log with <4096 byte lines ensures atomic writes on POSIX/APFS; O_APPEND is the durability mechanism",
+      "unique_failed_path() pattern prevents retry loops: always check all 5 state directories (pending/running/done/merged/failed) for card conflicts",
+      "Session-based architecture: each spec gets isolated session insights (session_NNN.json) to track discoveries independently",
+      "QA iteration history pattern: timestamp + duration tracking; allows post-mortem analysis of iteration count and convergence time",
+      "meta.json is materialized view of card state; sha256 checksum detects corruption; read-only between transitions"
+    ],
+    "gotchas_discovered": [
+      "fs::rename failure on already-in-failed/ was silent (EEXIST not surfaced); caused infinite merge-gate retry loop; now fixed via unique_failed_path()",
+      "CARGO_INCREMENTAL=0 insufficient when card workspace moves (fs::rename pending/\u2192done/); must also fs::remove_dir_all(target/) before ACs",
+      "git quotes non-ASCII SMP paths in diff output; path filter in policy script failed on card names with emoji; fixed via core.quotepath=false and is_runtime_path() runtime check",
+      "Stale CARGO_MANIFEST_DIR baked at compile time breaks when repo moves (gtfs\u2192bop); must use find_git_root() at runtime instead of env!()",
+      "Policy check .gitignore had team-prefixed patterns only (.cards/*/running/) not flat paths (.cards/running/); coverage gap fixed"
+    ],
+    "approach_outcome": {
+      "status": "success",
+      "scope": "Added stage_transition event logging at all 5+ fs::rename points in card state machine (pending\u2192running\u2192done\u2192merged\u2192failed)",
+      "implementation_strategy": "Instrumented dispatcher.rs and cards.rs with event log writes before/after each rename; used JSONL append-only pattern with O_APPEND atomic semantics",
+      "verification": "All 373 tests passed; make check (fmt, clippy, test) passed; no regressions; functional test confirmed live watch mode works; output/result.md screenshot provided",
+      "commitment": "ffb59e4 auto-claude: subtask-4-1 - Add stage_transition event logging at all fs::rename points",
+      "qa_approval": "approved by qa_agent on 2026-03-07T04:19:45Z; 1 iteration, 296.41 seconds"
+    },
+    "recommendations": [
+      "Monitor event log file size over time; consider rotation strategy when logs exceed threshold (currently unbounded append-only)",
+      "Add metrics/dashboard to visualize stage_transition event frequency by state pair (pending\u2192running count, etc.) for bottleneck detection",
+      "Cross-validate event log against filesystem state on dispatcher startup (idempotency check); replay events if meta.json checksum corrupted",
+      "Document WAL recovery procedure in CONTRIBUTING.md: how to rebuild meta.json from events.jsonl if corruption detected",
+      "Consider hardware-level durability: fsync() at 1000-event boundaries instead of every write (batch fsync for throughput vs latency trade-off)",
+      "Wave 5+ gate: implement event log compaction/archival when bop ui (spec 029) added; separate hot log from cold archive for faster watch performance"
+    ],
+    "subtask_id": "subtask-4-1",
+    "session_num": 8,
+    "success": true,
+    "changed_files": [
+      ".auto-claude/dispatch-state.json",
+      ".auto-claude/specs/025-bop-status-watch/MANUAL_TEST_PLAN.md",
+      ".auto-claude/specs/025-bop-status-watch/implementation_plan.json",
+      ".auto-claude/specs/025-bop-status-watch/memory/attempt_history.json",
+      ".auto-claude/specs/025-bop-status-watch/memory/build_commits.json",
+      ".auto-claude/specs/025-bop-status-watch/memory/session_insights/session_001.json",
+      ".auto-claude/specs/025-bop-status-watch/memory/session_insights/session_006.json",
+      ".auto-claude/specs/025-bop-status-watch/memory/session_insights/session_007.json",
+      ".auto-claude/specs/025-bop-status-watch/memory/session_insights/session_008.json",
+      ".auto-claude/specs/025-bop-status-watch/memory/session_insights/session_009.json",
+      ".auto-claude/specs/025-bop-status-watch/qa_report.md",
+      ".auto-claude/specs/025-bop-status-watch/task_logs.json",
+      ".auto-claude/specs/026-storage-resilience-wal-events/build-progress.txt",
+      ".auto-claude/specs/026-storage-resilience-wal-events/context.json",
+      ".auto-claude/specs/026-storage-resilience-wal-events/implementation_plan.json",
+      ".auto-claude/specs/026-storage-resilience-wal-events/init.sh",
+      ".auto-claude/specs/026-storage-resilience-wal-events/memory/attempt_history.json",
+      ".auto-claude/specs/026-storage-resilience-wal-events/memory/build_commits.json",
+      ".auto-claude/specs/026-storage-resilience-wal-events/memory/session_insights/session_002.json",
+      ".auto-claude/specs/026-storage-resilience-wal-events/memory/session_insights/session_003.json",
+      ".auto-claude/specs/026-storage-resilience-wal-events/memory/session_insights/session_004.json",
+      ".auto-claude/specs/026-storage-resilience-wal-events/memory/session_insights/session_005.json",
+      ".auto-claude/specs/026-storage-resilience-wal-events/memory/session_insights/session_006.json",
+      ".auto-claude/specs/026-storage-resilience-wal-events/memory/session_insights/session_007.json",
+      ".auto-claude/specs/026-storage-resilience-wal-events/review_state.json",
+      ".auto-claude/specs/026-storage-resilience-wal-events/task_logs.json",
+      ".secretsignore",
+      "Cargo.lock",
+      "crates/bop-cli/src/cards.rs",
+      "crates/bop-cli/src/dispatcher.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-4-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

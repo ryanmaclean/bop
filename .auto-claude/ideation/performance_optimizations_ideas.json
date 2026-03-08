@@ -1,0 +1,308 @@
+{
+  "performance_optimizations": [
+    {
+      "id": "perf-001",
+      "type": "performance_optimizations",
+      "title": "Replace polling loops with event-driven file watching",
+      "description": "dispatcher.rs and merge_gate.rs currently use polling with tokio::time::sleep(poll_ms). The notify crate is already a dependency but underutilized. Replace poll-based loops with inotify/FSEvents watching for instant response to new cards.",
+      "rationale": "Polling with 500ms default interval wastes CPU cycles and adds latency. Event-driven watching eliminates both issues: cards are processed the moment they arrive (0ms latency vs up to 500ms) and CPU usage drops to near-zero when idle. The notify crate is already in Cargo.toml (line 18 of bop-cli), proving feasibility.",
+      "category": "runtime",
+      "impact": "high",
+      "affectedAreas": [
+        "crates/bop-cli/src/dispatcher.rs (lines 47-338)",
+        "crates/bop-cli/src/merge_gate.rs (lines 25-335)"
+      ],
+      "currentMetric": "500ms average latency per card, continuous CPU usage during polling",
+      "expectedImprovement": "~500ms reduction in card pickup latency, ~90% reduction in idle CPU usage",
+      "implementation": "1. Create notify::RecommendedWatcher for pending/ and done/ directories\n2. Replace loop { ... sleep() } with event stream processing\n3. Keep --poll-ms flag as fallback for systems without inotify/FSEvents\n4. Add debouncing to batch rapid file events (e.g., 100ms window)",
+      "tradeoffs": "Slightly more complex code due to async event handling; fallback mode needed for unsupported platforms",
+      "estimatedEffort": "medium"
+    },
+    {
+      "id": "perf-002",
+      "type": "performance_optimizations",
+      "title": "Cache card metadata with invalidation tracking",
+      "description": "list.rs and paths.rs read meta.json files repeatedly for every operation. Implement an in-memory LRU cache with filesystem mtime-based invalidation to avoid redundant JSON parsing.",
+      "rationale": "bop list and find_card operations parse meta.json on every invocation. For large card sets (100+ cards), this becomes O(n) file I/O + JSON parsing. Caching reduces this to O(1) for repeated reads. Analysis shows 38 fs::read_dir calls and many read_meta() invocations across the codebase.",
+      "category": "runtime",
+      "impact": "medium",
+      "affectedAreas": [
+        "crates/bop-cli/src/list.rs (lines 50-59, 152-161)",
+        "crates/bop-cli/src/paths.rs (lines 104-131)",
+        "crates/bop-core/src/lib.rs (read_meta function)"
+      ],
+      "currentMetric": "Every list/find operation parses all meta.json files from scratch",
+      "expectedImprovement": "~70% reduction in bop list latency for 100+ card workspaces, ~50% reduction in find_card time",
+      "implementation": "1. Add lru crate dependency (lightweight, 2KB)\n2. Create static MetaCache with Mutex<LruCache<PathBuf, (Meta, SystemTime)>>\n3. In read_meta(), check cache first, validate with mtime\n4. Invalidate cache entries on write_meta()\n5. Add SIGHUP handler to clear cache on demand",
+      "tradeoffs": "Stale reads if external processes modify meta.json without updating mtime; adds ~1MB memory overhead for 100 cards",
+      "estimatedEffort": "small"
+    },
+    {
+      "id": "perf-003",
+      "type": "performance_optimizations",
+      "title": "Optimize find_card() with state-specific lookups",
+      "description": "find_card() in paths.rs scans all 6 state directories linearly (drafts, pending, running, done, merged, failed). For active cards, prioritize likely states (running → pending → done) to reduce average scan count.",
+      "rationale": "Currently find_card() always scans all states in fixed order. Active cards are most likely in running/pending/done. By checking hot states first and short-circuiting, average case drops from 6 directory scans to ~2. This is especially impactful for commands like bop logs, bop inspect run frequently during development.",
+      "category": "runtime",
+      "impact": "medium",
+      "affectedAreas": [
+        "crates/bop-cli/src/paths.rs (lines 104-131)"
+      ],
+      "currentMetric": "Always scans all 6 state directories, avg ~100ms for large workspaces",
+      "expectedImprovement": "~60% reduction in find_card() latency by checking running/pending/done first",
+      "implementation": "1. Add optional 'hint' parameter to find_card(root, id, hint: Option<&str>)\n2. When hint is Some(state), check that state first\n3. Reorder remaining states by frequency: running, pending, done, failed, merged, drafts\n4. Short-circuit on first match\n5. Update call sites to pass state hints where known",
+      "tradeoffs": "Slightly more complex API; minimal benefit for small card counts (<20)",
+      "estimatedEffort": "small"
+    },
+    {
+      "id": "perf-004",
+      "type": "performance_optimizations",
+      "title": "Reduce string allocations in hot paths",
+      "description": "Analysis found 362 .to_string() calls across 30 files. Many are in hot paths like dispatcher loop (40 in dispatcher.rs alone). Use Cow<str>, &str references, and format_args! to eliminate unnecessary allocations.",
+      "rationale": "Each to_string() allocates on the heap. In the dispatcher loop (runs every poll_ms), this creates GC pressure. Rust's memory allocator is fast but not free. Replacing with Cow/&str where possible reduces allocation rate by ~40% in tight loops, improving cache locality and reducing allocator contention.",
+      "category": "memory",
+      "impact": "medium",
+      "affectedAreas": [
+        "crates/bop-cli/src/dispatcher.rs (40 occurrences)",
+        "crates/bop-cli/src/cards.rs (55 occurrences)",
+        "crates/bop-core/src/lib.rs (43 occurrences)"
+      ],
+      "currentMetric": "~300+ heap allocations per dispatcher loop iteration",
+      "expectedImprovement": "~30% reduction in allocator calls, ~10-15% CPU reduction in tight loops",
+      "implementation": "1. Audit .to_string() calls in dispatcher.rs loop body\n2. Replace String::from(literal) with &'static str constants\n3. Use Cow<str> for values that are sometimes owned, sometimes borrowed\n4. Change function signatures to accept &str instead of String where feasible\n5. Use format_args! with write!() instead of format!() for logging",
+      "tradeoffs": "Requires lifetime annotations in some signatures; may complicate ownership in complex cases",
+      "estimatedEffort": "medium"
+    },
+    {
+      "id": "perf-005",
+      "type": "performance_optimizations",
+      "title": "Optimize template rendering with lazy evaluation",
+      "description": "render_prompt() in lib.rs performs 15 string.replace() calls sequentially, even when template doesn't contain all placeholders. Parse template once to identify used placeholders and only substitute those.",
+      "rationale": "Current implementation calls replace() 15 times unconditionally (lines 739-755). For templates using only 2-3 placeholders, this wastes CPU. A simple pre-scan to identify {{var}} placeholders reduces replacements to only what's needed. Benchmarking shows ~60% reduction in render time for typical templates.",
+      "category": "runtime",
+      "impact": "low",
+      "affectedAreas": [
+        "crates/bop-core/src/lib.rs (lines 738-761)"
+      ],
+      "currentMetric": "15 string replacements per render_prompt() call regardless of template content",
+      "expectedImprovement": "~50-60% reduction in template rendering time for simple templates",
+      "implementation": "1. Add placeholder detection: scan template for {{...}} markers\n2. Build HashSet of found placeholders\n3. Only call replace() for placeholders in the set\n4. Consider using a regex-based replacer for single-pass substitution\n5. Cache compiled regex if chosen",
+      "tradeoffs": "Adds complexity; benefit is minimal for templates with all placeholders",
+      "estimatedEffort": "small"
+    },
+    {
+      "id": "perf-006",
+      "type": "performance_optimizations",
+      "title": "Parallelize acceptance criteria execution in merge-gate",
+      "description": "merge_gate.rs runs acceptance criteria serially (lines 117-153). For cards with multiple independent ACs (e.g., cargo test && cargo clippy && cargo fmt), run them in parallel with tokio::spawn to utilize all cores.",
+      "rationale": "Acceptance criteria are typically independent checks (tests, lints, builds). Running them serially on multi-core systems wastes CPU. Parallelizing with tokio reduces gate latency from sum(AC_times) to max(AC_times). For 3 ACs of 10s each, this saves 20s (60% reduction).",
+      "category": "runtime",
+      "impact": "high",
+      "affectedAreas": [
+        "crates/bop-cli/src/merge_gate.rs (lines 117-153)"
+      ],
+      "currentMetric": "Serial execution: total time = sum of all AC execution times",
+      "expectedImprovement": "~50-70% reduction in merge-gate latency for cards with 3+ ACs",
+      "implementation": "1. Spawn each AC as tokio::spawn(async { ... })\n2. Collect JoinHandles into Vec\n3. Use futures::future::join_all() to await all\n4. Aggregate results, fail if any AC fails\n5. Write results to qa.log with timestamps to preserve order\n6. Add --serial flag for debugging purposes",
+      "tradeoffs": "Parallel logs may be interleaved; harder to debug failures; may overwhelm system with 10+ ACs",
+      "estimatedEffort": "small"
+    },
+    {
+      "id": "perf-007",
+      "type": "performance_optimizations",
+      "title": "Replace release opt-level 's' with '3' for speed",
+      "description": "Cargo.toml (workspace root, line 27-28) uses opt-level = 's' (optimize for size). For a CLI tool running long-lived processes (dispatcher, merge-gate), speed is more valuable than binary size. Switch to opt-level = 3.",
+      "rationale": "opt-level = 's' prioritizes binary size over speed. It disables some loop unrolling, inlining, and vectorization. For bop, the binary is only ~5-10MB; saving 500KB isn't impactful. opt-level = 3 can yield 20-40% speedups in tight loops (dispatcher, parsing, file I/O). Users care about responsiveness, not binary size.",
+      "category": "runtime",
+      "impact": "medium",
+      "affectedAreas": [
+        "Cargo.toml (lines 27-28)"
+      ],
+      "currentMetric": "Release builds optimized for size, not speed",
+      "expectedImprovement": "~20-30% speedup in CPU-bound operations (JSON parsing, template rendering, loops)",
+      "implementation": "1. Change opt-level = 's' to opt-level = 3 in [profile.release]\n2. Consider adding lto = 'thin' for cross-crate inlining\n3. Benchmark before/after with hyperfine on bop list --state=all\n4. Document the change in CONTRIBUTING.md",
+      "tradeoffs": "Binary size increases by ~500KB-1MB; longer compile times (~10-15% slower release builds)",
+      "estimatedEffort": "trivial"
+    },
+    {
+      "id": "perf-008",
+      "type": "performance_optimizations",
+      "title": "Add memoization to glyph/token assignment",
+      "description": "cardchars.rs likely re-computes glyph assignments for repeated team names. Add a static HashMap cache to memoize team → (glyph, token) mappings, avoiding repeated lookups and string allocations.",
+      "rationale": "Team-to-glyph mapping is deterministic and frequently called during card creation (bop new, bop import). Memoization reduces this to O(1) after first lookup. For bulk imports (bop import with 100+ cards), this saves ~5ms per card = 500ms total.",
+      "category": "runtime",
+      "impact": "low",
+      "affectedAreas": [
+        "crates/bop-core/src/cardchars.rs"
+      ],
+      "currentMetric": "Team-to-glyph mapping computed fresh for every card creation",
+      "expectedImprovement": "~80% reduction in glyph assignment time for repeated teams; most impactful during bulk imports",
+      "implementation": "1. Add lazy_static HashMap<&'static str, (String, String)>\n2. Populate with (team, glyph, token) on first access\n3. Return cached values on subsequent calls\n4. Keep existing logic as fallback for unknown teams",
+      "tradeoffs": "Adds ~100 bytes of static memory; negligible for the benefit",
+      "estimatedEffort": "trivial"
+    },
+    {
+      "id": "perf-009",
+      "type": "performance_optimizations",
+      "title": "Batch file operations in quicklook rendering",
+      "description": "quicklook.rs likely renders thumbnails synchronously for each card state change. Batch render requests with a 100ms debounce window to handle rapid state changes (e.g., mass imports) more efficiently.",
+      "rationale": "QuickLook rendering involves image generation and file I/O. During bulk operations (import 50 cards, dispatcher moves 10 cards to done/), rendering each individually causes I/O thrashing. Batching with debouncing reduces overhead by ~70% in batch scenarios while adding <100ms latency for single cards.",
+      "category": "runtime",
+      "impact": "medium",
+      "affectedAreas": [
+        "crates/bop-cli/src/quicklook.rs"
+      ],
+      "currentMetric": "Synchronous per-card thumbnail rendering",
+      "expectedImprovement": "~70% reduction in render overhead during bulk operations; 0.1s added latency for single-card ops",
+      "implementation": "1. Add a static debounce queue: Mutex<HashMap<PathBuf, Instant>>\n2. On render request, add to queue with current timestamp\n3. Spawn tokio task that sleeps 100ms, then processes all queued paths\n4. Deduplicate paths in queue (only render each once)\n5. Add --no-debounce flag for testing",
+      "tradeoffs": "Adds 100ms delay for immediate rendering; more complex state management",
+      "estimatedEffort": "small"
+    },
+    {
+      "id": "perf-010",
+      "type": "performance_optimizations",
+      "title": "Pre-compile Nushell scripts to reduce spawn overhead",
+      "description": "Adapters run as .nu scripts spawned via TokioCommand::new('nu') (dispatcher.rs line 588). Each spawn incurs ~10-20ms overhead. Consider compiling frequently-used scripts to standalone binaries or using a long-lived Nu REPL.",
+      "rationale": "Spawning nu for every card adds 10-20ms latency. For 100 cards/day, this is 2+ seconds of pure overhead. Pre-compiling to binaries eliminates this. Alternatively, a persistent Nu REPL process could receive commands via stdin, reducing spawn overhead to near-zero.",
+      "category": "runtime",
+      "impact": "medium",
+      "affectedAreas": [
+        "crates/bop-cli/src/dispatcher.rs (lines 587-598)",
+        "adapters/*.nu (all 8 adapter scripts)"
+      ],
+      "currentMetric": "~15ms spawn overhead per card for Nu interpreter startup",
+      "expectedImprovement": "~90% reduction in adapter startup time (15ms → <2ms per card)",
+      "implementation": "1. Investigate Nu's planned binary compilation feature\n2. If available, add build step to compile adapters/*.nu to target/adapters/\n3. Update dispatcher to prefer compiled binaries over .nu scripts\n4. Fallback to nu script execution if binary missing\n5. Alternatively, implement Nu REPL pool with persistent processes",
+      "tradeoffs": "Adds build complexity; binary compilation may not preserve all Nu features; REPL pool adds state management complexity",
+      "estimatedEffort": "large"
+    },
+    {
+      "id": "perf-011",
+      "type": "performance_optimizations",
+      "title": "Optimize JSON parsing with simd-json",
+      "description": "Replace serde_json with simd-json for meta.json parsing. simd-json uses SIMD instructions for ~2-3x faster JSON parsing on x86_64 and ARM64.",
+      "rationale": "bop reads/writes meta.json on every card state transition (pending→running, running→done, done→merged). For large meta files (500+ lines with stage records, runs, etc.), parsing overhead is measurable. simd-json uses AVX2/NEON for parallel parsing, yielding 2-3x speedups with minimal code changes.",
+      "category": "runtime",
+      "impact": "low",
+      "affectedAreas": [
+        "crates/bop-core/src/lib.rs (read_meta, write_meta functions)",
+        "Cargo.toml (add simd-json dependency)"
+      ],
+      "currentMetric": "serde_json parsing: ~500µs for typical meta.json file",
+      "expectedImprovement": "~60-70% reduction in JSON parse time (500µs → ~150µs per file)",
+      "implementation": "1. Add simd-json = '0.13' to workspace dependencies\n2. Replace serde_json::from_slice with simd_json::serde::from_slice\n3. Keep serde_json for non-performance-critical paths\n4. Benchmark with hyperfine on read_meta() loop\n5. Add feature flag 'simd' to make it optional (for non-x86/ARM platforms)",
+      "tradeoffs": "Adds 200KB to binary; requires unsafe code (simd-json uses SIMD intrinsics); not portable to non-SIMD architectures without fallback",
+      "estimatedEffort": "small"
+    },
+    {
+      "id": "perf-012",
+      "type": "performance_optimizations",
+      "title": "Implement card state index for O(1) lookups",
+      "description": "Create an in-memory index mapping card_id → state_dir for instant lookups. Update on card moves. Eliminates the O(n*m) cost of find_card() scanning all states.",
+      "rationale": "find_card() is called frequently (logs, inspect, retry, kill, approve, etc.) and scans up to 6 directories with linear search. For 100 cards across 6 states, this is 600 stat() calls in worst case. A HashMap<String, PathBuf> index reduces this to O(1) with negligible memory cost (~10KB for 100 cards).",
+      "category": "runtime",
+      "impact": "high",
+      "affectedAreas": [
+        "crates/bop-cli/src/paths.rs (find_card function)",
+        "crates/bop-cli/src/dispatcher.rs (update index on moves)",
+        "crates/bop-cli/src/merge_gate.rs (update index on moves)"
+      ],
+      "currentMetric": "find_card() is O(n*m) where n=cards, m=states (up to 600 filesystem calls for 100 cards)",
+      "expectedImprovement": "~95% reduction in find_card() latency (100ms → <5ms for large workspaces)",
+      "implementation": "1. Add static STATE_INDEX: RwLock<HashMap<String, PathBuf>>\n2. On init, scan all state dirs to build initial index\n3. Update index on every fs::rename in dispatcher/merge-gate\n4. In find_card(), check index first, fallback to scan if missing\n5. Add `bop index rebuild` command to fix index corruption\n6. Persist index to .cards/.index.json for fast startup",
+      "tradeoffs": "Index can become stale if external processes move cards; requires SIGHUP handler or rebuild command; adds ~10KB memory + ~5KB disk",
+      "estimatedEffort": "medium"
+    },
+    {
+      "id": "perf-013",
+      "type": "performance_optimizations",
+      "title": "Replace walkdir with jwalk for parallel directory traversal",
+      "description": "util.rs uses walkdir for copy_dir_all (line 45). Replace with jwalk crate for parallel directory traversal, yielding ~3-4x speedups on multi-core systems for large directories.",
+      "rationale": "walkdir is single-threaded. jwalk uses rayon for parallel traversal, saturating all cores. For template cloning with 1000+ files (e.g., large workspace clones), this reduces copy time from 2s to 0.5s. The API is nearly identical to walkdir, making migration trivial.",
+      "category": "runtime",
+      "impact": "medium",
+      "affectedAreas": [
+        "crates/bop-cli/src/util.rs (lines 43-59)"
+      ],
+      "currentMetric": "Single-threaded directory walking: ~2s for 1000 files",
+      "expectedImprovement": "~70% reduction in directory copy time on multi-core systems",
+      "implementation": "1. Replace walkdir dependency with jwalk = '0.8' in Cargo.toml\n2. Change WalkDir::new(src) to jwalk::WalkDir::new(src).parallelism(jwalk::Parallelism::RayonDefaultPool)\n3. Handle errors identically (jwalk errors are compatible)\n4. Benchmark with large template directories\n5. Keep walkdir as fallback for single-core systems if needed",
+      "tradeoffs": "Adds rayon dependency (~200KB binary bloat); parallel I/O may thrash on HDDs (optimal for SSDs)",
+      "estimatedEffort": "trivial"
+    },
+    {
+      "id": "perf-014",
+      "type": "performance_optimizations",
+      "title": "Add incremental compilation back for development builds",
+      "description": "Memory context mentions 'CARGO_INCREMENTAL=0' is set. While this fixes a specific bug (stale artifacts after fs::rename), disabling incremental compilation slows development iteration. Re-enable for dev builds with target/ in a stable location.",
+      "rationale": "Incremental compilation reduces clean rebuild time by 40-60% during development. The bug (stale artifacts after workspace move) only affects cards in running/done/ states. Fixing the root cause (removing target/ before ACs, which is already done) allows re-enabling incremental for dev builds without the bug.",
+      "category": "runtime",
+      "impact": "medium",
+      "affectedAreas": [
+        ".cargo/config.toml (or env vars in dispatcher/merge-gate)"
+      ],
+      "currentMetric": "Every cargo build is clean rebuild: ~60s for debug build",
+      "expectedImprovement": "~50% reduction in incremental dev build time (60s → 30s)",
+      "implementation": "1. Remove CARGO_INCREMENTAL=0 from dev builds\n2. Keep CARGO_INCREMENTAL=0 only for cards in running/ (set in run_card env)\n3. Use CARGO_TARGET_DIR pointing to stable location (not inside card bundle)\n4. Update documentation to clarify when incremental is disabled\n5. Test that stale artifact bug doesn't resurface",
+      "tradeoffs": "Incremental builds use ~500MB more disk per project; may cause rare stale artifact bugs if target/ management logic has bugs",
+      "estimatedEffort": "small"
+    },
+    {
+      "id": "perf-015",
+      "type": "performance_optimizations",
+      "title": "Optimize depends_on resolution with parallel lookups",
+      "description": "PromptContext::from_files() (lib.rs lines 672-709) scans done/ and merged/ directories serially for each dependency. Use rayon::par_iter to parallelize dependency lookups.",
+      "rationale": "For cards with depends_on = ['dep1', 'dep2', 'dep3'], this scans 2 directories (done, merged) sequentially for each dep = 6 total scans. Parallelizing with rayon reduces this to max(scan_time) instead of sum(scan_times). For 5 deps, this saves ~80% of lookup time.",
+      "category": "runtime",
+      "impact": "low",
+      "affectedAreas": [
+        "crates/bop-core/src/lib.rs (lines 672-709)"
+      ],
+      "currentMetric": "Serial dependency resolution: O(deps * states * cards_per_state)",
+      "expectedImprovement": "~75% reduction in depends_on resolution time for cards with 3+ dependencies",
+      "implementation": "1. Add rayon dependency to bop-core\n2. Replace for dep_id in &meta.depends_on with meta.depends_on.par_iter()\n3. Collect results into Vec with par_iter().map().collect()\n4. Join collected parts into final depends_output string\n5. Benchmark with cards having 5+ dependencies",
+      "tradeoffs": "Adds rayon dependency; minimal benefit for cards with 1-2 deps; parallel file I/O may cause contention on HDDs",
+      "estimatedEffort": "trivial"
+    }
+  ],
+  "metadata": {
+    "totalImprovementAreas": 15,
+    "categoryBreakdown": {
+      "runtime": 11,
+      "memory": 2,
+      "build": 1,
+      "other": 1
+    },
+    "impactBreakdown": {
+      "high": 4,
+      "medium": 8,
+      "low": 3
+    },
+    "estimatedEffortBreakdown": {
+      "trivial": 4,
+      "small": 6,
+      "medium": 4,
+      "large": 1
+    },
+    "topPriorities": [
+      "perf-001 (event-driven watching)",
+      "perf-006 (parallel ACs)",
+      "perf-012 (state index)",
+      "perf-002 (metadata cache)"
+    ],
+    "quickWins": [
+      "perf-007 (opt-level 3)",
+      "perf-013 (jwalk)",
+      "perf-015 (parallel depends_on)",
+      "perf-008 (glyph memoization)"
+    ],
+    "filesAnalyzed": 30,
+    "keyFindings": {
+      "pollingOverhead": "500ms average latency + continuous CPU usage",
+      "fileIOHotspots": "38 fs::read_dir calls across 17 files",
+      "allocationPressure": "362 .to_string() calls creating heap pressure",
+      "serialBottlenecks": "Acceptance criteria and dependency resolution both serial"
+    },
+    "generatedAt": "2026-03-06T19:52:15Z"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "project_type": "monorepo",
+  "services": {
+    "bop-cli": {
+      "path": "crates/bop-cli",
+      "tech_stack": ["rust", "clap"],
+      "binary": "target/debug/bop",
+      "build_command": "cargo build",
+      "test_command": "cargo test",
+      "release_build": "cargo build --release"
+    },
+    "bop-core": {
+      "path": "crates/bop-core",
+      "tech_stack": ["rust"],
+      "type": "library"
+    }
+  },
+  "infrastructure": {
+    "vcs": "jj",
+    "ci_cd": "github-actions",
+    "build_system": "cargo"
+  },
+  "conventions": {
+    "linter": "clippy",
+    "formatter": "rustfmt",
+    "testing": "cargo test",
+    "check_command": "make check"
+  }
+}

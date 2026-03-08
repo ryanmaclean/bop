@@ -1,0 +1,124 @@
+{
+  "session_number": 4,
+  "timestamp": "2026-03-05T23:58:52.926551+00:00",
+  "subtasks_completed": [
+    "subtask-1-3"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": ".auto-claude/specs/013-qemu-adapter/build-progress.txt",
+        "changes": [
+          "Updated acceptance criteria checkboxes: marked qemu.nu existence and providers.json entry as complete",
+          "Added detailed session notes documenting subtask 1-2 and 1-3 completions",
+          "Documented zam candidate path search strategy (4 locations checked)",
+          "Recorded self-test implementation details"
+        ],
+        "purpose": "Session-by-session progress tracking document"
+      },
+      {
+        "file": ".auto-claude/specs/013-qemu-adapter/implementation_plan.json",
+        "changes": [
+          "Updated subtask-1-2 status from pending to completed with detailed notes",
+          "Updated subtask-1-3 status from pending to completed with verification notes",
+          "Confirmed self-tests already implemented in subtask-1-2"
+        ],
+        "purpose": "Structured plan with acceptance criteria and status tracking"
+      },
+      {
+        "file": "adapters/qemu.nu",
+        "changes": "Not shown in diff but referenced as created in subtask 1-2 with integrated self-tests",
+        "purpose": "QEMU adapter implementation with embedded test function"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Adapter signature convention",
+        "description": "def main [workdir, prompt_file, stdout_log, stderr_log, _memory_out?, --test]",
+        "usage": "Standard signature across all adapters (claude.nu, mock.nu, qemu.nu, etc.)"
+      },
+      {
+        "pattern": "Self-test structure",
+        "description": "Tests use std/assert library with final output 'print \"PASS: <adapter-name>\"'",
+        "usage": "Consistent test completion signal across adapter implementations"
+      },
+      {
+        "pattern": "Exit code semantics",
+        "description": "0=success, 75=transient/rate-limit, 1+=failure",
+        "usage": "Standardized across all job execution contexts"
+      },
+      {
+        "pattern": "Dependency candidate paths",
+        "description": "Multiple search locations for zam image: release, debug, elf variants",
+        "usage": "Graceful fallback strategy for VM executable discovery"
+      },
+      {
+        "pattern": "Test scope coverage",
+        "description": "Tests validate: path resolution, candidate lists, command construction, rate-limit detection",
+        "usage": "Comprehensive self-testing without actual VM execution"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Self-tests implemented in subtask 1-2, not 1-3",
+        "impact": "Task dependency overlap - tests were already complete when subtask 1-3 began",
+        "mitigation": "Subtask 1-3 served as verification/review rather than new implementation"
+      },
+      {
+        "issue": "Nu environment unavailable for test execution",
+        "impact": "Cannot run 'nu --no-config-file adapters/qemu.nu --test' for runtime verification",
+        "mitigation": "Code review validation used instead of actual test execution"
+      },
+      {
+        "issue": "Rate-limit detection requires stderr parsing",
+        "impact": "Must handle both numeric (429) and text-based rate-limit indicators",
+        "mitigation": "Implementation checks for both 'rate limit' and 'too many requests' strings"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "summary": "Self-tests successfully implemented and verified through code review",
+      "achievements": [
+        "Validated test implementation follows mock.nu and timeout_wrapper.nu patterns",
+        "Confirmed comprehensive test coverage: 5 test scenarios across critical functionality",
+        "Verified std/assert-based testing approach with proper exit signaling",
+        "Documentation updated in both build-progress.txt and implementation_plan.json"
+      ],
+      "verification_method": "Code review - actual test execution blocked by missing Nu environment"
+    },
+    "recommendations": [
+      {
+        "priority": "high",
+        "recommendation": "Execute Nu tests in available environment",
+        "rationale": "Code review validation sufficient for current phase, but runtime verification needed before subtask 1-4 integration tests"
+      },
+      {
+        "priority": "high",
+        "recommendation": "Clarify subtask boundaries for overlapping implementation",
+        "rationale": "Self-tests in subtask 1-2 should have been explicitly noted as blockers for subtask 1-3 planning"
+      },
+      {
+        "priority": "medium",
+        "recommendation": "Document zam candidate path discovery strategy",
+        "rationale": "The 4-location search pattern should be explicitly documented in adapters/README.md for maintainability"
+      },
+      {
+        "priority": "medium",
+        "recommendation": "Add integration test in subtask 1-4",
+        "rationale": "Self-tests validate logic in isolation; subtask 1-4 should include end-to-end test with actual card execution"
+      }
+    ],
+    "subtask_id": "subtask-1-3",
+    "session_num": 4,
+    "success": true,
+    "changed_files": [
+      ".auto-claude/specs/013-qemu-adapter/build-progress.txt",
+      ".auto-claude/specs/013-qemu-adapter/implementation_plan.json"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-3"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

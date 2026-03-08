@@ -1,0 +1,116 @@
+{
+  "session_number": 9,
+  "timestamp": "2026-03-08T00:52:17.750168+00:00",
+  "subtasks_completed": [
+    "subtask-5-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "dispatch.nu",
+        "changes_type": "feature_addition",
+        "lines_added": 89,
+        "purpose": "Card-to-spec linkage in dogfood path",
+        "key_additions": [
+          "link_card_to_spec function definition",
+          "integration into run_spec after write_approval"
+        ]
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "dual_path_search",
+        "description": "Search both flat state dirs (.cards/STATE/*.jobcard) and team-prefixed dirs (.cards/team-*/STATE/*.jobcard)",
+        "benefit": "covers all card organizational structures in the project"
+      },
+      {
+        "pattern": "multi_condition_matching",
+        "description": "Match card by spec slug, spec_id substring in card ID, or spec_id in card title",
+        "benefit": "flexible matching reduces false negatives when spec-card naming doesn't perfectly align"
+      },
+      {
+        "pattern": "graceful_degradation",
+        "description": "Non-fatal error handling with try/catch blocks and early returns",
+        "benefit": "spec run continues even if card linkage fails; prints colored diagnostic messages"
+      },
+      {
+        "pattern": "nu_json_upsert",
+        "description": "Update metadata via open \u2192 upsert \u2192 to json \u2192 save --force pipeline",
+        "benefit": "idempotent metadata updates; creates field if absent, updates if present"
+      },
+      {
+        "pattern": "colored_terminal_feedback",
+        "description": "Use ansi color codes (green=success, yellow=warning, light_gray=info) for diagnostics",
+        "benefit": "clear visual feedback on card linkage outcome in dispatcher output"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "substring_matching_false_positives",
+        "description": "Matching via str contains on card_id/title could match unintended cards if spec_id is generic (e.g. '027')",
+        "mitigation": "prioritize exact slug match first; only use contains as fallback"
+      },
+      {
+        "gotcha": "directory_traversal_performance",
+        "description": "Nested loops through all state dirs and team dirs + all cards in each + nested meta.json reads could be slow with large card counts",
+        "mitigation": "early break on first match; consider caching matched spec_id\u2192card_id in future"
+      },
+      {
+        "gotcha": "path_existence_checks_required",
+        "description": "Each state_dir and meta_path must be checked for existence before open/ls to avoid exceptions",
+        "mitigation": "code includes explicit path exists checks and try/catch blocks"
+      },
+      {
+        "gotcha": "spec_dir_name_parsing",
+        "description": "Assumes spec directory follows format 'NNN-slug'; regex and str replace rely on this convention",
+        "mitigation": "code extracts slug by dropping spec_id prefix; breaks if naming changes"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "approach_details": {
+      "task": "Link card metadata to auto-claude spec by finding matching card in .cards/ state dirs and writing ac_spec_id to meta.json",
+      "implementation_strategy": [
+        "derive spec slug from .auto-claude/specs/NNN-slug directory",
+        "search all 5 state dirs (pending/running/done/failed/merged) in both flat and team-prefixed paths",
+        "match card by id==slug, id contains spec_id, or title contains spec_id",
+        "on match: open meta.json, upsert ac_spec_id field, save with --force",
+        "integrate into run_spec function post-write_approval",
+        "make linkage non-fatal: warn but continue if no match"
+      ],
+      "completion_status": "fully implemented and integrated"
+    },
+    "recommendations": [
+      {
+        "priority": "medium",
+        "recommendation": "Add explicit card_id parameter to link_card_to_spec to allow caller to override search",
+        "rationale": "improves debugging and avoids ambiguity if multiple cards could match"
+      },
+      {
+        "priority": "low",
+        "recommendation": "Consider memoizing recent spec_id\u2192card_path mappings in a transient .bop/spec_links.json",
+        "rationale": "avoids repeated directory scans if multiple specs run in same dispatch session"
+      },
+      {
+        "priority": "medium",
+        "recommendation": "Add dry-run output (e.g. --verbose flag) to print which card was matched before ac_spec_id write",
+        "rationale": "aids debugging when automated matching produces unexpected linkages"
+      },
+      {
+        "priority": "low",
+        "recommendation": "Log ac_spec_id linkage event to card's events.jsonl for audit trail",
+        "rationale": "consistent with storage model decision (fs state + JSONL append-only log)"
+      }
+    ],
+    "subtask_id": "subtask-5-1",
+    "session_num": 9,
+    "success": true,
+    "changed_files": [
+      "dispatch.nu"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-5-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

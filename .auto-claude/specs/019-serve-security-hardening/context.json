@@ -1,0 +1,38 @@
+{
+  "files_to_modify": {
+    "bop": [
+      "crates/bop-cli/src/serve.rs",
+      "crates/bop-cli/Cargo.toml"
+    ]
+  },
+  "files_to_reference": [
+    "crates/bop-cli/src/serve.rs"
+  ],
+  "patterns": {
+    "authentication_pattern": "Token auth in serve.rs lines 39-51: optional token check with direct string comparison",
+    "validation_pattern": "Input validation pattern lines 54-82: early returns with StatusCode::BAD_REQUEST and JSON error",
+    "error_response_pattern": "JSON error responses: (StatusCode, Json(json!({\"error\": \"message\"})))",
+    "test_pattern": "Unit tests in #[cfg(test)] mod tests using tokio::test macro and axum ServiceExt for testing",
+    "router_pattern": "Router::new().route(path, handler).with_state(Arc<AppState>) pattern"
+  },
+  "existing_implementations": {
+    "description": "serve.rs has basic token auth (timing-vulnerable), basic ID validation (incomplete), no body limits, no rate limiting, no security headers",
+    "relevant_files": [
+      "crates/bop-cli/src/serve.rs",
+      "crates/bop-cli/Cargo.toml"
+    ],
+    "security_gaps": [
+      "auth != bearer is timing-vulnerable (line 45)",
+      "No body size limits",
+      "Card ID validation only checks / and \\ (lines 61-66), missing .., %, null bytes",
+      "No rate limiting",
+      "No security response headers",
+      "Token is optional (line 157)"
+    ]
+  },
+  "dependencies_to_add": {
+    "subtle": "2 - for constant-time token comparison",
+    "tower": "0.4 - for middleware (already in dev-dependencies, move to dependencies)",
+    "tower-governor": "0.4 - for rate limiting OR custom HashMap-based rate limiter"
+  }
+}

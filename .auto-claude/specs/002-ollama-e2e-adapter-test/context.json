@@ -1,0 +1,28 @@
+{
+  "files_to_modify": {
+    "bop": ["adapters/ollama-local.nu"]
+  },
+  "files_to_reference": [
+    "adapters/mock.nu",
+    "adapters/claude.nu",
+    "scripts/test-real-adapters.nu"
+  ],
+  "patterns": {
+    "adapter_pattern": "All adapters follow calling convention: adapter.nu <workdir> <prompt_file> <stdout_log> <stderr_log> [_memory_out]. Exit codes: 0=success, 75=transient (retry), 1+=failure",
+    "path_resolution": "All adapters resolve relative paths to absolute before cd $workdir (lines 34-37)",
+    "output_pattern": "Adapters that create files typically use mkdir output + save to output/result.md",
+    "test_pattern": "Self-tests use --test flag and run_tests function"
+  },
+  "existing_implementations": {
+    "description": "Found ollama-local.nu adapter with JSON extraction logic (lines 66-111) but missing fallback for plain text responses",
+    "relevant_files": [
+      "adapters/ollama-local.nu",
+      "scripts/test-real-adapters.nu"
+    ],
+    "bug_location": "Line 111 in ollama-local.nu - needs fallback after JSON extraction block"
+  },
+  "test_verification": {
+    "description": "test-real-adapters.nu creates temp .cards dir, runs dispatcher, checks output/result.md exists and is non-empty",
+    "assert_result_function": "Lines 455-480 in scripts/test-real-adapters.nu verify result.md existence and content"
+  }
+}

@@ -11,13 +11,30 @@ clap.workspace = true
 clap_complete.workspace = true
 serde_json.workspace = true
 walkdir.workspace = true
+url.workspace = true
 bop-core = { path = "../bop-core" }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "signal", "net"] }
+axum = "0.7"
 serde.workspace = true
 notify = "6"
+notify-debouncer-mini = "0.4"
+subtle = "2"
+tower = { version = "0.4", features = ["util"] }
+tower_governor = "0.4"
+rand = "0.8"
+core-foundation = "0.9"
+terminal_size = "0.4"
+ratatui = "0.29"
+crossterm = "0.28"
+nucleo = "0.5"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+async-trait = "0.1"
+dirs.workspace = true
+uuid = { version = "1", features = ["v5"] }
 
 [dev-dependencies]
 tempfile = "3"
+insta = "1"
 chrono.workspace = true
 serde_json.workspace = true
 bop-core = { path = "../bop-core" }

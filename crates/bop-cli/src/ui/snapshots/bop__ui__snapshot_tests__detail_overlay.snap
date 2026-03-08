@@ -1,0 +1,25 @@
+---
+source: crates/bop-cli/src/ui/mod.rs
+assertion_line: 470
+expression: content
+---
+                                        ┌ build-ui — detail ───────────────────┐
+                                        │Card: build-ui                        │
+                                        │State: running                        │
+                                        │Stage: implement                      │
+                                        │Provider: claude                      │
+                                        │Elapsed: 5m00s                        │
+                                        │Priority: Urgent                      │
+                                        │                                      │
+                                        │Progress                              │
+                                        │██████████████████████░░░░░░░░  75%   │
+                                        │                                      │
+                                        │                                      │
+                                        │                                      │
+                                        │                                      │
+                                        │                                      │
+                                        │                                      │
+                                        │                                      │
+                                        │                                      │
+                                        │                                      │
+                                        └──────────────────────────────────────┘

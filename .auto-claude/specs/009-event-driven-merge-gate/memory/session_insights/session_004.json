@@ -1,0 +1,58 @@
+{
+  "session_number": 4,
+  "timestamp": "2026-03-06T16:19:13.890015+00:00",
+  "subtasks_completed": [
+    "subtask-1-3"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "install/linux/bop-merge-gate.service",
+        "type": "systemd service unit",
+        "status": "created",
+        "lines": 6,
+        "purpose": "One-shot systemd service to run bop merge-gate operation",
+        "key_directives": {
+          "Type": "oneshot",
+          "ExecStart": "/usr/local/bin/bop merge-gate --once",
+          "Description": "bop merge-gate (one-shot)"
+        }
+      }
+    ],
+    "patterns_discovered": [
+      "Standard systemd service unit structure ([Unit], [Service] sections)",
+      "One-shot service pattern for non-repeating background operations",
+      "Absolute path invocation of compiled binary with long-option arguments",
+      "Minimal configuration approach (relies on systemd defaults)"
+    ],
+    "gotchas_discovered": [
+      "Hardcoded binary path /usr/local/bin/bop assumes standard installation location - installation script must match",
+      "No User/Group directives - service runs as root (potential security concern)",
+      "No error handling or restart policy - transient failures will silently exit",
+      "No WorkingDirectory specified - inherits systemd caller's cwd",
+      "No logging configuration (StandardOutput/StandardError) - output goes to journal only",
+      "No environment variable passing mechanism visible - card state access depends on cwd or explicit paths"
+    ],
+    "approach_outcome": "SUCCESS",
+    "recommendations": [
+      "Add User=bop-service and Group=bop-service for privilege separation",
+      "Document /usr/local/bin/bop installation requirement in setup instructions",
+      "Consider adding StandardOutput=journal StandardError=journal for explicit logging",
+      "Add RemainAfterExit=yes if service state should persist after exit",
+      "Add EnvironmentFile= or Environment= directives if merge-gate needs config paths",
+      "Consider adding Before/After ordering directives if this integrates with other system services",
+      "For production, consider adding Type=notify and sd_notify() calls for better systemd integration"
+    ],
+    "subtask_id": "subtask-1-3",
+    "session_num": 4,
+    "success": true,
+    "changed_files": [
+      "install/linux/bop-merge-gate.service"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-3"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

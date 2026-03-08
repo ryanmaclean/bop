@@ -1,0 +1,6 @@
+[Unit]
+Description=bop merge-gate (one-shot)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/bop merge-gate --once

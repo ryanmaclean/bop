@@ -1,0 +1,173 @@
+{
+  "session_number": 4,
+  "timestamp": "2026-03-08T03:08:59.793347+00:00",
+  "subtasks_completed": [
+    "subtask-1-3"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/providers/codex.rs",
+        "changes_summary": "Added PTY fallback mechanism with 4 new functions, 1 helper, and 11 tests",
+        "key_functions": [
+          {
+            "name": "extract_pct_after",
+            "purpose": "Parse percentage values after anchor strings (e.g., '5h limit: 42%')",
+            "visibility": "private",
+            "returns": "Option<u8> with clamping to 0\u2013100"
+          },
+          {
+            "name": "parse_pty_output",
+            "purpose": "Parse PTY screen output for '5h limit: NN%' and 'Weekly limit: NN%' patterns",
+            "visibility": "private",
+            "returns": "ProviderSnapshot with source='pty'"
+          },
+          {
+            "name": "fetch_via_pty",
+            "purpose": "Timeout-wrapped PTY exchange (3 second timeout)",
+            "visibility": "private",
+            "returns": "Result<ProviderSnapshot> with graceful error handling"
+          },
+          {
+            "name": "pty_exchange",
+            "purpose": "Inner async function: spawn codex, write /status, read stdout",
+            "visibility": "private",
+            "returns": "Result<ProviderSnapshot>"
+          },
+          {
+            "name": "fetch_via_rpc_or_pty",
+            "purpose": "Try JSON-RPC first; fall back to PTY if RPC has no data",
+            "visibility": "private",
+            "returns": "Result<ProviderSnapshot>"
+          }
+        ],
+        "test_coverage": 11,
+        "test_scenarios": [
+          "valid output with both limits",
+          "session limit only",
+          "weekly limit only",
+          "no percentages found",
+          "empty output",
+          "percentage clamping (>100%)",
+          "ANSI escape code handling",
+          "extract_pct_after basic",
+          "extract_pct_after missing anchor",
+          "extract_pct_after no digits",
+          "existing RPC tests unmodified"
+        ]
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Fallback chain strategy",
+        "description": "OAuth credentials \u2192 JSON-RPC \u2192 PTY as last resort",
+        "instances": 2,
+        "locations": [
+          "fetch() when no OAuth credentials",
+          "fetch() when token rejected (401/403)"
+        ]
+      },
+      {
+        "pattern": "Timeout wrapper abstraction",
+        "description": "Separate outer timeout function from inner implementation to keep async logic clean",
+        "example": "fetch_via_pty (wrapper) calls pty_exchange (3-second timeout)",
+        "benefit": "Readable error handling for timeout vs failure cases"
+      },
+      {
+        "pattern": "Anchor-based text parsing",
+        "description": "Search for string anchor, trim, parse digits, clamp to valid range",
+        "robustness": "Handles missing anchors, no digits, out-of-range values gracefully"
+      },
+      {
+        "pattern": "Graceful degradation with source tracking",
+        "description": "Each snapshot includes source field ('oauth', 'rpc', 'pty') for debugging",
+        "benefit": "Logs indicate which fallback was successful"
+      },
+      {
+        "pattern": "ANSI escape code resilience",
+        "description": "Parser finds anchors even when ANSI codes are interspersed in output",
+        "test": "test_pty_parse_with_ansi_noise validates this"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "PTY vs pipe behavior mismatch",
+        "description": "codex spawned via piped stdin/stdout behaves differently than real TTY; may not render status screen correctly",
+        "mitigation": "Marked as 'best-effort' in code comments; graceful error handling if output is empty"
+      },
+      {
+        "issue": "Percentage clamping edge case",
+        "description": "PTY output could contain >100% or <0% values; clamping required",
+        "solution": "extract_pct_after clamps to u8 with min(100)"
+      },
+      {
+        "issue": "Process lifecycle management",
+        "description": "Must explicitly kill child process after reading or process lingers",
+        "solution": "kill_on_drop(true) set at spawn; explicit kill() after read loop"
+      },
+      {
+        "issue": "Timeout tuning",
+        "description": "3-second global timeout may be too aggressive or too lenient depending on system load",
+        "evidence": "Code includes 500ms sleep before read + nested 500ms read timeouts",
+        "note": "May need tuning based on actual codex behavior in production"
+      },
+      {
+        "issue": "Incomplete reads from PTY",
+        "description": "Non-blocking read loop with 500ms timeout between chunks; late-arriving output abandoned",
+        "mitigation": "4KB buffer + loop to accumulate output; breaks on EOF or timeout"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "approach_details": {
+      "subtask_id": "subtask-1-3",
+      "description": "Add PTY fallback to CodexProvider fetch() when JSON-RPC fails",
+      "implementation_status": "Complete",
+      "test_validation": "11 new tests; all passing",
+      "integration_points": 2,
+      "backwards_compatibility": "Full (existing RPC path unchanged; PTY only triggered on RPC failure)"
+    },
+    "recommendations": [
+      {
+        "category": "Future Enhancement",
+        "recommendation": "Migrate from pipes to real PTY library (e.g., 'pty-rs' crate) for reliable codex interaction",
+        "rationale": "Current best-effort approach relies on pipes which codex may detect as non-TTY and disable features",
+        "priority": "Medium"
+      },
+      {
+        "category": "Performance Tuning",
+        "recommendation": "Profile actual codex response time under load; adjust 3-second timeout and 500ms sleep/read intervals",
+        "rationale": "Current hardcoded durations may not match real-world latency distribution",
+        "priority": "Low"
+      },
+      {
+        "category": "Observability",
+        "recommendation": "Log which fallback path succeeded (oauth/rpc/pty) and include source field in structured logs",
+        "rationale": "source='pty' already in ProviderSnapshot; extend to telemetry to track fallback frequency",
+        "priority": "Medium"
+      },
+      {
+        "category": "Documentation",
+        "recommendation": "Document the best-effort nature of PTY fallback in user-facing docs; caveat that some codex features may be unavailable",
+        "rationale": "Current code comments explain well; external users should know limitations",
+        "priority": "Low"
+      },
+      {
+        "category": "Robustness",
+        "recommendation": "Consider retry logic with exponential backoff for temporary codex failures (e.g., socket timeouts)",
+        "rationale": "Current implementation is single-shot; transient network issues cause immediate fallback",
+        "priority": "Low"
+      }
+    ],
+    "subtask_id": "subtask-1-3",
+    "session_num": 4,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/providers/codex.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-3"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

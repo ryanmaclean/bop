@@ -1,0 +1,30 @@
+{
+  "files_to_modify": {},
+  "files_to_reference": [
+    "./crates/bop-cli/src/merge_gate.rs",
+    "./crates/bop-cli/src/main.rs",
+    "./Makefile"
+  ],
+  "patterns": {
+    "binary_location": "Binary is built at ./target/debug/bop after cargo build",
+    "command_pattern": "./target/debug/bop merge-gate --once runs one pass",
+    "state_directories": "Cards move from done/ to merged/ or failed/"
+  },
+  "existing_implementations": {
+    "description": "Merge-gate is fully implemented in ./crates/bop-cli/src/merge_gate.rs",
+    "relevant_files": [
+      "./crates/bop-cli/src/merge_gate.rs",
+      "./Makefile"
+    ],
+    "commands": {
+      "build": "cargo build",
+      "list": "./target/debug/bop list --state done",
+      "merge_gate": "./target/debug/bop merge-gate --once",
+      "check": "make check"
+    }
+  },
+  "prerequisites": {
+    "cards_present": "5 cards in .cards/team-arch/done/ and 5 in .cards/team-quality/done/",
+    "binary_exists": "cargo build must complete successfully"
+  }
+}

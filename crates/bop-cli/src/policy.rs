@@ -266,8 +266,10 @@ pub fn policy_check_card(
 ) -> anyhow::Result<()> {
     // Run staged policy check in the repo root. Card-specific meta checks
     // (scope, decision records) are handled by the merge-gate acceptance criteria.
-    let git_root = find_git_root(cards_root)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| cards_root.to_path_buf()));
+    // If cards_root is not inside a git repo, skip the policy check silently.
+    let Some(git_root) = find_git_root(cards_root) else {
+        return Ok(());
+    };
     let result = run_staged_policy_check(&git_root)?;
     if !result.ok {
         let msg = result.reasons.join("; ");

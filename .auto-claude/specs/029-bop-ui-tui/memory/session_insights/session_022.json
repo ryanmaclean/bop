@@ -1,0 +1,135 @@
+{
+  "session_number": 22,
+  "timestamp": "2026-03-07T20:38:18.106013+00:00",
+  "subtasks_completed": [
+    "subtask-6-4"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/ui/app.rs",
+        "changes": [
+          "Added terminal_width: u16 and terminal_height: u16 fields to App struct",
+          "Implemented on_resize(width, height) method to store new dimensions",
+          "Implemented is_minimal_height() predicate (height < 10)",
+          "Implemented visible_column_indices() to compute layout-safe columns with priority-based hiding (merged \u2192 done)",
+          "Added required_width() helper function to calculate minimum width for visible columns",
+          "Initial terminal size queried at startup with crossterm::terminal::size() fallback to 80\u00d724",
+          "Added 8 comprehensive unit tests covering resize scenarios, minimal height detection, and column visibility logic"
+        ]
+      },
+      {
+        "file": "crates/bop-cli/src/ui/input.rs",
+        "changes": [
+          "Updated test helper app instantiation to initialize terminal_width: 120, terminal_height: 40"
+        ]
+      },
+      {
+        "file": "crates/bop-cli/src/ui/mod.rs",
+        "changes": [
+          "Updated AppEvent::Resize(w, h) handler to call app.on_resize(w, h)",
+          "Added frame area dimensions sync to App state in draw() function",
+          "Implemented render_minimal_status() function for height < 10 constraint",
+          "Minimal status displays: 'bop \u00b7 P:N R:N D:N F:N M:N \u00b7 {mode}' as single-line fallback",
+          "Updated draw() docstring to document minimal mode behavior"
+        ]
+      },
+      {
+        "file": "crates/bop-cli/src/ui/widgets/kanban.rs",
+        "changes": [
+          "render_kanban() now calls app.visible_column_indices() to filter columns before layout",
+          "Early return if visible columns list is empty",
+          "Layout constraints updated to use only visible columns",
+          "Updated function docstring to document column hiding behavior"
+        ]
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Dual-store terminal dimensions",
+        "description": "Terminal width/height stored both in App state and synced from frame area at render time. Ensures consistency across state machine and UI rendering."
+      },
+      {
+        "pattern": "Progressive degradation UI",
+        "description": "Full kanban layout for height \u2265 10; minimal single-line status bar for height < 10. Maintains usability in extremely constrained terminal sizes (split panes, embedded terminals)."
+      },
+      {
+        "pattern": "Priority-based layout hiding",
+        "description": "When terminal width insufficient, columns hidden in fixed priority order: merged (lowest), then done, keeping essential pending/running/failed visible longest."
+      },
+      {
+        "pattern": "Lazy layout recalculation",
+        "description": "Layout recomputed at render time (visible_column_indices) rather than on every resize event. Ratatui cell-level diff handles incremental screen updates."
+      },
+      {
+        "pattern": "Const-based layout metrics",
+        "description": "MIN_COL_WIDTH (15), COLLAPSED_COL_WIDTH (3), and HIDE_PRIORITY array defined as function-scoped consts. Controls column width requirements and hiding order."
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Initial terminal size unavailable at startup",
+        "mitigation": "crossterm::terminal::size() queried with fallback to 80\u00d724 default when unavailable (e.g. non-TTY contexts)"
+      },
+      {
+        "issue": "Collapsed vs non-collapsed width asymmetry",
+        "impact": "Collapsed columns (3 chars) require far less width than expanded (15 chars). Required_width() must differentiate to prevent premature column hiding"
+      },
+      {
+        "issue": "Panic on zero-height or zero-width render area",
+        "mitigation": "render_minimal_status() includes early return guard: `if area.height == 0 || area.width == 0 { return; }`"
+      },
+      {
+        "issue": "Frame area dimensions vs App state divergence",
+        "mitigation": "draw() syncs app.terminal_width/height from frame.area() on every render to keep in sync"
+      },
+      {
+        "issue": "Empty visible columns vector edge case",
+        "mitigation": "render_kanban() early-returns if visible.is_empty() to prevent layout panic"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "approach_details": "Resize handling fully implemented across event loop, state management, and rendering pipeline. Terminal dimensions tracked in App state, retrieved from crossterm at startup, updated via AppEvent::Resize, and synced from frame area at render time. Layout dynamically hides low-priority columns (merged \u2192 done) when width insufficient. Minimal single-line status bar (P:N R:N D:N F:N M:N format) renders for height < 10. Full kanban board uses visible_column_indices() to filter columns before rendering. Comprehensive test suite (8 tests) covers edge cases: minimal height boundary (9 vs 10), wide terminal (all columns visible), narrow terminal (merged hidden first, then done), and width calculation correctness.",
+    "recommendations": [
+      {
+        "priority": "medium",
+        "category": "Configurability",
+        "suggestion": "Extract MIN_COL_WIDTH and COLLAPSED_COL_WIDTH to app-level config or environment variables to allow users to tune layout constraints without recompilation"
+      },
+      {
+        "priority": "low",
+        "category": "Performance",
+        "suggestion": "Profile visible_column_indices() on very large terminal widths (e.g. 500+ columns) to verify no O(n\u00b2) behavior in loop; consider memoization if resize frequency is high"
+      },
+      {
+        "priority": "low",
+        "category": "UX Enhancement",
+        "suggestion": "Add animated column transitions (fade-in/fade-out or slide) when columns are hidden/revealed due to resize, to provide visual feedback of layout change"
+      },
+      {
+        "priority": "medium",
+        "category": "Documentation",
+        "suggestion": "Document minimal status bar format (`bop \u00b7 P:N R:N D:N F:N M:N \u00b7 {mode}`) in user guide and help text for users encountering very small terminals"
+      },
+      {
+        "priority": "low",
+        "category": "Observability",
+        "suggestion": "Add telemetry or debug logging for resize event frequency in constrained environments (e.g. split panes) to detect pathological resize storms"
+      }
+    ],
+    "subtask_id": "subtask-6-4",
+    "session_num": 22,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/ui/app.rs",
+      "crates/bop-cli/src/ui/input.rs",
+      "crates/bop-cli/src/ui/mod.rs",
+      "crates/bop-cli/src/ui/widgets/kanban.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-6-4"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

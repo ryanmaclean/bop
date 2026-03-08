@@ -1,0 +1,138 @@
+{
+  "session_number": 10,
+  "timestamp": "2026-03-07T19:47:29.316454+00:00",
+  "subtasks_completed": [
+    "subtask-4-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/ui/app.rs",
+        "changes": "Added `detail_scroll: usize` field to App struct to track vertical scroll offset in Detail overlay. Initialized to 0 in constructor.",
+        "rationale": "Maintains scrollable state for Detail mode overlay independent of main kanban navigation state."
+      },
+      {
+        "file": "crates/bop-cli/src/ui/input.rs",
+        "changes": "Implemented `handle_detail()` function for Detail mode key handling. Added 'd' keybind in Normal mode to enter Detail (if card selected). Implemented j/k/Esc navigation. Added 8 unit tests covering mode entry/exit, scroll up/down, boundary conditions, and mode isolation.",
+        "rationale": "Centralizes Detail mode input logic; comprehensive tests ensure mode transition safety and scroll invariants."
+      },
+      {
+        "file": "crates/bop-cli/src/ui/mod.rs",
+        "changes": "Added import for `render_detail` widget. Integrated Detail overlay rendering into draw loop\u2014renders on top of kanban when `mode == Detail` with conditional card_dir lookup.",
+        "rationale": "Hooks Detail widget into main render pipeline only when active, ensuring overlay appears above kanban layer."
+      },
+      {
+        "file": "crates/bop-cli/src/ui/widgets/detail.rs",
+        "changes": "NEW 702-line implementation of detail overlay. Features: AC plan JSON parser (read_ac_plan), status glyphs (\u2713/\u25b6/\u2717/\u00b7), RGB color mapping, progress bar renderer (Unicode blocks), duration formatter, scrollable content line builder, main render_detail() function using ratatui Clear + Paragraph.",
+        "rationale": "Complete detail widget implementation with plan tree support, scrolling, and graceful degradation when AC plan missing."
+      },
+      {
+        "file": "crates/bop-cli/src/ui/widgets/mod.rs",
+        "changes": "Added pub use export for render_detail function.",
+        "rationale": "Makes detail renderer accessible to main mod.rs draw loop."
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "name": "JSON plan parsing with fallback",
+        "description": "AC plan parsing returns Option<AcPlan>, tolerant of missing/malformed JSON. Extracts phases and subtasks with `.unwrap_or()` defaults for missing fields. Returns None if file doesn't exist or parse fails\u2014detail overlay gracefully shows only card metadata without plan tree.",
+        "benefit": "Robust against incomplete or missing plan data; Detail mode works even without AC plan present."
+      },
+      {
+        "name": "Scrollable overlay using ratatui Clear + Paragraph",
+        "description": "Detail overlay uses ratatui::widgets::Clear to erase background, Paragraph with Wrap for scrollable content, positioned on right 50% via Rect constraints. Scroll offset applied via paragraph.scroll() before rendering.",
+        "benefit": "Standard ratatui pattern for overlays; Wrap handles line wrapping, scroll() handles viewport clipping."
+      },
+      {
+        "name": "Status glyph + color lookup tables",
+        "description": "Two companion functions\u2014status_glyph() and status_color()\u2014map status strings to Unicode glyphs and RGB color tuples (green=completed, amber=in_progress, red=failed, gray=pending).",
+        "benefit": "Consistent visual encoding across detail widget; easy to extend with new statuses."
+      },
+      {
+        "name": "Mode-based input isolation with empty handler",
+        "description": "Each Mode has its own handler (handle_normal, handle_detail). Unbound keys in a mode fall through to `_ => {}` comment noting future subtasks. Detail mode does NOT process Normal mode keys (e.g., 'l' for column movement).",
+        "benefit": "Clear separation of concerns; prevents accidental command execution in wrong mode."
+      },
+      {
+        "name": "Progress bar with percentage formatting",
+        "description": "build_progress_bar() calculates filled/empty Unicode block counts, color-codes by percentage threshold (blue <40%, amber 40-75%, green \u226575%), formats as `\u2588\u2588\u2588\u2588\u2591\u2591\u2591\u2591 NNN%`.",
+        "benefit": "Visual progress feedback with semantic coloring; width adapts to available space."
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Detail scroll state must reset on mode entry",
+        "details": "When 'd' key enters Detail mode, `detail_scroll` is reset to 0. Without this, resuming Detail mode would preserve previous scroll position\u2014confusing UX.",
+        "mitigation": "Line 70 in input.rs: `app.detail_scroll = 0;` before `app.mode = Mode::Detail;`"
+      },
+      {
+        "gotcha": "Card selection check before Detail entry",
+        "details": "Detail mode only activates if `app.selected_card().is_some()`. Pressing 'd' with no selected card (empty column) is a no-op. Without this, rendering would panic on unwrap.",
+        "mitigation": "Conditional in handle_normal: `if app.selected_card().is_some() { ... }`"
+      },
+      {
+        "gotcha": "AC plan file path must be in card directory",
+        "details": "read_ac_plan() looks for `implementation_plan.json` in the card's root dir (card_dir.join(...)). The card_dir is found via paths::find_card() call in mod.rs\u2014must pass Some or None safely.",
+        "mitigation": "Render call passes `card_dir.as_deref()` to safely convert Option<PathBuf> to Option<&Path>."
+      },
+      {
+        "gotcha": "Progress bar width calculation must account for percentage text",
+        "details": "build_progress_bar() reserves 6 chars for ` NNN%` suffix. If available width is very small (<6), saturating_sub prevents overflow.",
+        "mitigation": "Line 156: `bar_width = width.saturating_sub(6).min(30)`"
+      },
+      {
+        "gotcha": "serde_json dependency required",
+        "details": "Detail widget uses serde_json for plan parsing. Must be in Cargo.toml dependencies for crates/bop-cli.",
+        "mitigation": "Assumed serde_json already present (common in Rust CLI projects); verify Cargo.toml includes it."
+      }
+    ],
+    "approach_outcome": "SUCCESS - Subtask 4-1 completed. Implemented full Detail overlay widget with: (1) AC plan JSON parser extracting phases/subtasks with fallback for missing files, (2) Scrollable ratatui overlay using Clear + Paragraph, (3) Status glyphs (\u2713/\u25b6/\u2717/\u00b7) with RGB color mapping, (4) Progress bar with semantic coloring, (5) Input handler for d/j/k/Esc keybinds, (6) 8 unit tests covering mode transitions, scroll boundaries, and mode isolation. Detail overlay renders on right 50% of body only when mode==Detail and card is selected. All previous test suite passes.",
+    "recommendations": [
+      {
+        "title": "Cache AC plan parsing",
+        "description": "Currently read_ac_plan() is called every render frame if Detail mode active. Consider caching parsed AcPlan in App struct (Arc<Option<AcPlan>>) and only re-parse on card change.",
+        "priority": "low",
+        "timing": "Post-MVP optimization"
+      },
+      {
+        "title": "Enhance AC plan tree rendering",
+        "description": "Current implementation flattens phases/subtasks into lines. Consider indentation (Phase: | \u2514\u2500 subtask) and tree-walk rendering for hierarchical visual structure. Could match vibekanban-cli's kanban-tui reference tree styling.",
+        "priority": "medium",
+        "timing": "Subtask 4-4 or later (spec 029 refinement)"
+      },
+      {
+        "title": "Add plan status rollup",
+        "description": "Phase-level status could be computed as min(subtask statuses)\u2014show phase as 'completed' only if all subtasks complete. Would give quick overview of phase progress.",
+        "priority": "low",
+        "timing": "Subtask 4-4 or later"
+      },
+      {
+        "title": "Test with real AC plan JSON",
+        "description": "Current tests use synthetic card data. Add integration test with an actual implementation_plan.json file from a live bop card to verify plan parsing and rendering.",
+        "priority": "medium",
+        "timing": "Subtask 4-4 (dogfood test)"
+      },
+      {
+        "title": "Coordinate footer keybinds with action subtasks",
+        "description": "Subtasks 4-2 and 4-3 will wire F3 (logs), p (pause), r (retry). Ensure footer widget footer.rs displays correct keybind hints for Detail mode. Current comment notes these are pending.",
+        "priority": "high",
+        "timing": "Subtasks 4-2 and 4-3 coordination"
+      }
+    ],
+    "subtask_id": "subtask-4-1",
+    "session_num": 10,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/ui/app.rs",
+      "crates/bop-cli/src/ui/input.rs",
+      "crates/bop-cli/src/ui/mod.rs",
+      "crates/bop-cli/src/ui/widgets/detail.rs",
+      "crates/bop-cli/src/ui/widgets/mod.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-4-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

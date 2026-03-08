@@ -1,0 +1,28 @@
+auto-claude: subtask-2-2 - Fix factory WatchPaths: replace polling with --once flag
+
+During verification of the WatchPaths event-driven trigger, discovered that
+factory.rs had WatchPaths configured but ProgramArguments still used polling
+mode (--poll-ms 500), defeating the purpose of event-driven execution.
+
+Changes to crates/bop-cli/src/factory.rs:
+- Replaced --poll-ms 500 with --once flag (one-shot execution)
+- Removed --reap-ms 1000 (only needed in polling mode)
+- Added --vcs-engine jj (required for jj-based workflow)
+
+The dispatcher now correctly:
+1. Fires on launchd WatchPaths event (card appears in pending/)
+2. Runs once (--once flag) to process available cards
+3. Exits
+4. Launchd re-arms for next filesystem event
+
+This satisfies the TRIZ constraint: no polling loops; use OS events.
+
+Verification:
+✓ cargo build succeeds
+✓ WatchPaths present in generated plist (6 directories)
+✓ KeepAlive removed (no longer polling daemon)
+✓ --once flag present in ProgramArguments
+✓ Event-driven pattern matches icons.rs reference
+
+Files modified:
+- crates/bop-cli/src/factory.rs (lines 66-79)

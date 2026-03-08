@@ -1,0 +1,101 @@
+{
+  "session_number": 4,
+  "timestamp": "2026-03-07T18:07:29.441537+00:00",
+  "subtasks_completed": [
+    "subtask-2-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/render/dumb.rs",
+        "changes": "Added 452 lines of comprehensive unit tests",
+        "scope": "Tests for DumbRenderer::render_section_header, render_card_row, render_progress, render_footer, and format_duration; integration test for full render_board",
+        "complexity": "Medium - 45+ test cases covering nominal cases, edge cases, and invariants"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Test helper functions",
+        "description": "card() builder creates CardView with sensible defaults; assert_ascii_only() and assert_no_ansi() verify output constraints",
+        "evidence": "Lines 91-107, 110-118, 121-128"
+      },
+      {
+        "pattern": "Sectioned test organization",
+        "description": "Tests grouped by logical component (headers, markers, content, progress, footer, duration) with clear comment separators",
+        "evidence": "Comment sections '\u2500\u2500 Section header \u2500\u2500', '\u2500\u2500 Card row markers \u2500\u2500', etc."
+      },
+      {
+        "pattern": "Invariant verification",
+        "description": "Every render function tested for ASCII-only and ANSI-free output as mandatory constraints",
+        "evidence": "assert_ascii_only() and assert_no_ansi() called in tests for all public functions"
+      },
+      {
+        "pattern": "Edge case coverage",
+        "description": "Tests verify zero values, optional fields, boundary conditions (0%, 100%), and field visibility rules",
+        "evidence": "row_hides_zero_progress, header_zero_count, progress_bar_zero, progress_bar_full"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Zero progress hidden from display",
+        "description": "When progress is 0%, the percentage marker should not appear in card rows (row_hides_zero_progress test)",
+        "impact": "Display clarity - avoids clutter for cards with unknown progress"
+      },
+      {
+        "gotcha": "Exit code display conditional on state",
+        "description": "Exit codes only shown when state is 'failed'; hidden for 'done' or other successful states (row_hides_exit_code_on_non_failed test)",
+        "impact": "State-dependent output formatting prevents misleading information"
+      },
+      {
+        "gotcha": "Strict ASCII constraint",
+        "description": "No box-drawing, block characters, or unicode allowed - verified by assert_ascii_only checking each character is ASCII",
+        "impact": "Ensures compatibility with lowest-common-denominator terminals"
+      },
+      {
+        "gotcha": "Duration formatting MM:SS",
+        "description": "format_duration(134) yields '2m14s' not '2m' - always includes seconds with zero-padding",
+        "impact": "Consistent time display format across all durations"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "approach_details": {
+      "strategy": "Implemented comprehensive unit test suite covering all public render functions in DumbRenderer",
+      "execution": "Added 45+ test cases organized into 6 logical sections with helper functions for common assertions",
+      "verification": "Tests verify correct marker format ([>], [ ], [x], [!]), ASCII-only output, absence of ANSI sequences, optional field visibility, and footer aggregation",
+      "integration": "Full integration test (full_board_ascii_only) verifies render_board() assembles all components correctly with proper section headers and stats"
+    },
+    "recommendations": [
+      {
+        "area": "Test utilities extraction",
+        "suggestion": "Extract assert_ascii_only() and assert_no_ansi() to shared test module; these patterns will recur in ColorRenderer and other render backends",
+        "priority": "medium"
+      },
+      {
+        "area": "Template reuse",
+        "suggestion": "Use card() builder pattern as template for other render test suites; reduces boilerplate for CardView construction across tests",
+        "priority": "low"
+      },
+      {
+        "area": "Coverage metrics",
+        "suggestion": "Run `cargo tarpaulin` to confirm 100% line/branch coverage of render/dumb.rs; integration test at end is good practice but verify nothing is skipped",
+        "priority": "medium"
+      },
+      {
+        "area": "Future renderers",
+        "suggestion": "ColorRenderer and UnicodeRenderer can adopt same test structure (header/marker/content/progress/footer sections) with invariant assertions swapped (colors allowed, unicode allowed)",
+        "priority": "low"
+      }
+    ],
+    "subtask_id": "subtask-2-1",
+    "session_num": 4,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/render/dumb.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-2-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

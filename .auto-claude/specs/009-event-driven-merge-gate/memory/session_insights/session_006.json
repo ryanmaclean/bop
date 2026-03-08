@@ -1,0 +1,142 @@
+{
+  "session_number": 6,
+  "timestamp": "2026-03-06T16:24:38.963036+00:00",
+  "subtasks_completed": [
+    "subtask-2-2"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/main.rs",
+        "changes": [
+          "Added platform-specific function: `install_hooks_macos()` (~110 lines)",
+          "Added platform-specific stub: `install_hooks_linux()` for future implementation",
+          "Updated `Command::InstallHooks` handler to dispatch to platform-specific implementations",
+          "Used conditional compilation (#[cfg(target_os = ...)]) for platform gating"
+        ],
+        "loc_added": 120,
+        "complexity": "medium - path resolution, XML parsing, launchctl integration"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Defensive path resolution",
+        "description": "Multiple fallback strategies to resolve repo root: canonicalize() with unwrap_or(), parent() checks, and explicit .cards directory detection",
+        "location": "install_hooks_macos() lines 350-365"
+      },
+      {
+        "pattern": "Dynamic configuration discovery",
+        "description": "Scans .cards/ directory for team-* subdirectories to automatically populate WatchPaths in plist, enabling multi-team support without hardcoding",
+        "location": "install_hooks_macos() lines 376-387"
+      },
+      {
+        "pattern": "String-based XML/plist templating",
+        "description": "Uses string find/replace operations to modify plist content: placeholder replacement and WatchPaths array injection",
+        "location": "install_hooks_macos() lines 355-371"
+      },
+      {
+        "pattern": "Platform-specific conditional compilation",
+        "description": "Uses #[cfg(target_os = ...)] attributes for macOS/Linux branching with unsupported platform error message",
+        "location": "install_hooks_macos(), install_hooks_linux(), Command::InstallHooks match arms"
+      },
+      {
+        "pattern": "Lazy subprocess execution",
+        "description": "Uses std::process::Command to invoke launchctl with output capture and status checking, logs warning if load fails",
+        "location": "install_hooks_macos() lines 409-417"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Path canonicalization side effects",
+        "description": "canonicalize() may fail in test/temp directories; code uses unwrap_or_else with fallback to preserve original path",
+        "severity": "medium",
+        "mitigation": "Already implemented with fallback logic"
+      },
+      {
+        "gotcha": "String-based XML manipulation fragility",
+        "description": "Parsing plist with substring find/replace could break if template structure changes (e.g., newlines, spacing, key order). No XML parser used.",
+        "severity": "medium",
+        "mitigation": "Template format is fixed; brittle but works if template structure stable"
+      },
+      {
+        "gotcha": "WatchPaths array replacement logic",
+        "description": "Manual substring splicing to inject WatchPaths XML: finds <array> tag after WatchPaths key, replaces content up to </array>. Assumes specific template structure.",
+        "severity": "medium",
+        "mitigation": "Works for current template; would need refactoring if template evolves"
+      },
+      {
+        "gotcha": "Binary path resolution at runtime",
+        "description": "Uses current_exe() to determine bop binary path, replaces placeholder in plist. If binary moves, plist becomes stale.",
+        "severity": "low",
+        "mitigation": "Fallback to /usr/local/bin/bop if current_exe() fails"
+      },
+      {
+        "gotcha": "launchctl load non-fatal failures",
+        "description": "launchctl load failure is logged as warning, not error; installation proceeds. User may not notice if loading fails.",
+        "severity": "low",
+        "mitigation": "Stderr message printed; user can verify with `launchctl list sh.bop.merge-gate`"
+      },
+      {
+        "gotcha": "File name conversion assumption",
+        "description": "Uses into_string() on OsString without error handling in team-* discovery; silently skips directories with non-UTF8 names",
+        "severity": "low",
+        "mitigation": "Acceptable for typical team-* naming; non-UTF8 names rare"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "summary": "Successfully implemented macOS installation logic that registers a launchctl plist for the bop merge-gate daemon. Implementation handles multi-team setups through dynamic WatchPaths discovery, includes proper error context, and establishes platform-specific patterns for future Linux systemd support.",
+      "key_achievements": [
+        "Dynamic team directory discovery for WatchPaths - no hardcoding needed",
+        "Robust path resolution with fallbacks for various deployment scenarios",
+        "LaunchAgent registration with -w flag for persistent loading",
+        "Platform-gated compilation with error for unsupported platforms",
+        "Context-rich error messages via anyhow"
+      ],
+      "scope_completed": "Full macOS installation logic; Linux stub prepared for future implementation"
+    },
+    "recommendations": [
+      {
+        "priority": "medium",
+        "recommendation": "Replace string-based plist manipulation with xml-rs or plist crate",
+        "rationale": "Current substring-based parsing is fragile if template structure changes. Proper XML parsing would be more maintainable.",
+        "effort": "medium - would require adding dependency and refactoring template replacement logic"
+      },
+      {
+        "priority": "medium",
+        "recommendation": "Add launchctl load failure as hard error instead of warning",
+        "rationale": "If launchctl load fails, the daemon never starts. Silent-fail is confusing for users.",
+        "effort": "low - change return type to Result and propagate error"
+      },
+      {
+        "priority": "low",
+        "recommendation": "Implement Linux systemd installation (stub currently present)",
+        "rationale": "Linux support needed for full cross-platform daemon deployment",
+        "effort": "high - requires systemd user service understanding and testing"
+      },
+      {
+        "priority": "low",
+        "recommendation": "Add integration test for macOS installation logic",
+        "rationale": "Template path resolution, plist generation, and launchctl invocation are difficult to test in CI without macOS runner",
+        "effort": "medium - would need macOS-specific test harness"
+      },
+      {
+        "priority": "low",
+        "recommendation": "Validate plist output before loading with launchctl",
+        "rationale": "Catch malformed plist early rather than relying on launchctl to reject it",
+        "effort": "low - use plist crate to validate before write"
+      }
+    ],
+    "subtask_id": "subtask-2-2",
+    "session_num": 6,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/main.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-2-2"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

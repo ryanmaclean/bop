@@ -1,0 +1,28 @@
+{
+  "files_to_modify": {},
+  "files_to_create": {
+    "bop": ["crates/bop-cli/tests/serve_smoke.rs"]
+  },
+  "files_to_reference": [
+    "crates/bop-cli/tests/merge_gate_harness.rs",
+    "crates/bop-cli/tests/dispatcher_harness.rs",
+    "crates/bop-cli/src/serve.rs"
+  ],
+  "patterns": {
+    "integration_test_pattern": "Integration tests use repo_root(), build_jc(), bop_bin() helper functions and tempfile::tempdir() for isolation",
+    "test_execution": "Tests run the actual bop binary via Command::new(bop_bin())",
+    "card_verification": "Use fs::read_dir to check for card existence in .cards/pending/ directory"
+  },
+  "existing_implementations": {
+    "description": "serve.rs has unit tests using Tower oneshot, but the smoke test is marked #[ignore] due to port binding race conditions",
+    "relevant_files": [
+      "crates/bop-cli/src/serve.rs",
+      "crates/bop-cli/tests/merge_gate_harness.rs"
+    ]
+  },
+  "test_strategy": {
+    "approach": "Create a new integration test file that spawns the bop serve process, waits for it to be ready, POSTs a card creation request via HTTP client (reqwest), verifies the card directory exists, and cleans up",
+    "port_handling": "Use a fixed test port (18080) to avoid race conditions",
+    "process_management": "Spawn server as child process, wait for readiness, kill after test"
+  }
+}

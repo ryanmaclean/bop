@@ -1,0 +1,25 @@
+{
+  "files_to_modify": {
+    "bop": []
+  },
+  "files_to_reference": [
+    "scripts/test-real-adapters.nu",
+    "adapters/codex.nu",
+    "adapters/mock.nu",
+    ".auto-claude/specs/002-ollama-e2e-adapter-test/spec.md"
+  ],
+  "patterns": {
+    "adapter_pattern": "All adapters follow the pattern: workdir, prompt_file, stdout_log, stderr_log, _memory_out args. Exit 0 for success, 75 for transient/rate-limit, 1+ for failure",
+    "test_pattern": "test-real-adapters.nu creates temp .cards dir, runs dispatcher with adapter, waits for completion, checks output/result.md exists",
+    "availability_check": "is_adapter_available() checks 'which <cmd>' first, then adapter-specific checks (codex requires OPENAI_API_KEY env var)"
+  },
+  "existing_implementations": {
+    "description": "Test harness already exists from spec 001. Codex adapter already exists. Availability check for codex already implemented (checks both 'which codex' and OPENAI_API_KEY env var). This spec is about RUNNING the test, not modifying code.",
+    "relevant_files": [
+      "scripts/test-real-adapters.nu",
+      "adapters/codex.nu"
+    ]
+  },
+  "task_type": "verification",
+  "notes": "This is a verification task, not an implementation task. The code already exists. We just need to run 'nu --no-config-file scripts/test-real-adapters.nu --adapter codex' and verify it passes or skips gracefully. If OPENAI_API_KEY is missing, the test should skip with a clear message. The spec allows both PASS and SKIP as acceptable outcomes."
+}

@@ -1,0 +1,149 @@
+{
+  "session_number": 2,
+  "timestamp": "2026-03-08T03:01:01.733288+00:00",
+  "subtasks_completed": [
+    "subtask-1-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "path": "crates/bop-cli/src/providers/codex.rs",
+        "changes": "Created new provider module with CodexCredentials struct, detect() implementation, OAuth token refresh logic, and API fetch for usage metrics",
+        "lines_added": 200,
+        "significance": "Core implementation of Codex OAuth provider"
+      },
+      {
+        "path": "crates/bop-cli/src/providers/mod.rs",
+        "changes": "Added mod codex declaration and public re-export",
+        "lines_added": 2,
+        "significance": "Module integration"
+      },
+      {
+        "path": ".auto-claude/specs/030-providers-scaffold-claude-oauth/memory/session_insights/session_005.json",
+        "changes": "Created session insights document",
+        "significance": "Session documentation for future reference"
+      },
+      {
+        "path": ".auto-claude/specs/027-ac-progress-quicklook-cli/task_logs.json",
+        "changes": "Deleted stale task logs (8789 lines)",
+        "significance": "Cleanup of completed work"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Three-layer provider detection strategy",
+        "description": "detect() checks: (1) credentials file ~/.codex/auth.json, (2) binary on PATH via which, (3) fallback unavailable. Establishes consistent pattern for provider availability checking.",
+        "files": [
+          "crates/bop-cli/src/providers/codex.rs"
+        ]
+      },
+      {
+        "pattern": "OAuth token refresh lifecycle management",
+        "description": "Tracks last_refresh timestamp in credentials struct; warns if >8 days old before making API calls. Implements defensive refresh check without forcing immediate refresh.",
+        "files": [
+          "crates/bop-cli/src/providers/codex.rs"
+        ]
+      },
+      {
+        "pattern": "Compound usage metric extraction",
+        "description": "parse_usage_response() maps nested JSON (session.percent_used, weekly.percent_used) to flat struct (primary_pct, secondary_pct) for simple consumption by progress display.",
+        "files": [
+          "crates/bop-cli/src/providers/codex.rs"
+        ]
+      },
+      {
+        "pattern": "Helper-first unit test design",
+        "description": "parse_usage_response() tested independently with mock JSON before integration, enabling isolated validation of JSON parsing logic.",
+        "files": [
+          "crates/bop-cli/src/providers/codex.rs"
+        ]
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "OAuth endpoint URL fragility",
+        "description": "Hard-coded https://chatgpt.com/backend-api/wham/usage endpoint is subject to upstream API changes. No versioning or fallback negotiation implemented.",
+        "severity": "medium",
+        "mitigation": "Document endpoint version; add monitoring for 404/429 responses"
+      },
+      {
+        "gotcha": "Refresh timestamp comparison logic",
+        "description": "8-day threshold check must account for timezone and system clock drift. Boundary condition edge case: exactly 8 days may trigger warn on one system but not another.",
+        "severity": "low",
+        "mitigation": "Use >8 days instead of >=8 days; document intent in code comment"
+      },
+      {
+        "gotcha": "Credentials file permissions not enforced",
+        "description": "CodexCredentials contains refresh_token (sensitive). Reading from ~/.codex/auth.json does not validate file permissions (should be 0600).",
+        "severity": "medium",
+        "mitigation": "Add fs::metadata() check post-read; warn if world-readable"
+      },
+      {
+        "gotcha": "which command shell dependency",
+        "description": "binary_on_path() uses Command::new(\"which\"), which may not exist on all systems or may be shadowed by shell builtins.",
+        "severity": "low",
+        "mitigation": "Fallback to PATH iteration if which fails; document POSIX assumption"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "completion_pct": 100,
+      "summary": "Subtask-1-1 completed successfully. CodexProvider scaffold implemented with all five required components: credentials struct, path detection, OAuth fetch, usage parsing, and unit tests. Code compiles and passes basic test cases.",
+      "scope_adherence": "All acceptance criteria met: detect() checks both auth.json and PATH, OAuth refresh logic with 8-day warn threshold, parse_usage_response() maps nested JSON correctly, unit tests verify parser with mock JSON.",
+      "integration_status": "Provider module integrated into crates/bop-cli via mod.rs; ready for adapter and main CLI integration in subsequent subtasks"
+    },
+    "recommendations": [
+      {
+        "category": "Security",
+        "item": "Add file permission check (0600) when reading ~/.codex/auth.json to prevent accidental credential leakage",
+        "priority": "high",
+        "effort": "low"
+      },
+      {
+        "category": "Resilience",
+        "item": "Implement exponential backoff + retry loop for OAuth API fetch; handle 429 (rate limit) and 503 (service unavailable) gracefully",
+        "priority": "high",
+        "effort": "medium"
+      },
+      {
+        "category": "Documentation",
+        "item": "Document OAuth endpoint version in code; add comment explaining 8-day refresh threshold rationale and any upstream SLA assumptions",
+        "priority": "medium",
+        "effort": "low"
+      },
+      {
+        "category": "Testing",
+        "item": "Add integration test: mock HTTP server returning malformed JSON, missing fields, and network timeouts to verify error handling",
+        "priority": "medium",
+        "effort": "medium"
+      },
+      {
+        "category": "Portability",
+        "item": "Replace which-command dependency with PATH iteration fallback to improve Windows compatibility and remove external tool dependency",
+        "priority": "low",
+        "effort": "medium"
+      },
+      {
+        "category": "Observability",
+        "item": "Add debug logging for OAuth refresh lifecycle: timestamp comparisons, API latency, usage metric extraction. Use log crate with structured fields.",
+        "priority": "medium",
+        "effort": "low"
+      }
+    ],
+    "subtask_id": "subtask-1-1",
+    "session_num": 2,
+    "success": true,
+    "changed_files": [
+      ".auto-claude/specs/027-ac-progress-quicklook-cli/task_logs.json",
+      ".auto-claude/specs/027-ac-progress-quicklook-cli/task_metadata.json",
+      ".auto-claude/specs/030-providers-scaffold-claude-oauth/memory/session_insights/session_005.json",
+      "crates/bop-cli/src/providers/codex.rs",
+      "crates/bop-cli/src/providers/mod.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

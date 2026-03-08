@@ -1,0 +1,82 @@
+{
+  "session_number": 11,
+  "timestamp": "2026-03-07T13:00:12.363433+00:00",
+  "subtasks_completed": [
+    "subtask-6-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/cards.rs",
+        "insights": [
+          "Orphan detection logic refined to distinguish between write-ahead logs (events.jsonl) and meaningful work logs",
+          "Changed from simple presence check (.next().is_some()) to filtered iteration that excludes events.jsonl",
+          "Uses iterator chaining with flatten() and any() to filter directory entries while checking file types",
+          "Variable renamed from has_logs to has_meaningful_logs for clarity"
+        ],
+        "impact": "critical"
+      },
+      {
+        "file": "crates/bop-core/src/lib.rs",
+        "insights": [
+          "Two assertion statements reformatted for multi-line readability (no functional changes)",
+          "Assertions in test_meta_checksum function now span multiple lines per style guide",
+          "Pure formatting improvement, no logic modification"
+        ],
+        "impact": "minor"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "WAL vs Work Artifact Distinction",
+        "description": "events.jsonl (write-ahead log) should not be counted as evidence of work product when determining if a card is orphaned. Storage model uses append-only JSONL for transaction logging but this shouldn't prevent cleanup detection."
+      },
+      {
+        "pattern": "Iterator Filtering Chain",
+        "description": "Using flatten() \u2192 any() with filter predicate to iterate directory entries while simultaneously filtering and type-checking in a single expression",
+        "code": ".any(|e| e.file_name() != \"events.jsonl\" && e.path().is_file())"
+      },
+      {
+        "pattern": "Multi-line Assertion Formatting",
+        "description": "Breaking assertions across multiple lines when message exceeds readability threshold, maintaining consistent style for test code clarity"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "events.jsonl presence was false positive for orphan detection",
+        "explanation": "Previous code counted any log file (including the WAL) as evidence of activity. events.jsonl is created automatically for all cards and should not prevent cleanup of truly orphaned cards.",
+        "impact": "Would prevent proper cleanup of legitimately orphaned cards that had event history"
+      },
+      {
+        "gotcha": "Directory iteration requires explicit file type checking",
+        "explanation": "Not all entries in logs/ directory are files; must call .is_file() to distinguish regular files from directories",
+        "mitigation": "Added && e.path().is_file() check in filter predicate"
+      },
+      {
+        "gotcha": "Iterator exhaustion in original code",
+        "explanation": "Original .next() only checked if ANY entry exists; replaced with .any() to check all entries and apply predicate",
+        "improvement": "New implementation checks all entries against filter condition"
+      }
+    ],
+    "approach_outcome": "SUCCESS - Orphan detection logic corrected to properly ignore events.jsonl when determining if a card is truly orphaned. The fix aligns with the project's storage decision (events.jsonl as write-ahead log, not work artifact). Code formatting improvements applied for consistency. Make check verification successful.",
+    "recommendations": [
+      "Extract a helper function is_meaningful_log_file(path: &Path) -> bool to centralize the 'exclude events.jsonl' logic and improve readability",
+      "Document in code comment what constitutes a 'meaningful log' vs WAL (events.jsonl), referencing storage-decision.md",
+      "Consider adding a test case that verifies an orphaned card with only events.jsonl is correctly identified as orphaned",
+      "If additional log files should be excluded in future (e.g., other WAL formats), the helper function provides a single point of modification",
+      "Review other cleanup/orphan detection code paths to ensure consistent treatment of events.jsonl"
+    ],
+    "subtask_id": "subtask-6-1",
+    "session_num": 11,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/cards.rs",
+      "crates/bop-core/src/lib.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-6-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

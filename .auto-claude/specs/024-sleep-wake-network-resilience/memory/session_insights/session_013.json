@@ -1,0 +1,146 @@
+{
+  "session_number": 13,
+  "timestamp": "2026-03-07T09:34:01.281042+00:00",
+  "subtasks_completed": [
+    "subtask-5-2"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "output/result.md",
+        "change_type": "complete_rewrite",
+        "previous_topic": "Atomic write_meta + Crash Recovery mechanisms",
+        "new_topic": "Sleep/Wake Awareness + Network Resilience",
+        "sections_added": [
+          "Architecture component map with flow diagram",
+          "macOS IOKit power notifications (dedicated OS thread design)",
+          "Linux D-Bus logind stub",
+          "Sleep/Wake state machine with 5-state lifecycle",
+          "Network error detection patterns (14 patterns in adapters, 28 in dispatcher)",
+          "Transient failure auto-retry logic with cooldown",
+          "Exit code conventions (0, 75, 1+)",
+          "Retry count scope and reset semantics"
+        ],
+        "total_lines": "~600 lines (vs 505 before)",
+        "diagram_types": "ASCII architecture maps, state machines, CFRunLoop flow, retry flowchart"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "OS-Specific Thread Management",
+        "detail": "IOKit notifications require dedicated std::thread, not Tokio task, to meet 8-second IOAllowPowerChange deadline"
+      },
+      {
+        "pattern": "Error Code Semantics",
+        "detail": "Exit code 75 (EX_TEMPFAIL) signals transient network failures; retry up to 3 times with 30s cooldown; exit 1+ moves to failed/"
+      },
+      {
+        "pattern": "Network Error Pattern Matching",
+        "detail": "Both adapter layer (14 patterns: 'connection refused', 'ssl connection', etc.) and dispatcher layer (28 patterns) detect transient failures via stderr inspection"
+      },
+      {
+        "pattern": "State Transition Idempotency",
+        "detail": "Card retry count increments only once per episode; resets to 0 on success; saturating_add prevents overflow"
+      },
+      {
+        "pattern": "Multi-Stage Error Detection",
+        "detail": "Adapter detects and signals via exit code 75; dispatcher also checks failure_reason field with is_network_failure() for redundancy"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "IOKit Deadline Enforcement (macOS)",
+        "severity": "critical",
+        "detail": "If IOAllowPowerChange is not called within ~8 seconds of kIOMessageSystemWillSleep, macOS kernel hangs the entire sleep transition for 30 seconds. This is a hard deadline that cannot be violated. Future enhancement: add deadline timer that calls IOAllowPowerChange anyway with warning if pause_all_running() exceeds 8 seconds.",
+        "mitigation": "Dedicated OS thread ensures CFRunLoop is not starved by Tokio task scheduler"
+      },
+      {
+        "gotcha": "Network Errors During Sleep Transition",
+        "severity": "high",
+        "detail": "If adapter makes HTTP request during system sleep, connection will be aborted. On wake, adapter may exit with EAGAIN or ECONNREFUSED. These must be caught and retried, not treated as logic errors.",
+        "mitigation": "Network pattern matching at both adapter and dispatcher layers; retry count scope ensures max 3 retries per episode"
+      },
+      {
+        "gotcha": "WiFi-to-Cellular Handoff",
+        "severity": "medium",
+        "detail": "IP address changes during handoff; DNS may fail for 2-5 seconds; existing TCP connections break. Not documented yet but pattern-matched as transient.",
+        "mitigation": "TCP pre-check with 2s timeout in connectivity probe; retry heuristics sufficient for interim"
+      },
+      {
+        "gotcha": "Retry Count Persistence",
+        "severity": "medium",
+        "detail": "Retry count stored in meta.json but not persisted in events.jsonl append-only log. If dispatcher crashes before retry count reaches meta.json, next dispatcher restart will not know retry history.",
+        "mitigation": "Not currently mitigated; future enhancement: write retry_count to events.jsonl before moving card"
+      }
+    ],
+    "approach_outcome": {
+      "subtask_id": "subtask-5-2",
+      "objective": "Write output/result.md documenting sleep/wake flow and network resilience",
+      "outcome": "SUCCESS",
+      "completion_status": "Fully completed in 2 attempts (both successful)",
+      "key_deliverables": [
+        "Comprehensive architectural overview with component diagrams",
+        "macOS IOKit + Linux D-Bus implementations documented with code-level details",
+        "Sleep/Wake state machine with 5-state lifecycle fully specified",
+        "Network error detection patterns extracted and enumerated (14 + 28 patterns)",
+        "Retry logic semantics clearly defined (max 3 retries, 30s cooldown, exit code conventions)",
+        "Critical 8-second deadline constraint explicitly documented"
+      ],
+      "architectural_decisions_captured": [
+        "OS thread vs Tokio task distinction for IOKit",
+        "Exit code 75 convention for transient failures",
+        "Retry count scope (per-card, per-episode, resets on success)",
+        "Dual-layer error detection (adapter + dispatcher)"
+      ]
+    },
+    "recommendations": [
+      {
+        "type": "documentation",
+        "priority": "high",
+        "recommendation": "Add edge case documentation: What happens if WiFi \u2192 cellular switch occurs mid-HTTP-request? Include concrete error logs and retry sequence example.",
+        "rationale": "Currently pattern-matched as transient but not explicitly explained; developers need clear mental model"
+      },
+      {
+        "type": "observability",
+        "priority": "high",
+        "recommendation": "Add metrics collection points: count sleep/wake transitions, measure pause_all_running() latency, track retry count distribution, record network error patterns seen in production",
+        "rationale": "8-second deadline and retry limits are tuned via heuristics; real-world data needed to validate assumptions"
+      },
+      {
+        "type": "implementation",
+        "priority": "medium",
+        "recommendation": "Implement deadline timer enforcement: if pause_all_running() exceeds 6 seconds, log warning and call IOAllowPowerChange anyway; measure actual latency to validate 8-second margin",
+        "rationale": "Current design relies on stub; full implementation needed to handle overload scenarios"
+      },
+      {
+        "type": "persistence",
+        "priority": "medium",
+        "recommendation": "Persist retry_count to events.jsonl append-only log (with timestamp) before moving card to pending/; reconstruct state on dispatcher startup",
+        "rationale": "Prevents loss of retry history if dispatcher crashes between retry decision and meta.json write"
+      },
+      {
+        "type": "testing",
+        "priority": "high",
+        "recommendation": "Add harness test: simulate 3-card workload with WiFi disconnect mid-adapter, measure time for re-dispatch on reconnect, verify no cards land in failed/",
+        "rationale": "Network resilience claims need integration test validation; currently pattern-matched but not end-to-end tested"
+      },
+      {
+        "type": "documentation",
+        "priority": "medium",
+        "recommendation": "Add sequence diagram for full retry path: adapter exit \u2192 dispatcher detects exit code 75 \u2192 increments retry_count \u2192 moves to pending/ \u2192 cooldown \u2192 re-dispatch on next scan_timer tick",
+        "rationale": "Text description is thorough but a sequence diagram would clarify timing and state transitions for visual learners"
+      }
+    ],
+    "subtask_id": "subtask-5-2",
+    "session_num": 13,
+    "success": true,
+    "changed_files": [
+      "output/result.md"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-5-2"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

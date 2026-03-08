@@ -1,0 +1,199 @@
+=== AUTO-BUILD PROGRESS ===
+
+Project: bop - Atomic write_meta + crash recovery
+Workspace: /Users/studio/bop
+Started: 2026-03-06
+
+Workflow Type: simple
+Rationale: Focused reliability improvement in a single Rust codebase. All changes are related to crash safety and recovery mechanisms. Clear dependencies between subtasks but no multi-service coordination needed.
+
+Session 1 (Planner):
+- Created implementation_plan.json
+- Phases: 2
+- Total subtasks: 7
+- Created init.sh
+- Created context.json
+
+Phase Summary:
+Phase 1 - Crash Safety Implementation: 5 subtasks, depends on []
+  - Make write_meta atomic with temp+rename pattern
+  - Make write_providers atomic with temp+rename pattern
+  - Add recover_orphans function with corrupt meta.json handling
+  - Call recover_orphans on dispatcher startup
+  - Add 'bop recover' CLI command
+
+Phase 2 - Verification and Documentation: 2 subtasks, depends on [phase-1-implementation]
+  - Run make check (test + clippy + fmt)
+  - Write output/result.md with before/after analysis
+
+Services Involved:
+- bop-core: Core library with write_meta function
+- bop-cli: CLI binary with providers, dispatcher, and reaper modules
+
+Parallelism Analysis:
+- Max parallel phases: 1
+- Recommended workers: 1
+- Parallel opportunities: Subtasks 1-1 and 1-2 (write_meta and write_providers) can run in parallel as they modify independent files, but keeping sequential execution for simplicity
+
+Key Technical Details:
+- Problem: fs::write() truncates before writing, leaving empty/partial files on crash
+- Solution: write-to-temp-then-rename (atomic on POSIX/APFS)
+- Affected functions: write_meta (lib.rs), write_providers (providers.rs)
+- Recovery: Add startup scan of running/ directory before dispatcher loop
+- New command: bop recover - manual recovery scan
+
+Acceptance Criteria:
+1. write_meta uses atomic temp+rename pattern (no direct fs::write to target)
+2. write_providers uses atomic temp+rename pattern
+3. bop recover command exists and scans running/ for orphaned cards
+4. Dispatcher calls recover_orphans on startup (before first poll)
+5. make check passes (cargo test + clippy + fmt)
+6. output/result.md documents improvements and crash scenario analysis
+
+=== STARTUP COMMAND ===
+
+To continue building this spec, run:
+
+  source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 022 --parallel 1
+
+Example with direct mode:
+  source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 022 --direct
+
+=== END SESSION 1 ===
+
+Session 2 (Coder - subtask-1-1):
+- Status: COMPLETED
+- Subtask: Make write_meta atomic with temp+rename pattern
+- Files modified:
+  * crates/bop-core/src/lib.rs - Replaced fs::write with atomic tempfile pattern
+  * crates/bop-core/Cargo.toml - Added tempfile = "3" dependency
+- Implementation details:
+  * Used tempfile::Builder::new() with .prefix(".meta.json.") and .suffix(".tmp")
+  * Created temp file in same directory as target (ensures same filesystem)
+  * Used write_all() to write serialized JSON bytes
+  * Called persist() for atomic rename to final path
+  * Added proper error context at each step
+- Verification:
+  * All 96 bop-core tests passed
+  * make check passed (all 471 tests across all crates)
+  * cargo clippy -p bop-core -- -D warnings passed (no warnings)
+  * cargo fmt --check passed
+- Commit: 1d30467 "auto-claude: subtask-1-1 - Make write_meta atomic with temp+rename pattern"
+
+=== END SESSION 2 ===
+Session 3 (Coder - subtask-1-2):
+- Status: COMPLETED
+- Subtask: Make write_providers atomic with temp+rename pattern
+- Files modified:
+  * crates/bop-cli/src/providers.rs - Replaced fs::write with atomic temp+rename
+- Implementation details:
+  * Added temp file path: target.with_extension("json.tmp")
+  * Write to temp file: fs::write(&tmp, &bytes)?
+  * Atomic rename: fs::rename(&tmp, &target)?
+  * Pattern simpler than write_meta (uses stdlib instead of tempfile crate)
+  * Maintains existing validation logic before serialization
+- Verification:
+  * All 20 provider tests passed
+  * Test command: cargo test -p bop providers
+  * No new dependencies required
+- Commit: c28fcae "auto-claude: subtask-1-2 - Make write_providers atomic with temp+rename pattern"
+
+=== END SESSION 3 ===
+
+Session 4 (Coder - subtask-1-3):
+- Status: COMPLETED
+- Subtask: Add recover_orphans function with corrupt meta.json handling
+- Files modified:
+  * crates/bop-cli/src/reaper.rs - Added recover_orphans function and 6 comprehensive tests
+- Implementation details:
+  * Created recover_orphans(running_dir, pending_dir) -> Result<Vec<String>>
+  * Scans running/ directory for .bop directories
+  * Checks PID liveness using existing read_pid() and is_alive() helpers
+  * Treats cards with no PID as orphaned (dead)
+  * Handles corrupt/missing meta.json by creating minimal recovery meta:
+    - Extracts id from directory name (file_stem)
+    - Creates Meta with id + stage="pending" + defaults
+    - Writes minimal meta before moving to pending/
+  * Moves all recovered cards to pending/ (no retry logic, simpler than reap_orphans)
+  * Returns Vec of recovered card IDs for reporting
+  * Calls quicklook::render_card_thumbnail after moving
+- Tests added (6 total):
+  1. recover_orphans_moves_dead_pid_card_to_pending - basic dead PID recovery
+  2. recover_orphans_handles_corrupt_meta_json - handles invalid JSON gracefully
+  3. recover_orphans_handles_missing_meta_json - creates meta when missing
+  4. recover_orphans_skips_live_pid_cards - doesn't touch running cards
+  5. recover_orphans_handles_empty_running_dir - handles empty directory
+  6. recover_orphans_handles_card_without_pid_file - treats no PID as orphaned
+- Verification:
+  * All 6 new tests passed
+  * Test command: cargo test -p bop reaper::tests::recover
+  * No new dependencies required
+  * Function currently unused (will be integrated in subtask-1-4)
+- Commit: c45f1c4 "auto-claude: subtask-1-3 - Add recover_orphans function with corrupt meta.json handling"
+
+=== END SESSION 4 ===
+Session 5 (Coder - subtask-1-4):
+- Status: COMPLETED
+- Subtask: Call recover_orphans on dispatcher startup
+- Files modified:
+  * crates/bop-cli/src/dispatcher.rs - Added recover_orphans call on startup
+- Implementation details:
+  * Added call at line 48, immediately after directory setup and before watcher
+  * Placement: after paths::ensure_cards_layout, lock acquisition, and directory definitions
+  * Before filesystem watcher setup and main dispatch loop
+  * Call: reaper::recover_orphans(&running_dir, &pending_dir).await?
+  * Logs recovered cards with eprintln if any found: "[dispatcher] recovered N orphaned cards: [...]"
+  * Returns early with error if recovery fails (propagates anyhow::Result)
+- Verification:
+  * Manual code review confirms correct placement
+  * Code compiles successfully: cargo build --bin bop
+  * Build completed in 1.52s with no errors or warnings
+  * recover_orphans is called exactly once on startup
+  * Call happens before first dispatch cycle as required
+- Commit: 91da314 "auto-claude: subtask-1-4 - Call recover_orphans on dispatcher startup"
+
+=== END SESSION 5 ===
+
+## 2026-03-07 - Subtask 2-1 Complete: make check verification
+
+**Status:** ✅ All checks passed
+
+**Results:**
+- Unit tests: 344 passed (1 ignored)
+- Dispatcher harness: 10 passed
+- Job control harness: 17 passed
+- Merge gate harness: 4 passed
+- Serve tests: 5 passed
+- bop-core tests: 96 passed
+- Doc tests: 1 passed
+- Clippy: Clean (with -D warnings flag)
+- Formatting: Clean (cargo fmt --check)
+
+**Total:** 477 tests passed, 0 failures, all quality gates green.
+
+No code changes required - this was a verification-only subtask.
+
+
+[2026-03-07T07:25:00Z] subtask-2-2 COMPLETED
+- Wrote comprehensive output/result.md (419 lines)
+- Documented before/after comparison of write_meta and write_providers
+- Analyzed 4 crash scenarios with recovery mechanisms
+- Detailed technical implementation (atomic rename, PID checks, recovery algorithms)
+- Included test coverage summary (344 passing tests)
+- Documented impact analysis and future considerations
+- Commit: b71ecdf "auto-claude: subtask-2-2 - Write output/result.md with before/after analysis"
+
+ALL SUBTASKS COMPLETED
+- Phase 1 (Implementation): 5/5 subtasks ✓
+- Phase 2 (Verification): 2/2 subtasks ✓
+- Total: 7/7 subtasks ✓
+
+ACCEPTANCE CRITERIA MET:
+✓ write_meta uses atomic tmp+rename pattern
+✓ write_providers uses atomic tmp+rename pattern
+✓ bop recover command exists and works
+✓ Dispatcher calls recover_orphans on startup
+✓ make check passes (344 tests, no clippy warnings, proper formatting)
+✓ output/result.md documents all improvements with crash scenario analysis
+
+SPEC 022 COMPLETE - Ready for QA sign-off

@@ -1,7 +1,9 @@
 use bop_core::VcsEngine as CoreVcsEngine;
 use std::fs;
+use std::net::TcpStream;
 use std::path::Path;
 use std::process::Command as StdCommand;
+use std::time::Duration;
 
 pub fn command_available(name: &str) -> bool {
     // Try system PATH first
@@ -33,7 +35,7 @@ pub fn command_available(name: &str) -> bool {
     false
 }
 
-pub fn cmd_doctor(cards_root: &Path) -> anyhow::Result<()> {
+pub fn cmd_doctor(cards_root: &Path, fast: bool) -> anyhow::Result<()> {
     println!("bop doctor");
 
     // ── core tools ──────────────────────────────────────────────────────────
@@ -64,6 +66,24 @@ pub fn cmd_doctor(cards_root: &Path) -> anyhow::Result<()> {
         println!("ok\tzellij plugin ({})", plugin_path.display());
     } else {
         println!("missing\tzellij plugin (run `bop factory install`)");
+    }
+
+    // ── zellij session ──────────────────────────────────────────────────────
+    println!("\n── zellij session ──");
+    if let Ok(session_name) = std::env::var("ZELLIJ_SESSION_NAME") {
+        println!("ok\trunning in Zellij session '{}'", session_name);
+    } else {
+        println!("info\tnot running in Zellij (ZELLIJ_SESSION_NAME not set)");
+    }
+
+    // ── zellij web client ───────────────────────────────────────────────────
+    println!("\n── zellij web client ──");
+    match TcpStream::connect_timeout(
+        &"127.0.0.1:8082".parse().unwrap(),
+        Duration::from_millis(100),
+    ) {
+        Ok(_) => println!("ok\tport 8082 (web client running)"),
+        Err(_) => println!("info\tport 8082 not responding (web client may not be enabled)"),
     }
 
     // ── adapters ────────────────────────────────────────────────────────────
@@ -215,6 +235,38 @@ pub fn cmd_doctor(cards_root: &Path) -> anyhow::Result<()> {
         println!("ok\tno pending/ directory");
     }
 
+    // ── make check ──────────────────────────────────────────────────────────
+    if !fast {
+        println!("\n── make check ──");
+        let repo_root = cards_root.parent().unwrap_or(cards_root);
+        let makefile = repo_root.join("Makefile");
+        if !makefile.exists() {
+            println!("skip\tno Makefile found");
+        } else {
+            println!("running\tmake check (this may take a while)");
+            let output = StdCommand::new("make")
+                .arg("check")
+                .current_dir(repo_root)
+                .output();
+            match output {
+                Ok(o) if o.status.success() => {
+                    println!("ok\tmake check passed");
+                }
+                Ok(o) => {
+                    println!("failed\tmake check (exit code: {:?})", o.status.code());
+                    failed += 1;
+                }
+                Err(e) => {
+                    println!("error\tmake check ({e})");
+                    failed += 1;
+                }
+            }
+        }
+    } else {
+        println!("\n── make check ──");
+        println!("skip\t--fast mode (use `bop doctor` without --fast to run)");
+    }
+
     if failed > 0 {
         anyhow::bail!("doctor found {} issue(s)", failed);
     }
@@ -263,5 +315,18 @@ mod tests {
         };
         bop_core::write_meta(&card_dir, &meta).unwrap();
         print_status_summary(td.path()).unwrap();
+    }
+
+    #[test]
+    fn cmd_doctor_fast_mode() {
+        let td = tempdir().unwrap();
+        for state in ["pending", "running", "done"] {
+            fs::create_dir_all(td.path().join(state)).unwrap();
+        }
+        // Create minimal required files
+        let policy = td.path().join("policy.toml");
+        fs::write(&policy, "").unwrap();
+        // Fast mode should skip make check
+        cmd_doctor(td.path(), true).unwrap();
     }
 }

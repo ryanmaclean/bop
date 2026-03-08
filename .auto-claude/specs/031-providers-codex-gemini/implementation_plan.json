@@ -1,0 +1,344 @@
+{
+  "feature": "Codex and Gemini provider implementations",
+  "workflow_type": "feature",
+  "workflow_rationale": "Adding two new provider implementations (CodexProvider, GeminiProvider) following the established Provider trait pattern from spec 030. Each provider has multiple data source fallbacks, requiring ordered implementation of OAuth \u2192 RPC/API \u2192 PTY approaches.",
+  "phases": [
+    {
+      "id": "phase-1-codex",
+      "name": "Codex Provider",
+      "type": "implementation",
+      "description": "Build CodexProvider with three data source fallbacks: OAuth API, JSON-RPC, and PTY screen parsing. Each subtask adds one data source layer to the fetch() method.",
+      "depends_on": [],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Scaffold CodexProvider with detect() and OAuth API fetch path. Create codex.rs with: (1) CodexCredentials struct for ~/.codex/auth.json (access_token, refresh_token, last_refresh), (2) binary_on_path() helper using std::process::Command::new(\"which\"), (3) detect() checking auth.json OR codex on PATH, (4) OAuth fetch: read creds, check refresh (>8 days = warn), GET https://chatgpt.com/backend-api/wham/usage with Bearer token, (5) parse_usage_response() helper mapping session.percent_used \u2192 primary_pct and weekly.percent_used \u2192 secondary_pct, (6) unit tests for parse helper with mock JSON.",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [
+            "crates/bop-cli/src/providers/codex.rs"
+          ],
+          "patterns_from": [
+            "crates/bop-cli/src/providers/claude.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop -- providers::codex --no-fail-fast 2>&1 | tail -20",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "CodexProvider scaffolded with: CodexCredentials struct, binary_on_path() helper, detect() checking auth.json OR codex on PATH, OAuth fetch with Bearer token to chatgpt.com/backend-api/wham/usage, parse_usage_response() mapping session.percent_used\u2192primary_pct and weekly.percent_used\u2192secondary_pct, check_refresh_staleness() warning if >8 days old, 14 unit tests all passing. Clippy clean, fmt clean.",
+          "updated_at": "2026-03-08T03:00:31.836029+00:00"
+        },
+        {
+          "id": "subtask-1-2",
+          "description": "Add JSON-RPC fallback to CodexProvider fetch(). When OAuth creds are missing or expired, spawn `codex -s read-only -a untrusted app-server` via tokio::process::Command with piped stdin/stdout. Send initialize request (id:1), read response, send account/rateLimits/read (id:2), read response, parse windows array for session+weekly percent_used, kill process. 5-second total timeout. Add unit tests for RPC response parsing.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/providers/codex.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/providers/claude.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop -- providers::codex --no-fail-fast 2>&1 | tail -20",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "JSON-RPC fallback added to CodexProvider fetch(). When OAuth creds are missing or token rejected (401/403), spawns `codex -s read-only -a untrusted app-server` via tokio::process::Command with piped stdin/stdout. Sends initialize (id:1), reads response, sends account/rateLimits/read (id:2), reads response, parses windows array for session+weekly percent_used, kills process. 5-second total timeout. Added RPC response types (RpcResponse, RpcRateLimitWindow, RpcRateLimitsResult), parse_rpc_response() helper, fetch_via_rpc() with timeout, rpc_exchange() for the actual protocol. 9 new unit tests: valid windows, empty windows, session-only, clamping, malformed JSON, RPC error, missing result, snake_case aliases, credits field. All 23 tests pass. Clippy clean, fmt clean.",
+          "updated_at": "2026-03-08T03:04:13.433135+00:00"
+        },
+        {
+          "id": "subtask-1-3",
+          "description": "Add PTY fallback to CodexProvider fetch(). When JSON-RPC also fails, spawn `codex` via tokio::process::Command, write `/status\\n` to stdin, wait up to 3 seconds, read stdout, parse rendered screen for '5h limit: NN%' and 'Weekly limit: NN%' using regex or string search. Add parse test for PTY output.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/providers/codex.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop -- providers::codex --no-fail-fast 2>&1 | tail -20",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "PTY fallback added to CodexProvider fetch(). When both OAuth and JSON-RPC fail, spawns `codex` process, writes `/status\\n` to stdin, waits up to 3 seconds, reads stdout, and parses for '5h limit: NN%' and 'Weekly limit: NN%' patterns using string search (no regex dep needed). Added: parse_pty_output(), extract_pct_after(), fetch_via_pty(), pty_exchange(), fetch_via_rpc_or_pty() chaining method. fetch() now chains: OAuth \u2192 RPC \u2192 PTY. 10 new tests: valid output, session-only, weekly-only, no percentages, empty output, clamping, ANSI noise, extract_pct_after basic/missing/no-digits. All 33 codex tests pass. Clippy clean, fmt clean.",
+          "updated_at": "2026-03-08T03:08:29.260849+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-2-gemini",
+      "name": "Gemini Provider",
+      "type": "implementation",
+      "description": "Build GeminiProvider with OAuth quota API and PTY fallback. The OAuth path is more complex than Codex \u2014 requires extracting client ID/secret from the gemini npm package's oauth2.js, token refresh, and two Google API calls.",
+      "depends_on": [],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-2-1",
+          "description": "Scaffold GeminiProvider with detect() and OAuth credential/token infrastructure. Create gemini.rs with: (1) GeminiCredentials struct for ~/.gemini/oauth_creds.json (access_token, refresh_token, expiry_date, id_token), (2) detect() checking oauth_creds.json OR gemini on PATH, (3) find_gemini_binary() \u2014 locate gemini on PATH, (4) extract_oauth_client() \u2014 find .../node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js relative to binary, regex-extract OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET, (5) refresh_token_if_expired() \u2014 POST https://oauth2.googleapis.com/token with client_id/secret/refresh_token, (6) unit tests for credential parsing and client ID extraction from sample JS.",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [
+            "crates/bop-cli/src/providers/gemini.rs"
+          ],
+          "patterns_from": [
+            "crates/bop-cli/src/providers/claude.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop -- providers::gemini --no-fail-fast 2>&1 | tail -20",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "GeminiProvider scaffolded with: GeminiCredentials struct for ~/.gemini/oauth_creds.json (access_token, refresh_token, expiry_date as f64, id_token), detect() checking oauth_creds.json OR gemini on PATH, find_gemini_binary() via `which` with symlink resolution, extract_oauth_client() walking up from binary to find node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js and extracting OAUTH_CLIENT_ID/OAUTH_CLIENT_SECRET via string parsing, is_token_expired() handling both epoch-seconds and epoch-milliseconds, refresh_token_if_expired() POST to oauth2.googleapis.com/token, stub fetch() with TODO for subtask-2-2. Added `pub mod gemini;` to mod.rs. 23 unit tests all passing. Clippy clean, fmt clean.",
+          "updated_at": "2026-03-08T03:13:08.287509+00:00"
+        },
+        {
+          "id": "subtask-2-2",
+          "description": "Implement Gemini OAuth quota fetch. In fetch(), after refreshing token: (1) POST loadCodeAssist to get cloudaicompanionProject, (2) POST retrieveUserQuota with project ID (or empty string if loadCodeAssist fails), (3) parse response array of {remainingFraction, resetTime, modelId}, (4) map: primary_pct = (1 - min(remainingFraction for Pro models)) * 100, secondary_pct = same for Flash models, primary_label = 'Pro', secondary_label = 'Flash', (5) unit tests for quota response parsing.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/providers/gemini.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/providers/claude.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop -- providers::gemini --no-fail-fast 2>&1 | tail -20",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "Implemented Gemini OAuth quota fetch in fetch(): (1) loadCodeAssist POST to get cloudaicompanionProject (best-effort, falls back to empty string), (2) retrieveUserQuota POST with project ID, (3) parse_quota_response() maps remainingFraction to primary_pct (Pro models) and secondary_pct (Flash models) using min(remainingFraction) across model variants, (4) earliest resetTime tracked for reset_at. Added response types: LoadCodeAssistResponse, QuotaEntry, QuotaResponse (handles both object{quotas:[...]} and array[...] shapes). 15 new unit tests: valid pro+flash, pro-only, flash-only, empty entries, no remaining fraction, unknown model, clamping, case-insensitive, missing model_id, full usage, no usage, object shape deserialization, array shape deserialization, loadCodeAssist response, missing project. All 38 gemini tests pass. Clippy clean, fmt clean.",
+          "updated_at": "2026-03-08T03:17:44.734316+00:00"
+        },
+        {
+          "id": "subtask-2-3",
+          "description": "Add PTY fallback to GeminiProvider fetch(). When OAuth fails, spawn `gemini` via tokio::process::Command, write `/stats model\\n` to stdin, wait up to 3 seconds, read stdout, parse output for request counts and limits. Add parse test for PTY output.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/providers/gemini.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/providers/codex.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop -- providers::gemini --no-fail-fast 2>&1 | tail -20",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "PTY fallback added to GeminiProvider fetch(). When OAuth fails (missing creds, missing client ID/secret, token refresh failure, or quota API error), spawns `gemini` process, writes `/stats model\\n` to stdin, waits up to 3 seconds, reads stdout, and parses for model usage data. Parser handles fraction patterns (N/M \u2192 percentage), direct percentages (NN%), and model classification via case-insensitive \"pro\"/\"flash\" detection on each line. Added: extract_fraction_pct(), extract_direct_pct(), extract_line_pct(), parse_pty_output(), fetch_via_pty(), pty_exchange() methods. 22 new tests (12 PTY parse scenarios + 10 helper function tests). All 60 gemini tests pass. Clippy clean, fmt clean.",
+          "updated_at": "2026-03-08T03:23:08.832786+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-3-integration",
+      "name": "Integration & Verification",
+      "type": "integration",
+      "description": "Wire CodexProvider and GeminiProvider into the provider registry, run full test suite, clippy, and fmt to verify acceptance criteria.",
+      "depends_on": [
+        "phase-1-codex",
+        "phase-2-gemini"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-3-1",
+          "description": "Register both providers in mod.rs. Add `pub mod codex;` and `pub mod gemini;` to the module declarations at the top of providers/mod.rs. Update all_providers() to include CodexProvider and GeminiProvider: vec![Box::new(claude::ClaudeProvider::new()), Box::new(codex::CodexProvider::new()), Box::new(gemini::GeminiProvider::new())]. Run full acceptance criteria: cargo build -p bop, cargo test -p bop (all provider tests), cargo clippy -- -D warnings, cargo fmt -- --check. Verify `bop providers --json` output shape.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/providers/mod.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/providers/mod.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo build -p bop 2>&1 | tail -5 && cargo test -p bop -- providers:: --no-fail-fast 2>&1 | tail -20 && cargo clippy -p bop -- -D warnings 2>&1 | tail -5 && cargo fmt -p bop -- --check 2>&1 | tail -5",
+            "expected": "All commands succeed with no errors or warnings"
+          },
+          "status": "completed",
+          "notes": "Updated all_providers() to include CodexProvider and GeminiProvider. All 126 provider tests pass, clippy clean (-D warnings), fmt check passes. Committed as c024393.",
+          "updated_at": "2026-03-08T03:25:13.152529+00:00"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_phases": 3,
+    "total_subtasks": 7,
+    "services_involved": [
+      "bop-cli"
+    ],
+    "parallelism": {
+      "max_parallel_phases": 2,
+      "parallel_groups": [
+        {
+          "phases": [
+            "phase-1-codex",
+            "phase-2-gemini"
+          ],
+          "reason": "Both are independent provider implementations with no shared files. Codex creates codex.rs, Gemini creates gemini.rs. No file conflicts."
+        }
+      ],
+      "recommended_workers": 1,
+      "speedup_estimate": "Phases 1 and 2 could run in parallel (2x speedup for those phases), but both are single-service Rust modules. Recommend 1 worker for simplicity since phase 3 integration depends on both."
+    },
+    "startup_command": "No services to start \u2014 this is a Rust library implementation. Build and test with: cargo build -p bop && cargo test -p bop -- providers::"
+  },
+  "verification_strategy": {
+    "risk_level": "medium",
+    "skip_validation": false,
+    "test_creation_phase": "during_implementation",
+    "test_types_required": [
+      "unit"
+    ],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      "cargo build -p bop succeeds",
+      "cargo test -p bop providers::codex passes",
+      "cargo test -p bop providers::gemini passes",
+      "All existing provider tests still pass",
+      "cargo clippy -p bop -- -D warnings clean",
+      "cargo fmt -p bop -- --check clean",
+      "bop providers --json includes codex and gemini entries (when credentials exist)"
+    ],
+    "verification_steps": [
+      {
+        "name": "Build",
+        "command": "cargo build -p bop",
+        "expected_outcome": "Compiles without errors",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Codex provider tests",
+        "command": "cargo test -p bop -- providers::codex --no-fail-fast",
+        "expected_outcome": "All codex unit tests pass",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Gemini provider tests",
+        "command": "cargo test -p bop -- providers::gemini --no-fail-fast",
+        "expected_outcome": "All gemini unit tests pass",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Full test suite",
+        "command": "cargo test -p bop",
+        "expected_outcome": "All tests pass including existing provider tests",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Clippy lint",
+        "command": "cargo clippy -p bop -- -D warnings",
+        "expected_outcome": "No warnings or errors",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Format check",
+        "command": "cargo fmt -p bop -- --check",
+        "expected_outcome": "No formatting issues",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      }
+    ],
+    "reasoning": "Medium risk: adding two new provider implementations following an established trait pattern. No existing code is modified except adding module declarations and registration. Unit tests cover all parsing logic. Network-dependent code uses the established error-snapshot pattern."
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": true,
+      "commands": [
+        "cargo test -p bop -- providers::codex",
+        "cargo test -p bop -- providers::gemini",
+        "cargo test -p bop -- providers::"
+      ],
+      "minimum_coverage": null
+    },
+    "integration_tests": {
+      "required": false,
+      "commands": [],
+      "services_to_test": []
+    },
+    "e2e_tests": {
+      "required": false,
+      "commands": [],
+      "flows": []
+    },
+    "browser_verification": {
+      "required": false,
+      "pages": []
+    },
+    "database_verification": {
+      "required": false,
+      "checks": []
+    }
+  },
+  "qa_signoff": null,
+  "last_updated": "2026-03-08T03:25:13.152539+00:00",
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "error",
+      "timestamp": "2026-03-08T03:27:26.463200+00:00",
+      "issues": [
+        {
+          "title": "QA error",
+          "description": "QA agent did not update implementation_plan.json"
+        }
+      ]
+    },
+    {
+      "iteration": 2,
+      "status": "error",
+      "timestamp": "2026-03-08T03:27:31.269017+00:00",
+      "issues": [
+        {
+          "title": "QA error",
+          "description": "QA agent did not update implementation_plan.json (No tools were used by agent)"
+        }
+      ]
+    },
+    {
+      "iteration": 3,
+      "status": "error",
+      "timestamp": "2026-03-08T03:27:35.955360+00:00",
+      "issues": [
+        {
+          "title": "QA error",
+          "description": "QA agent did not update implementation_plan.json (No tools were used by agent)"
+        }
+      ]
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 3,
+    "last_iteration": 3,
+    "last_status": "error",
+    "issues_by_type": {
+      "unknown": 3
+    }
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "discovery_summary": {
+    "status": "ALREADY_IMPLEMENTED",
+    "discovery_date": "2026-03-05",
+    "findings": "All three CLI commands (retry, kill, logs) are fully implemented with comprehensive tests. The spec asks to implement them, but they already exist in the codebase."
+  },
+  "files_to_modify": {
+    "bop-cli": []
+  },
+  "files_to_reference": {
+    "bop-cli": [
+      "crates/bop-cli/src/main.rs",
+      "crates/bop-cli/src/cards.rs",
+      "crates/bop-cli/src/logs.rs",
+      "crates/bop-cli/tests/dispatcher_harness.rs"
+    ]
+  },
+  "patterns": {
+    "command_enum_pattern": "Commands are defined as enum variants in main.rs Command enum (lines 42-225)",
+    "command_handler_pattern": "Command handlers are async functions in cards.rs (cmd_retry, cmd_kill) and logs.rs (cmd_logs)",
+    "testing_pattern": "Unit tests are co-located in the same file within #[cfg(test)] mod tests blocks"
+  },
+  "existing_implementations": {
+    "description": "All three commands are fully implemented",
+    "relevant_files": [
+      "crates/bop-cli/src/main.rs (Command enum variants: Retry, Kill, Logs at lines 105-122)",
+      "crates/bop-cli/src/cards.rs (cmd_retry at line 511, cmd_kill at line 569)",
+      "crates/bop-cli/src/logs.rs (cmd_logs at line 9)",
+      "crates/bop-cli/src/cards.rs (tests for retry at lines 1291-1441)"
+    ],
+    "implementation_details": {
+      "retry": {
+        "location": "crates/bop-cli/src/cards.rs:511-565",
+        "functionality": "Moves failed cards to pending, increments retry_count, clears failure_reason, resets failed stages",
+        "tests": "Lines 1366-1441 (13 tests covering all scenarios)"
+      },
+      "kill": {
+        "location": "crates/bop-cli/src/cards.rs:569-641",
+        "functionality": "Sends SIGTERM to running agent PID, moves card to failed with reason='killed'",
+        "implementation_note": "Uses tokio::process::Command with 'kill -TERM' instead of nix::sys::signal (simpler approach)"
+      },
+      "logs": {
+        "location": "crates/bop-cli/src/logs.rs:9-89",
+        "functionality": "Streams stdout/stderr logs with optional --follow mode, colorized output, stops when card leaves running state"
+      }
+    }
+  },
+  "issues_found": {
+    "blocking": [
+      {
+        "description": "Test dispatcher_relative_adapter_path_works fails in crates/bop-cli/tests/dispatcher_harness.rs:283",
+        "impact": "make check fails, blocking acceptance criteria",
+        "relation_to_spec": "UNRELATED - This test is about dispatcher adapter path resolution, not about retry/kill/logs commands",
+        "location": "crates/bop-cli/tests/dispatcher_harness.rs:270-317"
+      }
+    ],
+    "non_blocking": []
+  },
+  "spec_discrepancies": {
+    "description": "Spec says commands are 'missing' but they are fully implemented",
+    "possible_reasons": [
+      "Spec was written before implementation was completed",
+      "This is a verification/documentation task",
+      "Previous implementation attempts failed (old cards in .cards/team-cli/failed/) and spec wasn't updated"
+    ]
+  }
+}

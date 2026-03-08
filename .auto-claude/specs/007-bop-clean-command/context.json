@@ -1,0 +1,34 @@
+{
+  "files_to_modify": {
+    "bop": [
+      "crates/bop-cli/src/main.rs",
+      "crates/bop-cli/src/cards.rs"
+    ]
+  },
+  "files_to_reference": [
+    "crates/bop-cli/src/cards.rs",
+    "crates/bop-cli/src/paths.rs",
+    "crates/bop-cli/src/list.rs",
+    "crates/bop-core/src/config.rs"
+  ],
+  "patterns": {
+    "command_pattern": "Commands are enum variants in Command enum with clap attributes, matched in main.rs to call module functions",
+    "file_ops_pattern": "Use std::fs for file operations, walkdir crate for recursive directory traversal",
+    "test_pattern": "Use tempfile crate for temporary directories, tests in #[cfg(test)] mod tests at bottom of files",
+    "config_pattern": "Load config with bop_core::load_config(), config has log_retention_days field"
+  },
+  "existing_implementations": {
+    "description": "Found existing card manipulation commands (retry, kill, approve) in cards.rs, card lookup utilities in paths.rs",
+    "relevant_files": [
+      "crates/bop-cli/src/cards.rs",
+      "crates/bop-cli/src/paths.rs",
+      "crates/bop-cli/src/list.rs"
+    ]
+  },
+  "card_directory_structure": {
+    "root_states": ["drafts", "pending", "running", "done", "merged", "failed", "templates", "memory"],
+    "team_dirs": ["team-cli", "team-arch", "team-quality", "team-platform", "team-intelligence"],
+    "team_states": ["done", "failed", "merged", "pending", "running", "templates", "memory"],
+    "card_bundle_format": "{glyph}-{id}.bop or {id}.bop"
+  }
+}

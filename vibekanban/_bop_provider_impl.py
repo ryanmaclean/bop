@@ -4,6 +4,25 @@ import json
 import os
 import sys
 import pathlib
+import time
+
+def elapsed_seconds(meta):
+    """Compute elapsed seconds from meta: duration_s if present, else started_at to now."""
+    if "duration_s" in meta:
+        try:
+            return float(meta["duration_s"])
+        except (TypeError, ValueError):
+            pass
+    started = meta.get("started_at")
+    if started:
+        try:
+            # ISO-8601 basic parse (Python 3.7+ fromisoformat)
+            from datetime import datetime, timezone
+            dt = datetime.fromisoformat(started.replace("Z", "+00:00"))
+            return round(time.time() - dt.timestamp(), 1)
+        except Exception:
+            pass
+    return None
 
 cards_dir = pathlib.Path(sys.argv[1])
 tasks = []
@@ -42,6 +61,11 @@ for entry in sorted(cards_dir.iterdir()):
                 "status":    status,
                 "team":      "root",
                 "stage":     meta.get("stage", ""),
+                "priority":  meta.get("priority", "P4"),
+                "provider":  meta.get("provider", ""),
+                "elapsed_s": elapsed_seconds(meta),
+                "progress":  meta.get("progress"),
+                "ac_spec_id": meta.get("ac_spec_id"),
                 "meta_path": str(meta_file),
             })
     else:
@@ -67,6 +91,11 @@ for entry in sorted(cards_dir.iterdir()):
                     "status":    status,
                     "team":      team,
                     "stage":     meta.get("stage", ""),
+                    "priority":  meta.get("priority", "P4"),
+                    "provider":  meta.get("provider", ""),
+                    "elapsed_s": elapsed_seconds(meta),
+                    "progress":  meta.get("progress"),
+                    "ac_spec_id": meta.get("ac_spec_id"),
                     "meta_path": str(meta_file),
                 })
 

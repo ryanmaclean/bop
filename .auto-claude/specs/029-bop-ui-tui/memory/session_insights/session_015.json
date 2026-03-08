@@ -1,0 +1,189 @@
+{
+  "session_number": 15,
+  "timestamp": "2026-03-07T20:11:19.059278+00:00",
+  "subtasks_completed": [
+    "subtask-5-1"
+  ],
+  "discoveries": {
+    "file_insights": {
+      "widgets_filter_rs": {
+        "type": "new_module",
+        "purpose": "Nucleo-powered fuzzy filter state and matching logic",
+        "key_structures": [
+          {
+            "name": "FilterState",
+            "fields": [
+              "query: String",
+              "matcher: Matcher"
+            ],
+            "responsibility": "Holds mutable filter query and reusable nucleo matcher; implements matches() to test cards against pattern"
+          },
+          {
+            "name": "FilterMatch",
+            "fields": [
+              "title_indices: Vec<u32>"
+            ],
+            "responsibility": "Encapsulates match result with highlight indices into card title portion"
+          }
+        ],
+        "algorithm": "Combined haystack '{id} {title}' matched via nucleo::Pattern::indices(); converted indices from combined space to title-only space via offset calculation"
+      },
+      "app_rs": {
+        "changes": [
+          "Added filter: Option<String> field \u2014 persisted filter query",
+          "Added filter_state: Option<FilterState> field \u2014 mutable state during filter mode",
+          "Added enter_filter_mode() \u2014 initializes FilterState and switches to Mode::Filter",
+          "Added confirm_filter() \u2014 persists query to filter field, returns to Normal",
+          "Added clear_filter() \u2014 clears both filter and filter_state, returns to Normal",
+          "Added apply_filter_collapse() \u2014 recalculates column collapse based on match results"
+        ]
+      },
+      "input_rs": {
+        "changes": [
+          "Wired handle_filter() function for Mode::Filter branch",
+          "Esc handler calls clear_filter()",
+          "Enter handler calls confirm_filter()",
+          "Backspace pops from query, updates filter field, calls apply_filter_collapse()",
+          "Char handler appends to query, updates filter field, calls apply_filter_collapse()",
+          "Added KeyCode::Char('/') in handle_normal to enter filter mode"
+        ]
+      },
+      "kanban_rs": {
+        "changes": [
+          "card_to_list_item() now accepts optional filter_match: Option<&FilterMatch>",
+          "Title rendering logic modified to apply yellow+bold styling to matched indices",
+          "Integrated highlight rendering into card spans construction"
+        ]
+      }
+    },
+    "patterns_discovered": [
+      {
+        "pattern": "Combined haystack matching",
+        "description": "Match against '{id} {title}' concatenation to allow flexible filtering by either card ID or title; requires index offset conversion post-match",
+        "benefit": "Users can filter by card ID or partial title; single pattern search over both fields"
+      },
+      {
+        "pattern": "Index space conversion",
+        "description": "Nucleo indices in combined haystack must be offset-adjusted to title-only space via: title_offset = id_char_len + 1, then filter indices >= title_offset and subtract offset",
+        "complexity": "Requires careful char count calculation (not byte count) and deduplication of sorted indices"
+      },
+      {
+        "pattern": "Dual filter state lifecycle",
+        "description": "filter: Option<String> persists across mode transitions; filter_state: Option<FilterState> is ephemeral and dropped when filter is cleared or confirmed",
+        "rationale": "Allows kanban widget to continue applying confirmed filter while filter_state is unavailable for edits in Normal mode"
+      },
+      {
+        "pattern": "Real-time column collapse",
+        "description": "apply_filter_collapse() called on every keystroke to check all cards against current pattern; columns with zero matches are immediately collapsed",
+        "ux_impact": "Users see live feedback as they type; visual feedback of matching card count per column"
+      },
+      {
+        "pattern": "Nucleo configuration",
+        "description": "Pattern::new() uses CaseMatching::Smart, Normalization::Smart, AtomKind::Fuzzy for intelligent fuzzy matching",
+        "robustness": "Smart case and normalization handle accents, case-insensitivity, and Unicode automatically"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Char vs byte offset calculation",
+        "context": "Converting combined haystack indices to title-only indices requires char count, not byte count",
+        "solution": "Used card_id.chars().count() to get proper char offset; nucleo indices are char-based, not byte-based",
+        "impact": "Would have caused off-by-one highlight errors if using byte offsets on multi-byte UTF-8 strings"
+      },
+      {
+        "issue": "Index filtering and deduplication",
+        "context": "Indices from nucleo may contain duplicates or be unsorted; filtering by title_offset and then deduping is necessary",
+        "solution": "Sort unstable, then dedup; filter indices >= title_offset and subtract offset",
+        "impact": "Ensures clean, sorted highlight indices for rendering without duplicate style spans"
+      },
+      {
+        "issue": "Matcher reuse across keystrokes",
+        "context": "Allocating a new Matcher on every keystroke would be expensive",
+        "solution": "FilterState holds a single reusable Matcher instance",
+        "impact": "Critical for performance in fast typing; avoids repeated allocation/deallocation"
+      },
+      {
+        "issue": "Empty query behavior",
+        "context": "When query is empty, all cards should match with no highlights",
+        "solution": "Early return with empty title_indices when self.query.is_empty()",
+        "impact": "Prevents unnecessary pattern matching and nucleo overhead when no filter is active"
+      },
+      {
+        "issue": "Filter state persistence across mode transitions",
+        "context": "User enters filter mode, types query, presses Esc (should clear), presses / again (should start fresh)",
+        "solution": "clear_filter() drops filter_state entirely; enter_filter_mode() checks self.filter to seed new state",
+        "impact": "If filter_state was not dropped, re-entering filter mode would restore previous query instead of starting fresh"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "approach_details": {
+      "implementation_strategy": "Modular filter state abstraction (FilterState struct) encapsulates nucleo matcher and query; integrated into app lifecycle via Mode::Filter; input handler wires keystroke to filter operations; kanban renderer applies highlight indices to card title spans",
+      "key_decisions": [
+        "Separated FilterMatch (result) from FilterState (mutable state) for clean data flow",
+        "Used Option<FilterState> to denote active filter mode vs Option<String> for persisted filter query",
+        "Applied filter collapse on every keystroke to provide real-time feedback",
+        "Combined haystack approach balances search flexibility against complexity"
+      ],
+      "integration_points": [
+        "app.rs: Mode::Filter state machine, filter persistence",
+        "input.rs: keystroke-to-filter-operation dispatch",
+        "kanban.rs: highlight rendering using match indices",
+        "Footer (not shown in diff): displays 'Filter: {query}\u2588' prompt with instructions"
+      ],
+      "test_coverage": "6 unit tests in filter.rs covering: empty query, title match, ID match, no match, sorted indices, case insensitivity"
+    },
+    "recommendations": [
+      {
+        "priority": "medium",
+        "category": "performance",
+        "suggestion": "Memoize FilterMatch results per card to avoid recalculating matches on every render frame",
+        "rationale": "With large card counts (100+), recalculating all matches every frame (60 FPS) becomes expensive; cache matches and only recalculate when query changes"
+      },
+      {
+        "priority": "low",
+        "category": "ux",
+        "suggestion": "Add filter history (recent queries) accessible via up/down arrows in filter mode",
+        "rationale": "Users often apply similar filters repeatedly; history reduces retyping and improves workflow"
+      },
+      {
+        "priority": "medium",
+        "category": "robustness",
+        "suggestion": "Add filter preview count to footer (e.g., 'Filter: feat  [3 cards]  [Esc]clear')",
+        "rationale": "Users need visibility into how many cards match current query; provides confidence before confirming"
+      },
+      {
+        "priority": "low",
+        "category": "code_quality",
+        "suggestion": "Consider extracting haystack construction into a dedicated method for reusability and testing",
+        "rationale": "If future filtering modes (by provider, by state) are added, a shared haystack builder reduces duplication"
+      },
+      {
+        "priority": "medium",
+        "category": "testing",
+        "suggestion": "Add integration test in app.rs verifying filter mode state transitions and column collapse behavior",
+        "rationale": "Current tests are unit-level; integration test ensures Mode::Filter \u2192 confirm \u2192 Normal \u2192 re-enter works correctly"
+      },
+      {
+        "priority": "low",
+        "category": "documentation",
+        "suggestion": "Add example in filter.rs docstring showing typical usage flow (enter \u2192 type \u2192 confirm \u2192 clear)",
+        "rationale": "Future maintainers can understand filter lifecycle without reading input.rs and app.rs"
+      }
+    ],
+    "subtask_id": "subtask-5-1",
+    "session_num": 15,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/ui/app.rs",
+      "crates/bop-cli/src/ui/input.rs",
+      "crates/bop-cli/src/ui/widgets/filter.rs",
+      "crates/bop-cli/src/ui/widgets/kanban.rs",
+      "crates/bop-cli/src/ui/widgets/mod.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-5-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

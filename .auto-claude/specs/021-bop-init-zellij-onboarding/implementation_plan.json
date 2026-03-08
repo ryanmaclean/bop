@@ -1,0 +1,297 @@
+{
+  "feature": "bop init Zellij detection and enhanced doctor command",
+  "workflow_type": "simple",
+  "workflow_rationale": "This is a straightforward enhancement to two existing CLI subcommands (init and doctor) within a single Rust crate. No multi-service coordination, no data migration, no investigation needed - just add features with clear acceptance criteria.",
+  "summary": {
+    "total_subtasks": 8,
+    "services_involved": [
+      "bop-core",
+      "bop-cli"
+    ],
+    "estimated_duration": "2-3 hours",
+    "parallelism": {
+      "max_parallel_phases": 1,
+      "parallel_groups": [],
+      "recommended_workers": 1,
+      "speedup_estimate": "Sequential execution required"
+    },
+    "startup_command": "source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 021 --parallel 1"
+  },
+  "verification_strategy": {
+    "risk_level": "low",
+    "skip_validation": false,
+    "test_creation_phase": "post_implementation",
+    "test_types_required": [
+      "unit"
+    ],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      "bop init detects Zellij session and writes to .cards/config.json",
+      "bop init prints clear quick-start guide",
+      "bop doctor checks all 6 conditions (nu, claude CLI, Zellij session, port 8082, .cards/, make check)",
+      "make check passes",
+      "output/result.md exists with sample output"
+    ],
+    "verification_steps": [
+      {
+        "name": "Unit Tests",
+        "command": "cargo test",
+        "expected_outcome": "All tests pass",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Clippy Lints",
+        "command": "cargo clippy -- -D warnings",
+        "expected_outcome": "No warnings",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Format Check",
+        "command": "cargo fmt --check",
+        "expected_outcome": "Code is formatted",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Manual Verification",
+        "command": "Run bop init and bop doctor manually",
+        "expected_outcome": "Features work as specified",
+        "type": "manual",
+        "required": true,
+        "blocking": false
+      }
+    ],
+    "reasoning": "Low risk change - adding features to CLI subcommands with clear acceptance criteria. Existing test suite provides regression coverage."
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": true,
+      "commands": [
+        "cargo test"
+      ],
+      "minimum_coverage": null
+    },
+    "integration_tests": {
+      "required": false,
+      "commands": [],
+      "services_to_test": []
+    },
+    "e2e_tests": {
+      "required": false,
+      "commands": [],
+      "flows": []
+    },
+    "browser_verification": {
+      "required": false,
+      "pages": []
+    },
+    "database_verification": {
+      "required": false,
+      "checks": []
+    }
+  },
+  "qa_signoff": {
+    "status": "approved",
+    "timestamp": "2026-03-07T06:50:00.000000+00:00",
+    "qa_session": 1,
+    "report_file": "qa_report.md",
+    "tests_passed": {
+      "unit": "339/339",
+      "integration": "N/A",
+      "e2e": "N/A"
+    },
+    "verified_by": "qa_agent"
+  },
+  "phases": [
+    {
+      "id": "1",
+      "phase": 1,
+      "name": "Phase 1",
+      "subtasks": [
+        {
+          "id": "subtask-1",
+          "description": "Add CardsConfig struct to bop-core for .cards/config.json",
+          "service": "bop-core",
+          "files_to_modify": [
+            "crates/bop-core/src/lib.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-core/src/config.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo build -p bop-core",
+            "expected": "Build succeeds"
+          },
+          "status": "completed",
+          "notes": "Define CardsConfig struct with zellij_session: Option<String>, add read/write helpers similar to Config"
+        },
+        {
+          "id": "subtask-2",
+          "description": "Enhance bop init to detect Zellij session and write .cards/config.json",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "verification": {
+            "type": "manual",
+            "instructions": "Run 'bop init' inside and outside Zellij session, verify config.json is written correctly and appropriate messages are printed"
+          },
+          "status": "completed",
+          "notes": "Check ZELLIJ_SESSION_NAME env var, write to .cards/config.json if present, print hint if not present"
+        },
+        {
+          "id": "subtask-3",
+          "description": "Add quick-start guide output to bop init",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cargo build && ./target/debug/bop init 2>&1 | grep -q 'bop new'",
+            "expected": "Quick-start guide is printed"
+          },
+          "status": "completed",
+          "notes": "Added quick-start guide output showing 'bop workspace ready', quick start commands (bop new, list, dispatcher, gantt), and docs link. Build successful."
+        },
+        {
+          "id": "subtask-4",
+          "description": "Add Zellij session check to bop doctor",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/doctor.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/doctor.rs"
+          ],
+          "verification": {
+            "type": "manual",
+            "instructions": "Run 'bop doctor' inside and outside Zellij, verify it detects ZELLIJ_SESSION_NAME correctly"
+          },
+          "status": "completed",
+          "notes": "Added Zellij session detection to bop doctor. Checks ZELLIJ_SESSION_NAME environment variable and displays session name if present, or informational message if not running in Zellij. Committed in 8af056f.",
+          "updated_at": "2026-03-07T06:36:54.764406+00:00"
+        },
+        {
+          "id": "subtask-5",
+          "description": "Add Zellij web client port check to bop doctor",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/doctor.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/doctor.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo build && ./target/debug/bop doctor 2>&1 | grep -q '8082'",
+            "expected": "Port 8082 check appears in output"
+          },
+          "status": "completed",
+          "notes": "Added Zellij web client port check to bop doctor. Checks port 8082 using TcpStream::connect_timeout with 100ms timeout. Displays 'ok' if web client is running, 'info' if not. Committed in cae20bc.",
+          "updated_at": "2026-03-07T06:39:03.493337+00:00"
+        },
+        {
+          "id": "subtask-6",
+          "description": "Add make check verification to bop doctor with --fast flag",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/main.rs",
+            "crates/bop-cli/src/doctor.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/doctor.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo build && ./target/debug/bop doctor --help | grep -q 'fast'",
+            "expected": "--fast flag exists"
+          },
+          "status": "completed",
+          "notes": "Successfully added --fast flag to bop doctor command. When --fast is used, the make check verification is skipped. Added make check section that runs by default and verifies the project builds and passes tests. All tests pass including new cmd_doctor_fast_mode test.",
+          "updated_at": "2026-03-07T06:42:20.514030+00:00"
+        },
+        {
+          "id": "subtask-7",
+          "description": "Run make check to verify all changes pass quality gates",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "make check",
+            "expected": "All tests pass, clippy clean, formatting correct"
+          },
+          "status": "completed",
+          "notes": "Successfully ran make check. All tests pass (339 tests), clippy is clean, formatting is correct. Fixed formatting issues in crates/bop-cli/src/main.rs and crates/bop-core/src/lib.rs (line wrapping of .with_context calls). Committed formatting fixes in 3354969.",
+          "updated_at": "2026-03-07T06:44:04.205413+00:00"
+        },
+        {
+          "id": "subtask-8",
+          "description": "Create output/result.md with sample bop init and bop doctor output",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [
+            "output/result.md"
+          ],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "test -f output/result.md && grep -q 'bop init' output/result.md",
+            "expected": "File exists and contains sample output"
+          },
+          "status": "completed",
+          "notes": "Created comprehensive output/result.md with sample bop init output (both inside and outside Zellij) and bop doctor output (with and without --fast flag). Verification passed. Committed in 312850c.",
+          "updated_at": "2026-03-07T06:47:30.000000+00:00"
+        }
+      ]
+    }
+  ],
+  "last_updated": "2026-03-07T06:47:30.000000+00:00",
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2026-03-07T06:51:55.984134+00:00",
+      "issues": [],
+      "duration_seconds": 266.09
+    },
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2026-03-07T06:53:59.380224+00:00",
+      "issues": [],
+      "duration_seconds": 351.46
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 2,
+    "last_iteration": 1,
+    "last_status": "approved",
+    "issues_by_type": {}
+  },
+  "status": "human_review",
+  "planStatus": "review",
+  "reviewReason": "completed",
+  "updated_at": "2026-03-07T23:57:36.600Z",
+  "xstateState": "human_review",
+  "executionPhase": "complete"
+}

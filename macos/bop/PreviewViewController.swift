@@ -22,6 +22,7 @@ fileprivate struct BopCardMeta: Codable {
     let acceptanceCriteria: [String]?
     let zellijSession: String?
     let zellijPane: String?
+    let acSpecId: String?
 
     enum CodingKeys: String, CodingKey {
         case id, title, description, stage, priority, created, labels, progress, subtasks, stages
@@ -32,6 +33,7 @@ fileprivate struct BopCardMeta: Codable {
         case acceptanceCriteria = "acceptance_criteria"
         case zellijSession = "zellij_session"
         case zellijPane = "zellij_pane"
+        case acSpecId = "ac_spec_id"
     }
 }
 
@@ -64,6 +66,24 @@ private struct RoadmapSnapshot {
     let priorityCounts: [String: Int]
     let phaseCount: Int
     let featureCount: Int
+}
+
+// MARK: - Auto-Claude plan model
+
+private struct AcPlan: Codable {
+    let phases: [AcPhase]
+}
+
+private struct AcPhase: Codable {
+    let id: String
+    let name: String
+    let subtasks: [AcSubtask]
+}
+
+private struct AcSubtask: Codable {
+    let id: String
+    let description: String
+    let status: String   // "pending" | "in_progress" | "completed"
 }
 
 // MARK: - Palette
@@ -99,6 +119,8 @@ private extension Color {
     static let attachText    = Color.black
     static let tailBg        = Color(red: 0.18, green: 0.42, blue: 0.82)
     static let tailText      = Color.white
+    static let webBg         = Color(red: 0.60, green: 0.45, blue: 0.85)
+    static let webText       = Color.white
 
     static let barEmpty      = Color(red: 0.25, green: 0.16, blue: 0.42)
     static let barFill       = Color(red: 0.85, green: 0.45, blue: 0.95)
@@ -443,11 +465,184 @@ private func parseSpecSections(_ text: String) -> SpecSections {
     return SpecSections(rationale: rationale, userStories: userStories, dependencies: dependencies)
 }
 
+// MARK: - Git root discovery
+
+/// Walk parent directories from `url` (max 6 levels) looking for `.auto-claude` dir.
+private func findGitRoot(from url: URL) -> URL? {
+    let fm = FileManager.default
+    var current = url.deletingLastPathComponent()
+    for _ in 0..<6 {
+        let acDir = current.appendingPathComponent(".auto-claude")
+        var isDir: ObjCBool = false
+        if fm.fileExists(atPath: acDir.path, isDirectory: &isDir), isDir.boolValue {
+            return current
+        }
+        let parent = current.deletingLastPathComponent()
+        if parent.path == current.path { break }
+        current = parent
+    }
+    return nil
+}
+
+/// Resolve the spec directory matching `specId` prefix under `.auto-claude/specs/`.
+private func resolveSpecDir(gitRoot: URL, specId: String) -> URL? {
+    let specsDir = gitRoot.appendingPathComponent(".auto-claude/specs")
+    guard let items = try? FileManager.default.contentsOfDirectory(atPath: specsDir.path) else {
+        return nil
+    }
+    let prefix = specId + "-"
+    for item in items.sorted() {
+        if item.hasPrefix(prefix) {
+            return specsDir.appendingPathComponent(item)
+        }
+    }
+    return nil
+}
+
+/// Load AcPlan from the implementation_plan.json in the spec dir resolved from card URL.
+private func loadAcPlan(cardURL: URL, specId: String) -> AcPlan? {
+    guard let gitRoot = findGitRoot(from: cardURL),
+          let specDir = resolveSpecDir(gitRoot: gitRoot, specId: specId) else {
+        return nil
+    }
+    let planURL = specDir.appendingPathComponent("implementation_plan.json")
+    guard let data = try? Data(contentsOf: planURL) else {
+        return nil
+    }
+    return try? JSONDecoder().decode(AcPlan.self, from: data)
+}
+
+// MARK: - Live log tail view
+
+private struct LiveLogView: View {
+    let cardURL: URL
+    let cardID: String
+    let maxLines: Int = 30
+
+    @State private var logLines: [String] = []
+    @State private var pulseScale: CGFloat = 1.0
+    @State private var refreshTimer: Timer?
+
+    private func encodeBopPathSegment(_ raw: String) -> String {
+        let unreserved = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~".utf8)
+        var out = ""
+        out.reserveCapacity(raw.utf8.count)
+        for byte in raw.utf8 {
+            if unreserved.contains(byte) {
+                out.append(Character(UnicodeScalar(byte)))
+            } else {
+                out += String(format: "%%%02X", byte)
+            }
+        }
+        return out
+    }
+
+    private var openLogsURL: URL? {
+        let eid = encodeBopPathSegment(cardID)
+        return URL(string: "bop://card/\(eid)/logs")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(Color.stageActive)
+                    .frame(width: 8, height: 8)
+                    .scaleEffect(pulseScale)
+                    .animation(.easeInOut(duration: 1).repeatForever(autoreverses: true), value: pulseScale)
+
+                Text("Live Tail (last \(maxLines) lines)")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.textSecondary)
+
+                Spacer()
+
+                if let logsURL = openLogsURL {
+                    Link(destination: logsURL) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.up.forward.square")
+                                .font(.system(size: 11))
+                            Text("Open full log")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundColor(.tailText)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.tailBg)
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                    }
+                    .help("Open full log: bop logs \(cardID)")
+                }
+            }
+
+            ScrollView {
+                if !logLines.isEmpty {
+                    Text(logLines.joined(separator: "\n"))
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(Color.white.opacity(0.8))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Text("No logs yet.")
+                        .font(.system(size: 12))
+                        .foregroundColor(.textMuted)
+                }
+            }
+            .frame(height: 200)
+            .padding(16)
+            .background(Color.black.opacity(0.4))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .onAppear {
+            refreshLogs()
+            startPulse()
+            startAutoRefresh()
+        }
+        .onDisappear {
+            stopAutoRefresh()
+        }
+    }
+
+    private func refreshLogs() {
+        var allLines: [String] = []
+
+        let stdoutURL = cardURL.appendingPathComponent("logs/stdout.log")
+        let stderrURL = cardURL.appendingPathComponent("logs/stderr.log")
+
+        if let data = try? Data(contentsOf: stdoutURL),
+           let text = String(data: data, encoding: .utf8) {
+            allLines.append(contentsOf: text.components(separatedBy: .newlines))
+        }
+
+        if let data = try? Data(contentsOf: stderrURL),
+           let text = String(data: data, encoding: .utf8) {
+            allLines.append(contentsOf: text.components(separatedBy: .newlines))
+        }
+
+        logLines = Array(allLines.suffix(maxLines))
+    }
+
+    private func startPulse() {
+        pulseScale = 1.3
+    }
+
+    private func startAutoRefresh() {
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+            refreshLogs()
+        }
+    }
+
+    private func stopAutoRefresh() {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+    }
+}
+
 // MARK: - Card view
 
 fileprivate enum CardTab: String, CaseIterable {
     case overview = "Overview"
     case subtasks = "Subtasks"
+    case plan = "Plan"
     case logs = "Logs"
     case files = "Files"
 }
@@ -463,6 +658,8 @@ fileprivate struct BopCardPreview: View {
     var specSections: SpecSections? = nil
 
     @State private var selectedTab: CardTab = .overview
+    @State private var collapsedPhases: Set<String> = []
+    var acPlan: AcPlan? = nil
 
     private var displayTitle: String {
         meta?.title ?? meta?.id ?? url?.lastPathComponent ?? "BopCard"
@@ -525,6 +722,11 @@ fileprivate struct BopCardPreview: View {
         return "Live tail: bop logs \(id) --follow"
     }
 
+    private var zellijWebURL: URL? {
+        guard isRunning, let session = meta?.zellijSession else { return nil }
+        return URL(string: "http://127.0.0.1:8082/\(session)")
+    }
+
     private var isRoadmapWorkflow: Bool {
         guard let m = meta else { return false }
         if m.workflowMode?.lowercased() == "roadmap" {
@@ -554,6 +756,13 @@ fileprivate struct BopCardPreview: View {
 
     private func displayStageName(_ key: String) -> String {
         stageDisplayName(key)
+    }
+
+    private func logsExist(at cardURL: URL) -> Bool {
+        let fm = FileManager.default
+        let stdoutURL = cardURL.appendingPathComponent("logs/stdout.log")
+        let stderrURL = cardURL.appendingPathComponent("logs/stderr.log")
+        return fm.fileExists(atPath: stdoutURL.path) || fm.fileExists(atPath: stderrURL.path)
     }
 
     private func inferredRoadmapProgress(_ m: BopCardMeta) -> Int {
@@ -643,9 +852,23 @@ fileprivate struct BopCardPreview: View {
         }
     }
 
+    private var availableTabs: [CardTab] {
+        CardTab.allCases.filter { tab in
+            if tab == .plan {
+                return meta?.acSpecId != nil && acPlan != nil
+            }
+            return true
+        }
+    }
+
     private func tabName(for tab: CardTab) -> String {
         if tab == .subtasks, let count = meta?.subtasks?.count, count > 0 {
             return "Subtasks (\(count))"
+        }
+        if tab == .plan, let plan = acPlan {
+            let total = plan.phases.flatMap(\.subtasks).count
+            let done = plan.phases.flatMap(\.subtasks).filter { $0.status == "completed" }.count
+            return "Plan (\(done)/\(total))"
         }
         return tab.rawValue
     }
@@ -731,7 +954,7 @@ fileprivate struct BopCardPreview: View {
 
             // Tabs
             HStack(spacing: 24) {
-                ForEach(CardTab.allCases, id: \.self) { tab in
+                ForEach(availableTabs, id: \.self) { tab in
                     VStack(spacing: 6) {
                         Text(tabName(for: tab))
                             .font(.system(size: 14, weight: selectedTab == tab ? .bold : .medium))
@@ -759,6 +982,8 @@ fileprivate struct BopCardPreview: View {
                         overviewTab(m)
                     case .subtasks:
                         subtasksTab(m)
+                    case .plan:
+                        planTab()
                     case .logs:
                         logsTab()
                     case .files:
@@ -813,6 +1038,22 @@ fileprivate struct BopCardPreview: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
                     .help("Attach to zellij session: \(session)")
+                }
+                if let zellijWebURL {
+                    Link(destination: zellijWebURL) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "globe")
+                                .font(.system(size: 11))
+                            Text("Web")
+                                .font(.system(size: 13, weight: .bold))
+                        }
+                        .foregroundColor(.webText)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.webBg)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .help("Open Zellij web interface")
                 }
                 if isRunning {
                     if let stopURL {
@@ -949,6 +1190,11 @@ fileprivate struct BopCardPreview: View {
                     stages: m.stages,
                     displayStages: displayStageOrder(for: m)
                 )
+            }
+
+            // Live log tail view (only if logs exist)
+            if let cardURL = url, logsExist(at: cardURL) {
+                LiveLogView(cardURL: cardURL, cardID: m.id)
             }
 
             // Roadmap snapshot summary (feature counts)
@@ -1196,6 +1442,144 @@ fileprivate struct BopCardPreview: View {
     }
 
     @ViewBuilder
+    private func planTab() -> some View {
+        if let plan = acPlan {
+            let allSubtasks = plan.phases.flatMap(\.subtasks)
+            let doneCount = allSubtasks.filter { $0.status == "completed" }.count
+            let totalCount = allSubtasks.count
+            let pct = totalCount > 0 ? Int(Double(doneCount) / Double(totalCount) * 100) : 0
+
+            VStack(alignment: .leading, spacing: 16) {
+                // Header progress summary (same style as subtasksTab)
+                HStack {
+                    Text("\(doneCount) of \(totalCount) subtasks complete")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.textSecondary)
+                    Spacer()
+                    Text("\(pct)%")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.textSecondary)
+                }
+
+                // Overall progress bar
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Rectangle().fill(Color.barEmpty)
+                        Rectangle()
+                            .fill(Color.barFill)
+                            .frame(width: max(0, geo.size.width * CGFloat(doneCount) / max(1, CGFloat(totalCount))))
+                    }
+                }
+                .frame(height: 6)
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+
+                // Per-phase sections
+                ForEach(plan.phases, id: \.id) { phase in
+                    planPhaseSection(phase)
+                }
+            }
+        } else {
+            Text("No plan loaded.")
+                .foregroundColor(.textMuted)
+        }
+    }
+
+    private func phaseIconInfo(_ phase: AcPhase) -> (icon: String, color: Color) {
+        let done = phase.subtasks.filter { $0.status == "completed" }.count
+        let total = phase.subtasks.count
+        if done == total && total > 0 {
+            return ("circle.fill", .stageActive)
+        } else if done > 0 {
+            return ("circle.lefthalf.filled", .pillOrange)
+        } else {
+            return ("circle", .textMuted)
+        }
+    }
+
+    @ViewBuilder
+    private func planPhaseSection(_ phase: AcPhase) -> some View {
+        let phaseDone = phase.subtasks.filter { $0.status == "completed" }.count
+        let phaseTotal = phase.subtasks.count
+        let isCollapsed = collapsedPhases.contains(phase.id)
+        let iconInfo = phaseIconInfo(phase)
+
+        VStack(alignment: .leading, spacing: 0) {
+            // Phase header row
+            HStack(spacing: 12) {
+                Image(systemName: iconInfo.icon)
+                    .foregroundColor(iconInfo.color)
+                    .font(.system(size: 18))
+
+                Text(phase.name)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.textPrimary)
+                    .lineLimit(2)
+
+                Spacer()
+
+                Text("\(phaseDone)/\(phaseTotal)")
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .foregroundColor(.textSecondary)
+
+                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.textMuted)
+            }
+            .padding()
+            .background(Color.black.opacity(0.15))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.05), lineWidth: 1))
+            .onTapGesture {
+                if collapsedPhases.contains(phase.id) {
+                    collapsedPhases.remove(phase.id)
+                } else {
+                    collapsedPhases.insert(phase.id)
+                }
+            }
+
+            // Subtask rows (when expanded)
+            if !isCollapsed {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(phase.subtasks, id: \.id) { subtask in
+                        planSubtaskRow(subtask)
+                    }
+                }
+                .padding(.leading, 32)
+                .padding(.top, 8)
+            }
+        }
+    }
+
+    private func subtaskIconInfo(_ status: String) -> (icon: String, iconColor: Color, textColor: Color) {
+        switch status {
+        case "completed":
+            return ("checkmark.circle.fill", .stageActive, .textSecondary)
+        case "in_progress":
+            return ("arrow.triangle.2.circlepath", .pillOrange, .textPrimary)
+        default:
+            return ("circle", .textMuted, .textMuted)
+        }
+    }
+
+    @ViewBuilder
+    private func planSubtaskRow(_ subtask: AcSubtask) -> some View {
+        let info = subtaskIconInfo(subtask.status)
+
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: info.icon)
+                .foregroundColor(info.iconColor)
+                .font(.system(size: 16))
+
+            Text(subtask.description)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(info.textColor)
+                .lineLimit(3)
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 12)
+    }
+
+    @ViewBuilder
     private func logsTab() -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if !logs.isEmpty {
@@ -1346,6 +1730,12 @@ class PreviewViewController: NSViewController, QLPreviewingController {
                 .sorted()
         }
 
+        // Load AC implementation plan if spec ID is set
+        var acPlan: AcPlan?
+        if let specId = meta?.acSpecId {
+            acPlan = loadAcPlan(cardURL: url, specId: specId)
+        }
+
         DispatchQueue.main.async {
             self.hostingView.rootView = BopCardPreview(
                 url: url,
@@ -1355,7 +1745,8 @@ class PreviewViewController: NSViewController, QLPreviewingController {
                 lastActivityAt: lastActivityAt,
                 activeTool: activeTool,
                 roadmapSnapshot: roadmapSnapshot,
-                specSections: specSections
+                specSections: specSections,
+                acPlan: acPlan
             )
             self.preferredContentSize = NSSize(width: 820, height: 720)
             handler(nil)

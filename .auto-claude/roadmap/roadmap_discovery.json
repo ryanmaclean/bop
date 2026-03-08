@@ -1,0 +1,190 @@
+{
+  "project_name": "bop - Heterogeneous Agent Orchestrator",
+  "project_type": "cli",
+  "tech_stack": {
+    "primary_language": "Rust",
+    "frameworks": [
+      "Tokio (async runtime)",
+      "Axum (HTTP server)",
+      "Clap (CLI)",
+      "Nushell (adapter scripts)"
+    ],
+    "key_dependencies": [
+      "tokio",
+      "axum",
+      "clap",
+      "serde_json",
+      "chrono",
+      "notify (filesystem watching)",
+      "walkdir",
+      "Nushell 0.100+",
+      "Zellij (terminal multiplexer)",
+      "QEMU (future VM isolation)",
+      "Jujutsu (VCS)"
+    ]
+  },
+  "target_audience": {
+    "primary_persona": "Software development teams using AI coding assistants who need to orchestrate multiple AI agents working in parallel on different tasks",
+    "secondary_personas": [
+      "DevOps engineers managing automated code generation workflows",
+      "Solo developers leveraging multiple AI assistants",
+      "AI/LLM researchers experimenting with agent coordination",
+      "Platform teams building internal developer tools"
+    ],
+    "pain_points": [
+      "Managing multiple AI coding agents simultaneously is chaotic and error-prone",
+      "No visibility into agent state transitions and work progress",
+      "Difficult to coordinate parallel AI work without conflicts",
+      "Lack of reliability guarantees when AI agents crash or rate-limit",
+      "No standardized way to plug in different AI providers (Claude, Codex, Ollama, etc.)",
+      "Hard to track which changes came from which agent or task",
+      "CI/CD integration with AI agents is complex and fragile",
+      "State management across agent runs requires custom databases or complex tooling"
+    ],
+    "goals": [
+      "Orchestrate multiple AI coding agents working on different tasks in parallel",
+      "Maintain clear visibility into agent state and progress (pending → running → done → merged)",
+      "Ensure reliability with atomic state transitions and crash recovery",
+      "Easily swap between different AI providers based on cost, rate limits, or capabilities",
+      "Track provenance of AI-generated changes for review and rollback",
+      "Integrate AI agent workflows into CI/CD pipelines",
+      "Scale from solo developer workflows to team-wide agent orchestration"
+    ],
+    "usage_context": "Developers use bop during active development sprints to parallelize work across AI agents. They create job cards for specific implementation tasks, let the dispatcher route cards to appropriate AI providers, review completed work in the filesystem state machine, and merge approved changes. The filesystem-as-state-machine design means they can inspect progress in Finder/Quick Look without special tooling. Teams integrate bop into CI/CD for automated code generation, testing, and quality gates."
+  },
+  "product_vision": {
+    "one_liner": "A filesystem-based orchestrator that coordinates multiple AI coding agents in parallel with atomic state transitions, pluggable providers, and native macOS integration.",
+    "problem_statement": "Development teams want to leverage AI coding assistants at scale, but managing multiple agents, tracking their work, handling failures, and coordinating changes is complex. Existing solutions require databases, custom state management, and lack visibility. Teams need a simple, reliable way to orchestrate heterogeneous AI agents with clear state tracking and native OS integration.",
+    "value_proposition": "bop treats the filesystem as the state machine - no database needed. Directory bundles (.card) move atomically between states (pending → running → done → merged). Quick Look integration means you can preview card status in Finder. Pluggable Nushell adapters make it trivial to add new AI providers. Lock-based dispatcher ensures reliability. The filesystem IS the API - simple, inspectable, and git-friendly. Future VM isolation (QEMU) will provide security guarantees for untrusted agent code.",
+    "success_metrics": [
+      "Number of AI providers supported via adapters (currently 8+, target 15+)",
+      "Successful parallel card executions per day without conflicts",
+      "Mean time to recovery from agent crashes or rate limits (target <1 minute)",
+      "Developer adoption rate (teams using bop for daily workflows)",
+      "Percentage of AI-generated changes that pass merge gates and quality checks",
+      "Community contributions: new adapters, templates, and integrations",
+      "macOS Quick Look preview engagement (percentage of cards previewed before merging)",
+      "VM isolation adoption rate (percentage of cards running in QEMU vs local process)"
+    ]
+  },
+  "current_state": {
+    "maturity": "mvp",
+    "existing_features": [
+      "Filesystem state machine (pending/running/done/merged/failed directories)",
+      "Atomic state transitions via fs::rename",
+      "Dispatcher with single-process locking and PID-based lease heartbeat",
+      "8+ AI provider adapters (Claude, Codex, Ollama, Aider, Goose, OpenCode, Mock, QEMU)",
+      "Nushell-based adapter scripts (~20 LOC each) with pluggable architecture",
+      "Card bundle format (.card directories) with meta.json, spec.md, prompt.md, logs/, output/",
+      "CLI commands: new, status, inspect, gantt, dispatcher, merge-gate, retry, kill, logs, approve",
+      "macOS Quick Look extension for previewing .card bundles in Finder",
+      "BopDeck.app companion app with notch overlay and bop:// URL scheme",
+      "Zellij integration (layout + WASM status plugin showing live card counts)",
+      "Card symbol protocol (playing card glyphs for team/priority encoding)",
+      "Planning poker commands (open, submit, reveal, consensus)",
+      "Policy check gates (anti-slop validation on staged changes)",
+      "Merge gate with acceptance criteria verification",
+      "Integration tests (dispatcher_harness, job_control_harness, merge_gate_harness, serve_smoke)",
+      "CI/CD via GitHub Actions (ci.yml, release.yml, repo-health.yml)",
+      "HTTP API endpoint (POST /cards/new) via axum for remote card creation",
+      "Provider rotation on rate-limit (exit code 75)",
+      "APFS COW cloning for efficient card template instantiation",
+      "Worktree management for isolated git/jj branches per card",
+      "Reaper for orphaned cards (dead PID or stale heartbeat)"
+    ],
+    "known_gaps": [
+      "VM isolation not yet default (QEMU adapter exists but not primary path)",
+      "Limited documentation for new users (no comprehensive guide)",
+      "Linux support is secondary to macOS (some features macOS-only)",
+      "No web dashboard for team visibility (CLI and Finder only)",
+      "Adapter marketplace or registry for discovering community providers",
+      "Metrics/observability beyond logs and CLI status",
+      "Multi-user coordination primitives (currently optimized for single dispatcher instance)",
+      "Rollback/undo commands for failed merges",
+      "Card dependency graphs (blocking relationships)",
+      "Template library and discovery mechanism",
+      "Integration with issue trackers (GitHub Issues, Linear, Jira)",
+      "Cost tracking across AI providers",
+      "A/B testing framework for comparing provider quality"
+    ],
+    "technical_debt": [
+      "Migration to VM-first architecture (MICROCLAW) in progress - adapters still run on host",
+      "Some legacy ZSH scripts remain (migration to Nushell nearly complete)",
+      "Worktree path handling differs between git and jj engines",
+      "Target directory cleanup needed after fs::rename to avoid stale cargo artifacts",
+      "Policy check git quotepath handling for non-ASCII SMP paths",
+      "Merge-gate retry loop vulnerability when cards already in failed/ (mitigated with unique_failed_path)",
+      "bop new ID uniqueness check only scanned pending/ initially (now scans all 5 states)",
+      "CARGO_MANIFEST_DIR compile-time path broke after repo rename (fixed with runtime git root detection)",
+      "Some binary bloat from dev dependencies and debug symbols in release builds",
+      "VTODO vs VEVENT iCalendar projection inconsistency"
+    ]
+  },
+  "competitive_context": {
+    "alternatives": [
+      "Manual AI assistant workflows (ChatGPT/Claude web UI, copy-paste)",
+      "GitHub Copilot / Cursor (single-agent, IDE-integrated)",
+      "Zapier / Make / n8n (general automation, not AI-coding focused)",
+      "Custom CI/CD scripts orchestrating AI APIs",
+      "LangChain / LlamaIndex (framework-level, requires custom orchestration)",
+      "Aider / Goose / OpenCode standalone (single provider, no multi-agent coordination)",
+      "Jenkins / GitHub Actions (general CI/CD, no AI-specific state machine)",
+      "AutoGPT / BabyAGI / AgentGPT (autonomous agents, different use case)"
+    ],
+    "differentiators": [
+      "Filesystem IS the state machine - no database, inspectable in Finder/Quick Look",
+      "Atomic state transitions via fs::rename guarantee consistency",
+      "Pluggable adapter architecture - trivial to add new AI providers",
+      "Native macOS integration (Quick Look, Spotlight, notch overlay, bop:// URLs)",
+      "Future VM isolation (QEMU) for security and reproducibility",
+      "Card symbol protocol (playing card glyphs) for team/priority encoding",
+      "Lock-based reliability (dispatcher locks, PID leases, orphan reaping)",
+      "Git/Jujutsu integration with isolated worktrees per card",
+      "Zellij integration with live status dashboard",
+      "Planning poker built-in for estimation workflows",
+      "APFS COW cloning for instant card creation from templates",
+      "Exit code 75 provider rotation on rate limits",
+      "Merge gates with acceptance criteria and policy checks"
+    ],
+    "market_position": "bop occupies a unique niche: multi-agent AI coding orchestration with filesystem-based state management and native OS integration. It's more opinionated and integrated than general automation tools (Zapier), more reliable than manual workflows, and more flexible than single-provider IDEs (Copilot). The VM-first architecture (MICROCLAW) positions it as a secure, reproducible platform for untrusted AI-generated code. Target market is power users and teams who've outgrown manual AI workflows but need more control than fully autonomous agents.",
+    "competitor_pain_points": [],
+    "competitor_analysis_available": false
+  },
+  "constraints": {
+    "technical": [
+      "macOS-primary platform (Quick Look, APFS COW, notch overlay are macOS-only)",
+      "Requires Rust 1.75+ for compilation",
+      "Requires Nushell 0.100+ for adapter scripts",
+      "QEMU required for future VM isolation (not yet default path)",
+      "Jujutsu VCS preferred over git (some features jj-specific)",
+      "SMP Unicode characters (U+10000+) break in filenames across tooling",
+      "Single dispatcher instance per .cards/ directory (distributed coordination not yet supported)",
+      "Filesystem performance limits scale (thousands of cards may degrade)",
+      "APFS COW cloning macOS-only (Linux falls back to regular copy)",
+      "AI provider API rate limits require rotation logic",
+      "No Windows support currently"
+    ],
+    "resources": [
+      "Small team: 5 contributors based on git history",
+      "Active development: multiple commits per day based on recent history",
+      "Likely solo maintainer or small core team (based on commit patterns)",
+      "Community-driven adapter contributions expected",
+      "No external funding mentioned (likely bootstrapped/open-source)",
+      "Time constraint: VM-first architecture migration in progress",
+      "Documentation bandwidth limited (CONTRIBUTING.md exists, but comprehensive guide missing)"
+    ],
+    "dependencies": [
+      "External AI APIs: Claude (Anthropic), OpenAI Codex, Ollama (local), Aider, Goose, OpenCode",
+      "API keys required for each provider (LINEAR_API_KEY in env)",
+      "Rate limits from AI providers drive exit code 75 rotation logic",
+      "Zellij terminal multiplexer required for full UI experience",
+      "macOS for full feature set (Linux partial support)",
+      "QEMU for future VM isolation (in roadmap but not yet required)",
+      "Git or Jujutsu for worktree management and merge gates",
+      "Nushell runtime for all adapter scripts",
+      "GitHub for CI/CD and releases (GitHub Actions)",
+      "Filesystem performance and APFS features for optimal operation"
+    ]
+  },
+  "created_at": "2026-03-06T19:15:00Z"
+}

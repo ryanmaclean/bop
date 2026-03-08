@@ -1,0 +1,634 @@
+{
+  "id": "roadmap-2026-03-06T19:55:00Z",
+  "project_name": "bop - Heterogeneous Agent Orchestrator",
+  "version": "1.0",
+  "vision": "A filesystem-based orchestrator that coordinates multiple AI coding agents in parallel with atomic state transitions, pluggable providers, and native macOS integration.",
+  "target_audience": {
+    "primary": "Software development teams using AI coding assistants who need to orchestrate multiple AI agents working in parallel on different tasks",
+    "secondary": [
+      "DevOps engineers managing automated code generation workflows",
+      "Solo developers leveraging multiple AI assistants",
+      "AI/LLM researchers experimenting with agent coordination",
+      "Platform teams building internal developer tools"
+    ]
+  },
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "Foundation (MVP Completion)",
+      "description": "Complete the MVP with essential reliability, usability, and recovery features. Focus on making bop production-ready for single-user and small team workflows.",
+      "order": 1,
+      "status": "planned",
+      "features": [
+        "feature-1",
+        "feature-2",
+        "feature-3",
+        "feature-4",
+        "feature-5"
+      ],
+      "milestones": [
+        {
+          "id": "milestone-1-1",
+          "title": "Documentation & Onboarding Complete",
+          "description": "New users can install bop and run their first AI agent workflow in under 10 minutes",
+          "features": ["feature-1"],
+          "status": "planned"
+        },
+        {
+          "id": "milestone-1-2",
+          "title": "Reliability Hardening Complete",
+          "description": "bop automatically recovers from transient failures and rate limits without manual intervention",
+          "features": ["feature-2", "feature-5"],
+          "status": "planned"
+        },
+        {
+          "id": "milestone-1-3",
+          "title": "Workflow Management Complete",
+          "description": "Users can model card dependencies, rollback failed merges, and manage complex multi-card workflows",
+          "features": ["feature-3", "feature-4"],
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "phase-2",
+      "name": "Enhancement (Visibility & Integration)",
+      "description": "Add team visibility, metrics, and integrations to scale bop to larger teams and CI/CD pipelines. Focus on observability and ecosystem connectivity.",
+      "order": 2,
+      "status": "planned",
+      "features": [
+        "feature-6",
+        "feature-7",
+        "feature-8",
+        "feature-9",
+        "feature-10"
+      ],
+      "milestones": [
+        {
+          "id": "milestone-2-1",
+          "title": "Team Visibility Achieved",
+          "description": "Teams can see real-time card status, metrics, and costs across all running agents in a web dashboard",
+          "features": ["feature-6", "feature-7", "feature-10"],
+          "status": "planned"
+        },
+        {
+          "id": "milestone-2-2",
+          "title": "Ecosystem Integration Live",
+          "description": "bop integrates with issue trackers and adapter marketplace, enabling seamless workflow automation",
+          "features": ["feature-8", "feature-9"],
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "phase-3",
+      "name": "Scale (Multi-user & Advanced)",
+      "description": "Enable multi-user coordination, VM isolation by default, and advanced provider management. Focus on security, scalability, and experimentation.",
+      "order": 3,
+      "status": "planned",
+      "features": [
+        "feature-11",
+        "feature-12",
+        "feature-13",
+        "feature-14",
+        "feature-15"
+      ],
+      "milestones": [
+        {
+          "id": "milestone-3-1",
+          "title": "VM-First Architecture Complete",
+          "description": "All cards run in QEMU VMs by default with secure boot and TPM attestation (MICROCLAW)",
+          "features": ["feature-11"],
+          "status": "planned"
+        },
+        {
+          "id": "milestone-3-2",
+          "title": "Team Collaboration Enabled",
+          "description": "Multiple users can coordinate card work with locking, conflict detection, and workload distribution",
+          "features": ["feature-12"],
+          "status": "planned"
+        },
+        {
+          "id": "milestone-3-3",
+          "title": "Provider Ecosystem Matured",
+          "description": "Developers can easily create, test, share, and compare AI provider adapters",
+          "features": ["feature-13", "feature-14", "feature-15"],
+          "status": "planned"
+        }
+      ]
+    },
+    {
+      "id": "phase-4",
+      "name": "Future (Vision & Innovation)",
+      "description": "Explore advanced features like real-time streaming, distributed coordination, and advanced workflow primitives. Focus on innovation and community feedback.",
+      "order": 4,
+      "status": "planned",
+      "features": [
+        "feature-16",
+        "feature-17",
+        "feature-18"
+      ],
+      "milestones": [
+        {
+          "id": "milestone-4-1",
+          "title": "Real-time Streaming Available",
+          "description": "Teams can watch card progress in real-time via SSE/WebSocket connections",
+          "features": ["feature-16"],
+          "status": "planned"
+        },
+        {
+          "id": "milestone-4-2",
+          "title": "Advanced Workflow Tools Available",
+          "description": "Users have sophisticated conflict detection and distributed coordination capabilities",
+          "features": ["feature-17", "feature-18"],
+          "status": "planned"
+        }
+      ]
+    }
+  ],
+  "features": [
+    {
+      "id": "feature-1",
+      "title": "Comprehensive Getting-Started Guide",
+      "description": "Create an interactive, end-to-end tutorial that takes new users from installation to their first successful AI agent workflow. Include quickstart commands, common workflows, troubleshooting, and best practices.",
+      "rationale": "Addresses the major pain point of 'limited documentation for new users'. Many teams are blocked from adopting bop because they don't understand the filesystem state machine model or how to set up their first card. A great getting-started guide reduces time-to-first-value from hours to minutes.",
+      "priority": "must",
+      "complexity": "low",
+      "impact": "high",
+      "phase_id": "phase-1",
+      "dependencies": [],
+      "status": "idea",
+      "acceptance_criteria": [
+        "New user can install bop and run 'bop new' in under 5 minutes following the guide",
+        "Guide explains filesystem state machine (.cards/pending → running → done → merged) with diagrams",
+        "Tutorial includes at least 3 example workflows (simple task, multi-card parallel work, CI/CD integration)",
+        "Troubleshooting section covers common errors (adapter not found, rate limits, merge conflicts)",
+        "Guide is indexed by Spotlight and accessible via 'bop help tutorial'"
+      ],
+      "user_stories": [
+        "As a new user, I want a step-by-step tutorial so that I can run my first AI agent task without reading the entire codebase",
+        "As a team lead, I want onboarding documentation so that I can get my team started with bop in one sprint",
+        "As a solo developer, I want common workflow examples so that I can copy-paste and adapt them to my needs"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-2",
+      "title": "Auto-Retry with Exponential Backoff",
+      "description": "Automatically retry failed cards with intelligent exponential backoff when the failure is transient (network errors, rate limits, temporary API outages). Distinguish between retriable and permanent failures.",
+      "rationale": "Addresses the pain point 'Lack of reliability guarantees when AI agents crash or rate-limit'. Currently, when a card fails due to a transient error (exit code 75 for rate limit, network timeout, etc.), it goes to failed/ and requires manual retry. This feature makes bop resilient to temporary failures without human intervention.",
+      "priority": "must",
+      "complexity": "medium",
+      "impact": "high",
+      "phase_id": "phase-1",
+      "dependencies": [],
+      "status": "idea",
+      "acceptance_criteria": [
+        "Exit code 75 (rate limit) triggers retry with exponential backoff (1min, 2min, 4min, 8min, 16min, then fail)",
+        "Network errors (DNS, connection timeout) are automatically retried up to 3 times",
+        "Permanent failures (exit code 1 from policy check, compilation errors) go directly to failed/ without retry",
+        "Retry count and next retry time are stored in card meta.json",
+        "Dispatcher logs show retry attempts and backoff strategy",
+        "Max retry limit is configurable via DISPATCHER_MAX_RETRIES env var (default 5)"
+      ],
+      "user_stories": [
+        "As a developer running overnight batches, I want bop to auto-retry rate-limited cards so that I don't wake up to 20 failed cards",
+        "As a CI/CD pipeline, I want transient network failures to be retried automatically so that my builds don't fail unnecessarily",
+        "As a team using multiple AI providers, I want bop to wait and retry when providers are temporarily down"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-3",
+      "title": "Card Dependency Management",
+      "description": "Allow cards to declare dependencies on other cards via meta.json 'depends_on' field. The dispatcher will only run a card when all its dependencies are in merged/ or done/. Support dependency visualization and cycle detection.",
+      "rationale": "Addresses the pain point 'Difficult to coordinate parallel AI work without conflicts' and known gap 'Card dependency graphs (blocking relationships)'. Teams need to model sequential workflows (e.g., 'implement auth' must complete before 'add auth to checkout') and prevent race conditions.",
+      "priority": "must",
+      "complexity": "medium",
+      "impact": "high",
+      "phase_id": "phase-1",
+      "dependencies": [],
+      "status": "idea",
+      "acceptance_criteria": [
+        "Cards can declare 'depends_on': ['card-id-1', 'card-id-2'] in meta.json",
+        "Dispatcher checks dependencies before moving pending → running; blocked cards stay in pending/",
+        "Cycle detection: if A depends on B and B depends on A, both fail with clear error message",
+        "'bop status' shows dependency graph with blocked cards highlighted",
+        "'bop gantt' includes dependency edges between cards",
+        "If a dependency fails and moves to failed/, dependent cards also fail with 'dependency failed' reason"
+      ],
+      "user_stories": [
+        "As a developer, I want to model sequential AI tasks so that later cards don't run until prerequisites are complete",
+        "As a team, I want dependency visualization so that we can understand blocking relationships in our workflow",
+        "As a project manager, I want dependency validation so that circular dependencies are caught early"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-4",
+      "title": "Rollback Command for Failed Merges",
+      "description": "Add 'bop rollback <card-id>' command that undoes a merged card by reverting its commits and moving it back to pending/ for rework. Preserve rollback history in card meta.json.",
+      "rationale": "Addresses known gap 'Rollback/undo commands for failed merges'. When a card passes acceptance criteria but breaks in production or causes regressions, teams need a quick way to undo the merge and rework the card. Currently, they must manually revert commits and recreate the card.",
+      "priority": "must",
+      "complexity": "medium",
+      "impact": "high",
+      "phase_id": "phase-1",
+      "dependencies": [],
+      "status": "idea",
+      "acceptance_criteria": [
+        "'bop rollback <card-id>' reverts commits associated with the card (from card meta.json 'commit_sha')",
+        "Rolled-back card moves from merged/ back to pending/ with updated meta.json",
+        "meta.json includes 'rollback_history' array with timestamps and reasons",
+        "Command requires confirmation prompt: 'This will revert N commits. Continue? [y/N]'",
+        "Works with both git and jj VCS engines",
+        "Failed rollback (e.g., merge conflicts) provides clear error message and manual instructions"
+      ],
+      "user_stories": [
+        "As a developer, I want to quickly undo a merged card that broke tests so that I can fix and re-run it",
+        "As a team lead, I want rollback history so that I can see which cards were reworked and why",
+        "As a CI/CD pipeline, I want automated rollback when production checks fail after merge"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-5",
+      "title": "Dead Letter Queue for Permanent Failures",
+      "description": "Add a 'poison/' state directory for cards that have exhausted all retries or hit permanent failure conditions. Provide 'bop rescue <card-id>' to manually recover cards from poison/.",
+      "rationale": "Addresses pain point 'Lack of reliability guarantees when AI agents crash'. After auto-retry is exhausted (feature-2), permanently failed cards should be quarantined separately from retriable failures. This prevents dispatcher from continuously retrying hopeless cards and cluttering failed/.",
+      "priority": "must",
+      "complexity": "low",
+      "impact": "medium",
+      "phase_id": "phase-1",
+      "dependencies": ["feature-2"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "After max retries (default 5), card moves to .cards/poison/ instead of failed/",
+        "Permanent failures (exit code 2, policy violations) go directly to poison/ without retry",
+        "'bop status' shows poison/ count separately from failed/",
+        "'bop rescue <card-id>' moves card from poison/ → pending/ and resets retry count",
+        "poison/ cards are excluded from dispatcher processing (require manual intervention)",
+        "Quick Look extension shows poison/ cards with distinct visual style (skull icon)"
+      ],
+      "user_stories": [
+        "As a developer, I want permanently failed cards quarantined so that I can triage them separately from transient failures",
+        "As a team, I want to rescue poison cards after fixing root causes (bad adapter, missing API key) without recreating them",
+        "As a CI/CD pipeline, I want to clearly distinguish 'retry exhausted' from 'will retry later'"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-6",
+      "title": "Web Dashboard with Real-Time Card Visualization",
+      "description": "Build a web UI (React/Svelte) served by 'bop serve' that shows live card counts by state, card details, logs, and state transitions. Update via Server-Sent Events (SSE) when cards move between states.",
+      "rationale": "Addresses pain point 'No visibility into agent state transitions and work progress' and known gap 'No web dashboard for team visibility'. While Finder + Quick Look is great for individuals, teams need a shared dashboard. Current Zellij status plugin is CLI-only.",
+      "priority": "should",
+      "complexity": "high",
+      "impact": "high",
+      "phase_id": "phase-2",
+      "dependencies": [],
+      "status": "idea",
+      "acceptance_criteria": [
+        "'bop serve --dashboard' starts web UI on http://localhost:3030/dashboard",
+        "Dashboard shows card counts by state (pending, running, done, merged, failed, poison)",
+        "Click on a card to see meta.json, spec.md, prompt.md, logs, and output/",
+        "Real-time updates via SSE when cards change state (no polling)",
+        "Visual timeline showing card lifecycle (created → running → done → merged)",
+        "Filter/search by team, adapter, priority, date range",
+        "Authentication via BOP_SERVE_TOKEN (same as POST /cards/new)",
+        "Mobile-responsive design works on iPhone/iPad"
+      ],
+      "user_stories": [
+        "As a team lead, I want a shared dashboard so that I can see all running AI agents at a glance",
+        "As a remote team member, I want real-time card updates so that I know when my tasks complete",
+        "As a manager, I want historical card data so that I can review AI agent productivity over time"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-7",
+      "title": "Metrics & Observability Endpoint",
+      "description": "Expose Prometheus-compatible metrics endpoint (/metrics) with card state counts, adapter success/failure rates, queue depth, processing time, and error rates. Add Grafana dashboard template.",
+      "rationale": "Addresses known gap 'Metrics/observability beyond logs and CLI status'. Production teams need to monitor bop health, detect anomalies (e.g., sudden spike in failed cards), and track SLOs (e.g., 95% of cards merge within 30min).",
+      "priority": "should",
+      "complexity": "medium",
+      "impact": "medium",
+      "phase_id": "phase-2",
+      "dependencies": [],
+      "status": "idea",
+      "acceptance_criteria": [
+        "'bop serve' exposes GET /metrics endpoint in Prometheus format",
+        "Metrics include: bop_cards_total{state='pending|running|done|merged|failed|poison'}, bop_adapter_success_rate{adapter='claude|codex|...'}, bop_card_processing_time_seconds{quantile='0.5|0.95|0.99'}, bop_dispatcher_heartbeat_age_seconds",
+        "Grafana dashboard JSON template in docs/grafana/bop-dashboard.json",
+        "Metrics persist across dispatcher restarts (read from filesystem state)",
+        "Documentation includes Prometheus scrape config and Grafana setup instructions",
+        "Optional StatsD/Datadog integration via BOP_METRICS_BACKEND env var"
+      ],
+      "user_stories": [
+        "As a DevOps engineer, I want Prometheus metrics so that I can alert when card failure rate exceeds 10%",
+        "As a platform team, I want Grafana dashboards so that we can track AI agent utilization across teams",
+        "As an SRE, I want processing time metrics so that I can optimize adapter performance"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-8",
+      "title": "Adapter Marketplace & Registry",
+      "description": "Create a community registry of adapters (similar to Homebrew taps or NPM) where users can discover, install, and publish adapters. 'bop adapter search <query>' finds adapters, 'bop adapter install <name>' downloads from registry.",
+      "rationale": "Addresses known gap 'Adapter marketplace or registry for discovering community providers'. Currently, users must manually copy .nu scripts to adapters/. A registry enables ecosystem growth, quality ratings, and version management.",
+      "priority": "should",
+      "complexity": "medium",
+      "impact": "high",
+      "phase_id": "phase-2",
+      "dependencies": [],
+      "status": "idea",
+      "acceptance_criteria": [
+        "'bop adapter search <query>' queries registry API and shows matching adapters with descriptions and ratings",
+        "'bop adapter install <name>' downloads adapter .nu script to adapters/ and validates signature",
+        "'bop adapter publish' uploads local adapter to registry (requires GitHub auth)",
+        "Registry hosted at registry.bop.dev with web UI for browsing adapters",
+        "Each adapter has metadata: name, description, author, version, dependencies, license, download count",
+        "Adapters signed with GPG/cosign for security (optional but recommended)",
+        "Version pinning: 'bop adapter install anthropic-claude@1.2.3'",
+        "Adapter testing framework validates adapter contract before publishing"
+      ],
+      "user_stories": [
+        "As a developer, I want to discover adapters for new AI providers so that I don't have to write them from scratch",
+        "As an adapter author, I want to publish my adapter so that the community can use it",
+        "As a security-conscious team, I want signed adapters so that I can trust registry downloads"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-9",
+      "title": "GitHub Issues & Linear Integration",
+      "description": "Automatically create cards from GitHub Issues or Linear tickets. 'bop sync-issues' pulls new issues and creates .card bundles. When cards merge, update issue status and link PR.",
+      "rationale": "Addresses known gap 'Integration with issue trackers (GitHub Issues, Linear, Jira)' and pain point 'CI/CD integration with AI agents is complex'. Teams want to trigger AI agent work from their existing workflow tools without manual card creation.",
+      "priority": "should",
+      "complexity": "medium",
+      "impact": "medium",
+      "phase_id": "phase-2",
+      "dependencies": [],
+      "status": "idea",
+      "acceptance_criteria": [
+        "'bop sync-issues' creates cards from issues labeled 'bop-auto' (configurable via BOP_ISSUE_LABEL)",
+        "Card spec.md is populated from issue body; meta.json includes issue URL and number",
+        "When card merges, GitHub/Linear issue status updates to 'Done' with link to merged PR",
+        "Supports both GitHub Issues (via gh CLI) and Linear (via LINEAR_API_KEY)",
+        "Bi-directional sync: issue comments appear in card meta.json, card logs added to issue comments",
+        "'bop new --from-issue <url>' creates single card from issue URL",
+        "Works with webhooks: GitHub/Linear webhook → bop serve → auto-create card"
+      ],
+      "user_stories": [
+        "As a product manager, I want to create Linear tickets that automatically become bop cards so that I don't need to learn bop CLI",
+        "As a developer, I want issue status to update when AI agent work completes so that stakeholders see progress",
+        "As a team, I want GitHub issue discussions to sync with card logs so that context is preserved"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-10",
+      "title": "Cost Tracking Dashboard",
+      "description": "Track and visualize AI provider API costs per card. Parse adapter logs for token counts, estimate costs using provider pricing tables, and show cumulative spend in dashboard and CLI.",
+      "rationale": "Addresses known gap 'Cost tracking across AI providers'. Teams using bop at scale need to understand their AI spend, identify expensive cards, and optimize adapter selection to stay within budget.",
+      "priority": "should",
+      "complexity": "low",
+      "impact": "medium",
+      "phase_id": "phase-2",
+      "dependencies": ["feature-6"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "Adapters report token usage in card meta.json: { 'tokens_in': 1000, 'tokens_out': 500, 'provider': 'claude-3-7-sonnet' }",
+        "Cost calculator uses pricing table (docs/pricing.json) to estimate cost per card",
+        "'bop status --costs' shows total spend and per-adapter breakdown",
+        "Web dashboard shows cost trends over time (daily/weekly/monthly)",
+        "Budget alerts: log warning when daily spend exceeds BOP_COST_BUDGET env var",
+        "Export cost reports as CSV for accounting: 'bop cost-report --from 2026-01-01 --to 2026-01-31 > costs.csv'"
+      ],
+      "user_stories": [
+        "As a finance team, I want to track AI API costs so that I can allocate budget accurately",
+        "As a developer, I want to see which cards are expensive so that I can optimize prompts or switch adapters",
+        "As a team lead, I want cost alerts so that we don't exceed our monthly AI budget"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-11",
+      "title": "VM-First Dispatcher Mode (MICROCLAW)",
+      "description": "Make QEMU VM execution the default path for all cards (not just qemu.nu adapter). Each card runs in isolated VM with dub bootloader, zam unikernel, 9P filesystem mount for card bundle, and UART output capture.",
+      "rationale": "Addresses technical debt 'Migration to VM-first architecture (MICROCLAW) in progress' and known gap 'VM isolation not yet default'. Security, reproducibility, and attestation are core to bop's long-term vision. Current host-based adapters expose risk of untrusted AI-generated code.",
+      "priority": "should",
+      "complexity": "high",
+      "impact": "high",
+      "phase_id": "phase-3",
+      "dependencies": [],
+      "status": "idea",
+      "acceptance_criteria": [
+        "Dispatcher invokes qemu-system-x86_64 for all cards by default (not 'nu adapters/claude.nu')",
+        "Card bundle mounted via 9P filesystem (-virtfs local,path=.card,mount_tag=card)",
+        "VM boots dub EFI → zam unikernel reads card/spec.md → calls AI provider → writes output/ → exits",
+        "TPM vTPM measurements verify boot chain integrity (PCR0-7)",
+        "Exit codes: 0=success, 75=rate-limit, other=failure (same as current adapters)",
+        "VM timeout enforced by QEMU watchdog (default 1 hour, configurable via card meta.json)",
+        "Fallback to host adapters via BOP_DISABLE_VM=1 env var (for development/debugging)",
+        "Documentation includes QEMU installation and zam build instructions"
+      ],
+      "user_stories": [
+        "As a security-conscious team, I want all AI-generated code to run in isolated VMs so that malicious output can't compromise my system",
+        "As a researcher, I want reproducible builds with TPM attestation so that I can verify card execution integrity",
+        "As a platform team, I want VM isolation by default so that untrusted users can run cards safely"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-12",
+      "title": "Multi-User Coordination Primitives",
+      "description": "Enable multiple dispatchers to run concurrently with distributed locking (Redis/etcd), workload stealing, and conflict resolution. Support team-based card assignment and routing.",
+      "rationale": "Addresses known gap 'Multi-user coordination primitives (currently optimized for single dispatcher instance)'. Large teams need multiple dispatcher instances for high throughput and fault tolerance. Current single-instance design bottlenecks at ~100 concurrent cards.",
+      "priority": "could",
+      "complexity": "high",
+      "impact": "medium",
+      "phase_id": "phase-3",
+      "dependencies": [],
+      "status": "idea",
+      "acceptance_criteria": [
+        "Multiple dispatcher processes can run concurrently with Redis/etcd distributed locks (BOP_LOCK_BACKEND=redis://localhost:6379)",
+        "Workload stealing: idle dispatcher claims pending cards from other dispatchers",
+        "Team-based routing: cards in .cards/team-X/ only processed by dispatchers with TEAM=X env var",
+        "Conflict detection: if two dispatchers grab same card, second one backs off and logs warning",
+        "Dispatcher health checks: distributed heartbeat with leader election for monitoring",
+        "Graceful shutdown: dispatcher releases locks and returns running cards to pending/",
+        "'bop dispatcher --multi-user' enables distributed mode (defaults to single-instance for backwards compatibility)"
+      ],
+      "user_stories": [
+        "As a large team, I want to run 5 dispatcher instances so that we can process 500 cards in parallel",
+        "As a DevOps engineer, I want distributed locking so that multiple bop instances don't conflict",
+        "As a team lead, I want team-based routing so that frontend cards only go to frontend-team dispatchers"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-13",
+      "title": "Provider Quality A/B Testing Framework",
+      "description": "Run the same card through multiple AI providers (Claude, Codex, Ollama) in parallel and compare results. Measure success rate, cost, speed, and code quality. Generate comparison reports.",
+      "rationale": "Addresses known gap 'A/B testing framework for comparing provider quality'. Teams want data-driven decisions on which AI provider to use for different task types (e.g., Codex for TypeScript, Claude for documentation, Ollama for low-cost tasks).",
+      "priority": "could",
+      "complexity": "medium",
+      "impact": "medium",
+      "phase_id": "phase-3",
+      "dependencies": [],
+      "status": "idea",
+      "acceptance_criteria": [
+        "'bop new --ab-test claude,codex,ollama' creates 3 cards with same spec but different adapters",
+        "After all variants complete, 'bop ab-report <card-prefix>' generates comparison report",
+        "Report includes: success/failure, processing time, cost, output diff, acceptance criteria pass rate",
+        "Web dashboard shows A/B test results with side-by-side code diff",
+        "Automated provider selection: BOP_AUTO_PROVIDER=best chooses highest-quality provider based on historical A/B data",
+        "'bop ab-history' shows past A/B tests with win rates per provider"
+      ],
+      "user_stories": [
+        "As a developer, I want to test whether Claude or Codex is better for my task so that I can optimize for quality",
+        "As a cost-conscious team, I want to compare cheap vs expensive providers so that we can balance cost and quality",
+        "As a researcher, I want historical A/B data so that I can publish papers on AI provider performance"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-14",
+      "title": "Adapter Scaffolding CLI Tool",
+      "description": "Generate boilerplate adapter code with 'bop adapter new <name>'. Creates .nu template with parameter handling, error logging, rate-limit detection, and contract compliance. Includes test harness.",
+      "rationale": "Lowers the barrier to creating new adapters (currently ~20 LOC but requires understanding the calling convention). Makes it trivial to add new AI providers and encourages community contributions.",
+      "priority": "could",
+      "complexity": "low",
+      "impact": "medium",
+      "phase_id": "phase-3",
+      "dependencies": [],
+      "status": "idea",
+      "acceptance_criteria": [
+        "'bop adapter new my-provider' creates adapters/my-provider.nu with template code",
+        "Template includes: argument parsing, prompt file reading, API call skeleton, error handling, exit codes (0/75/1)",
+        "Generated adapter passes 'bop adapter test my-provider' (validates calling convention)",
+        "Template comments explain each section with links to adapter docs",
+        "Supports multiple languages: --lang=nu (default), --lang=python, --lang=bash",
+        "'bop adapter new --example' creates working example adapter (mock provider with random success/failure)"
+      ],
+      "user_stories": [
+        "As a developer, I want to scaffold an adapter in 30 seconds so that I can focus on the API integration logic",
+        "As a community contributor, I want a template that passes tests so that my adapter is accepted in the registry",
+        "As a team, I want adapters in Python so that our ML engineers can create providers without learning Nushell"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-15",
+      "title": "Template Registry & Discovery",
+      "description": "Create a library of card templates (spec.md + prompt.md patterns) for common tasks: 'Add REST endpoint', 'Fix bug', 'Write tests', 'Refactor component'. 'bop new --template <name>' instantiates from template.",
+      "rationale": "Addresses known gap 'Template library and discovery mechanism'. Writing effective spec.md and prompt.md requires skill. Templates codify best practices and reduce time-to-first-card for new users.",
+      "priority": "could",
+      "complexity": "medium",
+      "impact": "medium",
+      "phase_id": "phase-3",
+      "dependencies": [],
+      "status": "idea",
+      "acceptance_criteria": [
+        "'bop templates' lists available templates from registry (local + remote)",
+        "'bop new --template rest-endpoint' creates card from template with placeholders",
+        "Templates include: spec.md skeleton, prompt.md with best-practice wording, example acceptance criteria",
+        "Template variables: {{PROJECT_NAME}}, {{LANGUAGE}}, {{FRAMEWORK}} replaced during instantiation",
+        "Community templates published to registry (same as adapters): 'bop template publish my-template'",
+        "Templates categorized: feature, bugfix, refactor, test, docs, infra",
+        "Template ratings and download counts shown in 'bop templates'"
+      ],
+      "user_stories": [
+        "As a new user, I want templates so that I don't have to write spec.md from scratch",
+        "As a team, I want to share internal templates so that cards follow our standards",
+        "As a community member, I want to discover popular templates so that I can learn best practices"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-16",
+      "title": "Card Event Stream (SSE/WebSocket)",
+      "description": "Provide real-time event stream of card state transitions, log lines, and adapter output. Clients subscribe via WebSocket or SSE to get instant updates. Enables live dashboards and integrations.",
+      "rationale": "Enhances the web dashboard (feature-6) and enables integrations (Slack bots, mobile apps, IDE plugins) that need real-time card updates without polling the filesystem.",
+      "priority": "could",
+      "complexity": "medium",
+      "impact": "low",
+      "phase_id": "phase-4",
+      "dependencies": ["feature-6"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "'bop serve' exposes WebSocket endpoint at ws://localhost:3030/events",
+        "Clients subscribe to events: CARD_CREATED, CARD_RUNNING, CARD_DONE, CARD_MERGED, CARD_FAILED, LOG_LINE",
+        "Events include full card meta.json in JSON payload",
+        "Authentication via BOP_SERVE_TOKEN (same as dashboard)",
+        "SSE fallback for clients without WebSocket support: GET /events (Server-Sent Events)",
+        "Example integrations: Slack bot posts when cards merge, VS Code extension shows live card count"
+      ],
+      "user_stories": [
+        "As a team, I want Slack notifications when critical cards merge so that we can react immediately",
+        "As a developer, I want VS Code extension to show live card status so that I don't have to switch windows",
+        "As a mobile user, I want push notifications when my cards complete so that I can review on the go"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-17",
+      "title": "Advanced Conflict Detection & Resolution",
+      "description": "Detect when multiple cards modify the same files and provide merge conflict resolution UI. Show diffs, allow manual merge or auto-resolve with AI assistance.",
+      "rationale": "Addresses pain point 'Difficult to coordinate parallel AI work without conflicts'. When two cards modify the same function, merge conflicts require manual resolution. This feature automates detection and provides guided resolution.",
+      "priority": "could",
+      "complexity": "medium",
+      "impact": "medium",
+      "phase_id": "phase-4",
+      "dependencies": ["feature-3"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "Before merging, merge-gate detects conflicts with already-merged cards",
+        "Conflicting cards shown in 'bop conflicts' with file-level diff highlighting",
+        "Web dashboard includes conflict resolution UI: three-pane diff (base, card A, card B)",
+        "Auto-resolve option: 'bop resolve --auto <card-id>' uses AI to merge conflicting changes",
+        "Manual resolution workflow: 'bop resolve <card-id>' opens editor with conflict markers",
+        "Conflict history tracked in meta.json: which cards conflicted, how resolved"
+      ],
+      "user_stories": [
+        "As a developer, I want conflict detection before merge so that I don't break the build",
+        "As a team, I want AI-assisted conflict resolution so that we don't spend hours on manual merges",
+        "As a reviewer, I want to see which cards conflicted so that I can understand the merge strategy"
+      ],
+      "competitor_insight_ids": []
+    },
+    {
+      "id": "feature-18",
+      "title": "Distributed Multi-Dispatcher Coordination",
+      "description": "Scale bop to 100+ dispatcher instances with distributed consensus (Raft/Paxos), global work queue, and cross-datacenter replication. Enable cloud-scale AI agent orchestration.",
+      "rationale": "Long-term vision for enterprises running thousands of AI agents across multiple regions. Requires distributed systems engineering but enables massive scale.",
+      "priority": "wont",
+      "complexity": "high",
+      "impact": "low",
+      "phase_id": "phase-4",
+      "dependencies": ["feature-12"],
+      "status": "idea",
+      "acceptance_criteria": [
+        "Dispatchers form Raft consensus cluster with leader election",
+        "Global work queue distributed via consistent hashing (card ID → dispatcher)",
+        "Cross-datacenter replication: cards created in US-East replicate to EU-West",
+        "Fault tolerance: if dispatcher crashes, leader redistributes its cards to other nodes",
+        "Observability: distributed tracing (OpenTelemetry) shows card flow across dispatchers",
+        "'bop cluster status' shows health of all dispatcher nodes"
+      ],
+      "user_stories": [
+        "As an enterprise platform team, I want 100 dispatcher instances so that we can run 10,000 cards per day",
+        "As a global team, I want multi-region replication so that developers in Europe see low latency",
+        "As an SRE, I want fault tolerance so that dispatcher crashes don't lose card state"
+      ],
+      "competitor_insight_ids": []
+    }
+  ],
+  "metadata": {
+    "created_at": "2026-03-06T19:55:00Z",
+    "updated_at": "2026-03-06T19:55:00Z",
+    "generated_by": "roadmap_features agent",
+    "prioritization_framework": "MoSCoW",
+    "competitor_analysis_used": false
+  }
+}

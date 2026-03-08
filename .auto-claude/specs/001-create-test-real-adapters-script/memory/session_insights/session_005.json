@@ -1,0 +1,111 @@
+{
+  "session_number": 5,
+  "timestamp": "2026-03-05T16:02:19.983004+00:00",
+  "subtasks_completed": [
+    "subtask-1-4"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "scripts/test-real-adapters.nu",
+        "lines_added": 92,
+        "lines_removed": 2,
+        "functions_added": [
+          "start_dispatcher",
+          "stop_dispatcher",
+          "poll_for_state",
+          "wait_for_card_completion"
+        ],
+        "test_coverage": "Added comprehensive tests for dispatcher lifecycle and polling with assertions for process management, timeout behavior, and state transitions"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Process Lifecycle Management",
+        "description": "Kill existing process via pkill pattern matching, start with nohup and background execution (&), capture logs via o>> and e>&1 redirection",
+        "location": "start_dispatcher, stop_dispatcher functions"
+      },
+      {
+        "pattern": "Polling with Timeout",
+        "description": "Loop-based state polling with elapsed time tracking, fixed 200ms intervals, configurable timeout",
+        "location": "poll_for_state function"
+      },
+      {
+        "pattern": "Multi-state Orchestration",
+        "description": "Sequential state transitions (pending \u2192 running \u2192 done) with dynamic timeout allocation and early exit on timeout",
+        "location": "wait_for_card_completion function"
+      },
+      {
+        "pattern": "Filesystem State Machine",
+        "description": "Card state determined by directory location (.cards/STATE/ID.jobcard/), query via find_card_in helper",
+        "location": "poll_for_state, wait_for_card_completion"
+      },
+      {
+        "pattern": "Robust Process Management",
+        "description": "All external commands wrapped with 'do { ... } | complete' to handle non-zero exits gracefully",
+        "location": "start_dispatcher, stop_dispatcher"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Process Reaping Before Start",
+        "description": "Must pkill existing dispatcher before starting new one to avoid multiple instances competing for same cards_dir",
+        "mitigation": "Added explicit pkill in start_dispatcher with do { } | complete wrapper"
+      },
+      {
+        "issue": "Nushell Background Process Redirection",
+        "description": "Nushell has no native & redirect; must use ^nohup with o>> e>&1 for proper log capture",
+        "location": "start_dispatcher function"
+      },
+      {
+        "issue": "Timeout Allocation Strategy",
+        "description": "Current 50/50 split of total timeout between pending\u2192running and running\u2192done may be suboptimal if adapter has skewed latency profile",
+        "impact": "Could timeout prematurely on slow-to-complete states or waste time on fast states"
+      },
+      {
+        "issue": "Polling Granularity vs Efficiency",
+        "description": "Fixed 200ms poll interval is arbitrary; no backoff strategy means constant CPU/FS pressure during long waits",
+        "impact": "May cause issues at scale or on slower filesystems"
+      },
+      {
+        "issue": "Race Condition: Fast State Transitions",
+        "description": "If card moves to target state between loop iterations, poll may miss it depending on filesystem timing",
+        "mitigation": "200ms interval makes this unlikely but not impossible; consider inotify-based approach"
+      }
+    ],
+    "approach_outcome": "SUCCESS - Dispatcher execution and polling logic fully implemented with 4 new functions providing clean abstractions. All 3 test cases pass: basic polling with timeout, multi-state completion, and process lifecycle management. Code integrates smoothly with existing test infrastructure.",
+    "recommendations": [
+      {
+        "priority": "medium",
+        "suggestion": "Parameterize poll interval (currently hardcoded 200ms) to allow tuning per adapter/environment"
+      },
+      {
+        "priority": "medium",
+        "suggestion": "Implement exponential backoff in poll_for_state to reduce filesystem load during long waits"
+      },
+      {
+        "priority": "low",
+        "suggestion": "Add instrumentation (start/end timestamps) to capture time-to-running and time-to-done metrics for performance monitoring"
+      },
+      {
+        "priority": "low",
+        "suggestion": "Make timeout allocation strategy configurable rather than hard 50/50 split to handle adapters with asymmetric latency"
+      },
+      {
+        "priority": "low",
+        "suggestion": "Document expected dispatcher behavior contract (e.g., guaranteed state transitions, atomicity guarantees) in script comments"
+      }
+    ],
+    "subtask_id": "subtask-1-4",
+    "session_num": 5,
+    "success": true,
+    "changed_files": [
+      "scripts/test-real-adapters.nu"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-4"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

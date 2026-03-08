@@ -15,5 +15,8 @@ Stage: {{stage}} ({{stage_index}} of {{stage_count}})
 
 {{prior_stage_output}}
 
+
+{{bridge_skill}}
+
 Acceptance criteria:
 {{acceptance_criteria}}

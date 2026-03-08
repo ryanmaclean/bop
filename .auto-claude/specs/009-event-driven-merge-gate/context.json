@@ -1,0 +1,45 @@
+{
+  "files_to_modify": {
+    "bop": [
+      "crates/bop-cli/src/main.rs"
+    ]
+  },
+  "files_to_create": [
+    "install/macos/sh.bop.merge-gate.plist",
+    "install/linux/bop-merge-gate.path",
+    "install/linux/bop-merge-gate.service"
+  ],
+  "files_to_reference": [
+    "crates/bop-cli/src/factory.rs",
+    "launchd/com.yourorg.bop.merge-gate.plist",
+    "crates/bop-cli/src/main.rs"
+  ],
+  "patterns": {
+    "command_pattern": "Commands are defined in the Command enum in main.rs, with variants that may have fields for arguments. Some commands have subcommands using nested enums (e.g., FactoryAction, IconsAction).",
+    "command_dispatch": "Main function matches on cli.cmd and dispatches to module functions. Simple commands can be inlined, complex ones are in separate modules.",
+    "launchd_pattern": "factory.rs shows the pattern: generate_plist() creates XML string, write to ~/Library/LaunchAgents/, use launchctl load/unload. WatchPaths triggers on filesystem changes.",
+    "platform_detection": "Use cfg!(target_os = \"macos\") for compile-time or std::env::consts::OS for runtime platform detection",
+    "error_handling": "Functions return anyhow::Result<()>, using .context() for error messages"
+  },
+  "existing_implementations": {
+    "description": "Factory command already handles launchd installation for dispatcher and merge-gate, but uses the OLD polling approach (KeepAlive=true). This spec creates a NEW event-driven approach (WatchPaths + --once + KeepAlive=false).",
+    "relevant_files": [
+      "crates/bop-cli/src/factory.rs",
+      "launchd/com.yourorg.bop.merge-gate.plist"
+    ],
+    "key_differences": "OLD: KeepAlive=true with --poll-ms (daemon always running). NEW: WatchPaths with --once + KeepAlive=false (process exits, OS re-triggers on fs events)."
+  },
+  "tech_stack": {
+    "language": "Rust",
+    "cli_framework": "clap v4 with derive macros",
+    "os_services": "launchd (macOS), systemd (Linux)",
+    "build_tool": "cargo",
+    "test_framework": "cargo test"
+  },
+  "acceptance_criteria_mapping": {
+    "criterion_1": "bop install-hooks exits 0 (successful installation)",
+    "criterion_2": "Card in .cards/done/ triggers merge-gate automatically within 2s",
+    "criterion_3": "No bop merge-gate --loop process needed (event-driven, not polling)",
+    "criterion_4": "make check passes (tests, clippy, fmt)"
+  }
+}

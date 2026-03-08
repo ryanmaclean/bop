@@ -1,0 +1,129 @@
+{
+  "subtasks": {
+    "subtask-1-1": {
+      "attempts": [
+        {
+          "session": 2,
+          "timestamp": "2026-03-07T12:29:30.640674+00:00",
+          "approach": "Implemented: Add blake3 dependency to bop-core/Cargo.toml",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-2-1": {
+      "attempts": [
+        {
+          "session": 3,
+          "timestamp": "2026-03-07T12:32:01.157482+00:00",
+          "approach": "Implemented: Add append_event() function for JSONL WAL in lib.rs",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-2-2": {
+      "attempts": [
+        {
+          "session": 4,
+          "timestamp": "2026-03-07T12:35:25.208763+00:00",
+          "approach": "Implemented: Call append_event in write_meta after tmp+rename",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-1": {
+      "attempts": [
+        {
+          "session": 5,
+          "timestamp": "2026-03-07T12:37:00.491472+00:00",
+          "approach": "Implemented: Add checksum field to Meta struct",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-2": {
+      "attempts": [
+        {
+          "session": 6,
+          "timestamp": "2026-03-07T12:39:57.737475+00:00",
+          "approach": "Implemented: Implement checksum computation in write_meta",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-3": {
+      "attempts": [
+        {
+          "session": 7,
+          "timestamp": "2026-03-07T12:42:29.149914+00:00",
+          "approach": "Implemented: Implement checksum validation in read_meta",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-4-1": {
+      "attempts": [
+        {
+          "session": 8,
+          "timestamp": "2026-03-07T12:48:00.078919+00:00",
+          "approach": "Implemented: Add stage_transition event logging at all fs::rename points",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-5-1": {
+      "attempts": [
+        {
+          "session": 9,
+          "timestamp": "2026-03-07T12:50:51.949361+00:00",
+          "approach": "Implemented: Write docs/storage-decision.md",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-5-2": {
+      "attempts": [
+        {
+          "session": 10,
+          "timestamp": "2026-03-07T12:55:49.012681+00:00",
+          "approach": "Implemented: Write output/result.md with corruption scenarios",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-6-1": {
+      "attempts": [
+        {
+          "session": 11,
+          "timestamp": "2026-03-07T12:59:58.014734+00:00",
+          "approach": "Implemented: Run make check and verify acceptance criteria",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    }
+  },
+  "stuck_subtasks": [],
+  "metadata": {
+    "created_at": "2026-03-07T12:23:34.840528+00:00",
+    "last_updated": "2026-03-07T12:59:58.014751+00:00"
+  }
+}

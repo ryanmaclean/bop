@@ -1,0 +1,75 @@
+{
+  "session_number": 11,
+  "timestamp": "2026-03-05T18:57:13.449693+00:00",
+  "subtasks_completed": [],
+  "discoveries": {
+    "file_insights": {
+      "list.rs": {
+        "changes": "Added JSON output functionality (list_cards_json, emit_state_json), extracted state resolution logic, added .jobcard extension support alongside .bop",
+        "key_additions": [
+          "pub fn list_cards_json() - outputs newline-delimited JSON",
+          "fn emit_state_json() - emits state-specific cards as JSON lines",
+          "fn resolve_states() - centralized state filter resolution",
+          "JsonCard struct with serde serialization"
+        ],
+        "test_coverage": "5 new tests added: ndjson_lines, state_field_matches, team_field_present, skips_missing_meta, empty_produces_no_output",
+        "extension_support": "Updated from 'bop' only to 'bop' || 'jobcard'"
+      },
+      "main.rs": {
+        "changes": "Added --json flag to List command, conditional routing to JSON vs table output",
+        "cli_modification": "List { state, json: bool } with routing logic"
+      },
+      "agent.sh": {
+        "changes": "Comment reformatting only (race condition note consolidated to single line)"
+      }
+    },
+    "patterns_discovered": [
+      "Trait-based output abstraction: list_cards_json(&mut impl Write) allows flexible output targets",
+      "Extension compatibility pattern: files support both .bop and .jobcard extensions",
+      "State filtering centralization: resolve_states() prevents duplication",
+      "Metadata-aware filtering: silently skips cards with missing/corrupt meta",
+      "Team directory discovery: dynamic scanning for team-* prefixed directories",
+      "NDJSON serialization: one JSON object per line with flattened Meta fields + state + team"
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Session outcome is FAILED but no error details provided in diff",
+        "impact": "Unclear what adapter test failure was - could be compilation, test logic, or runtime error",
+        "scope": "Subtask objective (run claude adapter test and verify PASS) not achieved"
+      },
+      {
+        "issue": "Extension check added in two locations: list_cards() and emit_state_json()",
+        "impact": "Inconsistency risk if future code paths check only one location",
+        "mitigation": "Consider extracting to helper function like is_card_dir()"
+      },
+      {
+        "issue": "JSON output uses serde_json::to_string() without schema validation",
+        "impact": "Could output fields adapter doesn't expect if Meta struct changes",
+        "scope": "No validation that output matches adapter's expected schema"
+      }
+    ],
+    "approach_outcome": "FAILED",
+    "outcome_details": "Code changes for bop list --json feature and .jobcard extension support appear structurally sound with comprehensive tests, but the adapter test execution failed. The root cause of failure is not documented in provided session data.",
+    "recommendations": [
+      "Investigate adapter test failure logs - check stderr/stdout from test run",
+      "Verify JSON output schema matches what adapter expects (field order, types, required fields)",
+      "Validate that .jobcard extension recognition doesn't break existing .bop-only code paths",
+      "Add integration test that runs full adapter chain with --json output",
+      "Consider extracting card directory check (is_dir && extension check) to reusable function to prevent divergence",
+      "Document expected JSON output format in code comments or OpenAPI schema if used by other tools"
+    ],
+    "subtask_id": "subtask-2-1",
+    "session_num": 11,
+    "success": false,
+    "changed_files": [
+      "crates/bop-cli/src/list.rs",
+      "crates/bop-cli/src/main.rs",
+      "scripts/agent.sh"
+    ]
+  },
+  "what_worked": [],
+  "what_failed": [
+    "Failed to complete subtask: subtask-2-1"
+  ],
+  "recommendations_for_next_session": []
+}

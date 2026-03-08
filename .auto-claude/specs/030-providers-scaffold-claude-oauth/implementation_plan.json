@@ -1,0 +1,373 @@
+{
+  "feature": "bop providers: scaffold Provider trait + Claude OAuth quota monitor",
+  "workflow_type": "feature",
+  "workflow_rationale": "New feature adding a Provider trait, Claude OAuth credential reader, usage history, and a CLI subcommand. Single service (bop-cli crate), but multiple logical layers: types \u2192 provider impl \u2192 history \u2192 CLI wiring.",
+  "phases": [
+    {
+      "id": "phase-1-scaffold",
+      "name": "Provider Module Scaffold",
+      "type": "setup",
+      "description": "Add dependencies, convert providers.rs to directory module, define ProviderSnapshot and Provider trait. Must resolve naming conflict between existing Provider struct (adapter config) and new Provider trait (quota monitor).",
+      "depends_on": [],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Add reqwest and async-trait dependencies to crates/bop-cli/Cargo.toml. reqwest with features=[\"json\",\"rustls-tls\"] for the OAuth usage API call. async-trait for the Provider trait's async fn.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/Cargo.toml"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "Cargo.toml"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo check -p bop 2>&1 | tail -5",
+            "expected": "Finished"
+          },
+          "status": "completed",
+          "notes": "Added reqwest = { version = \"0.12\", features = [\"json\", \"rustls-tls\"] } and async-trait = \"0.1\" to crates/bop-cli/Cargo.toml. cargo check -p bop passes successfully.",
+          "updated_at": "2026-03-08T00:13:41.909140+00:00"
+        },
+        {
+          "id": "subtask-1-2",
+          "description": "Convert providers.rs from flat file to providers/ directory module. Move all existing code into providers/mod.rs. Rename existing Provider struct to AdapterConfig and update all references. Verify all 16 existing tests pass unchanged.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "files_to_create": [
+            "crates/bop-cli/src/providers/mod.rs"
+          ],
+          "patterns_from": [
+            "crates/bop-cli/src/providers.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop -- providers:: 2>&1 | tail -10",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "Converted providers.rs to providers/mod.rs directory module. Renamed Provider struct to AdapterConfig and updated all internal references (validate_provider, seed_providers, mock_provider test helper). All 20 existing provider tests pass unchanged. In this jj-managed repo, changes are auto-tracked in the working copy commit. No external files reference providers::Provider directly, so the rename was self-contained within the module.",
+          "updated_at": "2026-03-08T00:20:24.741465+00:00"
+        },
+        {
+          "id": "subtask-1-3",
+          "description": "Add ProviderSnapshot struct and Provider trait to providers/mod.rs. ProviderSnapshot has fields: provider, display_name, primary_pct, secondary_pct, primary_label, secondary_label, tokens_used, cost_usd, reset_at, source, error. Provider trait: name(), detect(), async fetch(). Also add a helper function detect_all_providers() that collects all registered providers.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/providers/mod.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/providers.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo check -p bop 2>&1 | tail -5",
+            "expected": "Finished"
+          },
+          "status": "completed",
+          "notes": "Added ProviderSnapshot struct (11 fields: provider, display_name, primary_pct, secondary_pct, primary_label, secondary_label, tokens_used, cost_usd, reset_at, source, error), Provider trait (#[async_trait] with name(), detect(), async fetch()), all_providers() registry function, and detect_all_providers() filter helper. Added async_trait and chrono::DateTime imports. cargo check passes (4 expected unused warnings for new types not yet consumed). All 21 existing provider tests pass. Changes auto-tracked by jj working copy.",
+          "updated_at": "2026-03-08T00:23:47.812899+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-2-claude",
+      "name": "Claude OAuth Provider",
+      "type": "implementation",
+      "description": "Implement ClaudeProvider: read ~/.claude/.credentials.json, detect Keychain on macOS, call OAuth usage API, map response to ProviderSnapshot.",
+      "depends_on": [
+        "phase-1-scaffold"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-2-1",
+          "description": "Create providers/claude.rs with ClaudeProvider struct. Implement credential parsing: read ~/.claude/.credentials.json, parse access_token, refresh_token, expires_at. Add ClaudeCredentials struct. Implement detect(): return true if creds file exists, or on macOS check Keychain via `security find-generic-password -s 'Claude Code-credentials'`. Include unit test test_detect_missing_creds.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/providers/mod.rs"
+          ],
+          "files_to_create": [
+            "crates/bop-cli/src/providers/claude.rs"
+          ],
+          "patterns_from": [
+            "crates/bop-core/src/config.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop -- providers::claude 2>&1 | tail -10",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "Created providers/claude.rs with ClaudeProvider struct, ClaudeCredentials struct, credential parsing (read ~/.claude/.credentials.json), detect() with macOS Keychain fallback via `security find-generic-password -s 'Claude Code-credentials'`, and fetch() skeleton with expiry check. Added `dirs.workspace = true` dep to Cargo.toml. Wired claude module into providers/mod.rs and registered ClaudeProvider in all_providers(). All 24 provider tests pass (4 new: test_detect_missing_creds, parse_valid_credentials, parse_minimal_credentials, parse_credentials_missing_token_fails + 20 existing). Changes tracked in jj working copy (jj-managed repo, git commit not applicable in detached HEAD state).",
+          "updated_at": "2026-03-08T00:29:09.420588+00:00"
+        },
+        {
+          "id": "subtask-2-2",
+          "description": "Implement async fetch() on ClaudeProvider: GET https://api.anthropic.com/api/oauth/usage with Authorization: Bearer <token> and anthropic-beta: oauth-2025-04-20 header. Parse response, map five_hour.percent_used \u2192 primary_pct, seven_day.percent_used \u2192 secondary_pct. Handle expired tokens (return snapshot with error field). Include unit test test_claude_snapshot_parse that tests parsing a mock JSON response without making network calls.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/providers/claude.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/serve.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop -- providers::claude 2>&1 | tail -10",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "Implemented async fetch() on ClaudeProvider: GET /api/oauth/usage with Bearer token + anthropic-beta header. Added UsageResponse/UsageWindow types, parse_usage_response() helper. Maps five_hour.percent_used\u2192primary_pct, seven_day.percent_used\u2192secondary_pct, five_hour.reset_at\u2192reset_at. Handles expired/rejected tokens, malformed JSON, HTTP errors gracefully via error field. All 8 tests pass including test_claude_snapshot_parse + 3 bonus tests (empty, malformed, clamping). Implementation was already committed at HEAD (aa4b6b3).",
+          "updated_at": "2026-03-08T00:33:44.464238+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-3-history",
+      "name": "Provider History Tracking",
+      "type": "implementation",
+      "description": "Append-only JSONL history file for sparkline rendering. Write after every successful fetch, read last N entries.",
+      "depends_on": [
+        "phase-1-scaffold"
+      ],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-3-1",
+          "description": "Create providers/history.rs with HistoryEntry struct (ts, provider, primary_pct, secondary_pct) and functions: append_history(provider, snapshot) writes one JSONL line to ~/.bop/provider-history.jsonl, read_history(provider, n) returns last N entries for a given provider name. Include unit test test_history_roundtrip using tempfile.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/providers/mod.rs"
+          ],
+          "files_to_create": [
+            "crates/bop-cli/src/providers/history.rs"
+          ],
+          "patterns_from": [
+            "crates/bop-core/src/config.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo test -p bop -- providers::history 2>&1 | tail -10",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "Created providers/history.rs with HistoryEntry struct, append_history(), read_history() functions. All 5 tests pass: test_history_roundtrip, read_history_missing_file_returns_empty, read_history_skips_malformed_lines, history_path_returns_expected_location, append_creates_parent_dirs. Committed as e514b53.",
+          "updated_at": "2026-03-08T00:36:00.509150+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-4-cli",
+      "name": "CLI Command Wiring",
+      "type": "implementation",
+      "description": "Add `bop providers` subcommand to main.rs with ANSI table, --json, --watch, and --interval flags.",
+      "depends_on": [
+        "phase-2-claude",
+        "phase-3-history"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-4-1",
+          "description": "Add Providers variant to Command enum in main.rs with flags: --watch (bool), --json (bool), --interval (u64, default 60). Wire it to a new async function cmd_providers() in providers/mod.rs. The function should: (1) instantiate all known providers (ClaudeProvider for now), (2) call detect() to filter to installed ones, (3) call fetch() on each detected provider, (4) append to history on success, (5) output ANSI table or JSON based on flags.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/main.rs",
+            "crates/bop-cli/src/providers/mod.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/gantt.rs",
+            "crates/bop-cli/src/list.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo build -p bop && ./target/debug/bop providers --help 2>&1",
+            "expected": "Usage"
+          },
+          "status": "completed",
+          "notes": "Added Providers variant to Command enum in main.rs with --watch (bool), --json (bool), --interval (u64, default 60) flags. Implemented cmd_providers() in providers/mod.rs: detects installed providers via detect_all_providers(), fetches quota/usage, appends to history on success, outputs ANSI table (with colored percentage bars and relative reset time) or JSON array. Watch mode clears screen and re-polls every N seconds. Fixed pre-existing clippy dead_code warnings (rate_limit_tier, read_history). Applied cargo fmt. All 34 provider tests pass. Committed as 36b097c.",
+          "updated_at": "2026-03-08T00:40:08.326312+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-5-verification",
+      "name": "Final Verification",
+      "type": "integration",
+      "description": "Run full build, all tests, clippy, and fmt checks. Verify CLI help text and --json output.",
+      "depends_on": [
+        "phase-4-cli"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-5-1",
+          "description": "Run the full acceptance criteria from the spec: cargo build -p bop-cli, cargo test -p bop-cli providers, ./target/debug/bop providers --help, cargo clippy -- -D warnings, cargo fmt --check. Fix any issues found.",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cd /Users/studio/bop && cargo build -p bop && cargo test -p bop -- providers && cargo clippy -- -D warnings && cargo fmt --check",
+            "expected": "All pass with no errors or warnings"
+          },
+          "status": "completed",
+          "notes": "All acceptance criteria passed on first try. Results: (1) cargo build -p bop \u2014 Finished dev profile, no errors. (2) cargo test -p bop -- providers \u2014 34 tests passed (7 claude, 5 history, 21 existing providers, 1 UI snapshot). (3) cargo run -p bop -- providers --help \u2014 prints correct usage with --watch, --json, --interval flags. (4) cargo run -p bop -- providers --json \u2014 outputs valid JSON array with claude provider entry (error field correctly reports unreadable credentials when no real OAuth token present). (5) cargo clippy -- -D warnings \u2014 clean, no warnings. (6) cargo fmt --check \u2014 clean, no formatting issues. No code changes were needed; all implementation was completed in prior subtasks.",
+          "updated_at": "2026-03-08T00:42:17.354725+00:00"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_phases": 5,
+    "total_subtasks": 7,
+    "services_involved": [
+      "bop-cli"
+    ],
+    "parallelism": {
+      "max_parallel_phases": 2,
+      "parallel_groups": [
+        {
+          "phases": [
+            "phase-2-claude",
+            "phase-3-history"
+          ],
+          "reason": "Both depend only on phase-1-scaffold, modify different files (claude.rs vs history.rs)"
+        }
+      ],
+      "recommended_workers": 1,
+      "speedup_estimate": "Minimal \u2014 phases 2 and 3 are small enough that parallelism overhead exceeds benefit"
+    },
+    "startup_command": "PYTHONPATH=$(python3 -c 'import site; print(site.getsitepackages()[0])') env -u CLAUDECODE python3 /Applications/Auto-Claude.app/Contents/Resources/backend/run.py --spec 030 --project-dir /Users/studio/bop --direct"
+  },
+  "verification_strategy": {
+    "risk_level": "medium",
+    "skip_validation": false,
+    "test_creation_phase": "inline",
+    "test_types_required": [
+      "unit"
+    ],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      "cargo build -p bop succeeds",
+      "cargo test -p bop -- providers passes all tests (existing 16 + 3 new)",
+      "./target/debug/bop providers --help prints usage",
+      "./target/debug/bop providers --json outputs valid JSON array",
+      "cargo clippy -- -D warnings is clean",
+      "cargo fmt --check is clean"
+    ],
+    "verification_steps": [
+      {
+        "name": "Build",
+        "command": "cargo build -p bop",
+        "expected_outcome": "Compiles without errors",
+        "type": "build",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Unit Tests",
+        "command": "cargo test -p bop -- providers",
+        "expected_outcome": "All tests pass (16 existing + 3 new: test_claude_snapshot_parse, test_detect_missing_creds, test_history_roundtrip)",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Clippy",
+        "command": "cargo clippy -- -D warnings",
+        "expected_outcome": "No warnings",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Format",
+        "command": "cargo fmt --check",
+        "expected_outcome": "No formatting issues",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "CLI Help",
+        "command": "./target/debug/bop providers --help",
+        "expected_outcome": "Prints usage information for bop providers subcommand",
+        "type": "test",
+        "required": true,
+        "blocking": false
+      }
+    ],
+    "reasoning": "Medium risk: new module with HTTP client dependency, async trait, and file system operations. Naming refactor of existing Provider struct requires verifying no regressions. All existing 16 provider tests must continue passing."
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": true,
+      "commands": [
+        "cargo test -p bop -- providers"
+      ],
+      "minimum_coverage": null
+    },
+    "integration_tests": {
+      "required": false,
+      "commands": [],
+      "services_to_test": []
+    },
+    "e2e_tests": {
+      "required": false,
+      "commands": [],
+      "flows": []
+    },
+    "browser_verification": {
+      "required": false,
+      "pages": []
+    },
+    "database_verification": {
+      "required": false,
+      "checks": []
+    }
+  },
+  "qa_signoff": {
+    "status": "approved",
+    "timestamp": "2026-03-08T00:50:00+00:00",
+    "qa_session": 1,
+    "report_file": "qa_report.md",
+    "tests_passed": {
+      "unit": "845/845",
+      "integration": "N/A",
+      "e2e": "N/A",
+      "dispatcher_harness": "10/10",
+      "job_control_harness": "17/17",
+      "merge_gate_harness": "4/4",
+      "serve_smoke": "5/5",
+      "total": "881/881"
+    },
+    "verified_by": "qa_agent"
+  },
+  "last_updated": "2026-03-08T00:50:00+00:00",
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2026-03-08T00:47:04.044994+00:00",
+      "issues": [],
+      "duration_seconds": 257.33
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 1,
+    "last_iteration": 1,
+    "last_status": "approved",
+    "issues_by_type": {}
+  }
+}

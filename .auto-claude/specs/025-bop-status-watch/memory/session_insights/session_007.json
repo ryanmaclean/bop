@@ -1,0 +1,110 @@
+{
+  "session_number": 7,
+  "timestamp": "2026-03-07T12:11:51.200951+00:00",
+  "subtasks_completed": [
+    "subtask-1-6"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/main.rs",
+        "type": "command_handler_modification",
+        "changes": [
+          "Added conditional branch in Status command handler (lines 503-507)",
+          "Wired --watch flag to invoke list_cards_watch(&root, \"active\").await",
+          "Preserved existing print_status_summary() as default behavior when watch flag is false"
+        ],
+        "key_code_section": "Command::Status { id, watch } => { ... }",
+        "async_context": true,
+        "flag_usage": "watch: bool parameter from CLI args struct"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Flag-driven dispatch in CLI handlers",
+        "description": "Using boolean flags to conditionally invoke different async functions within same command handler",
+        "example": "if watch { list_cards_watch() } else { print_status_summary() }",
+        "reusability": "high - can extend to other flag-driven branching in Status or other commands"
+      },
+      {
+        "pattern": "Hardcoded filter string in watch mode",
+        "description": "Watch mode always uses \"active\" as the filter argument to list_cards_watch",
+        "precedent": "Similar to how other commands invoke list_cards_watch with specific filters"
+      },
+      {
+        "pattern": "Empty ID check gates watch behavior",
+        "description": "Watch mode only triggers when id.trim().is_empty(), preventing watch from running on specific card IDs",
+        "logic_flow": "Status with no ID + watch flag = watch mode; Status with ID + watch flag = single card handling (unchanged)"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Watch mode unavailable for single-card status",
+        "context": "The conditional is inside if id.trim().is_empty() block, so --watch only works when listing all cards, not specific IDs",
+        "potential_issue": "User expecting `bop status <id> --watch` to work will get single-card status instead",
+        "severity": "medium - may need documentation or UX clarification"
+      },
+      {
+        "gotcha": "Hardcoded \"active\" filter",
+        "context": "list_cards_watch called with hardcoded \"active\" string; no way to filter by other states in watch mode",
+        "design_implication": "Watch mode shows only active cards; other states require separate invocation",
+        "severity": "low - matches existing bop behavior but limits flexibility"
+      },
+      {
+        "gotcha": "No explicit error handling addition",
+        "context": "Relies on list_cards_watch error propagation (`.await?`); changes are structurally safe",
+        "severity": "low - existing error handling is sufficient"
+      }
+    ],
+    "approach_outcome": {
+      "result": "SUCCESS",
+      "complexity": "low",
+      "lines_changed": 6,
+      "breaking_changes": false,
+      "backward_compatibility": "maintained - default behavior (no --watch) unchanged",
+      "implementation_quality": "clean - minimal diff, clear intent, no refactoring needed",
+      "async_safety": "correct - await placed on async function call within async context"
+    },
+    "recommendations": [
+      {
+        "priority": "low",
+        "type": "future_enhancement",
+        "suggestion": "Allow --watch with single card ID",
+        "rationale": "Currently --watch is only effective for full status listing; single-card watch would enable focused monitoring of specific card",
+        "implementation_hint": "Move watch branch outside the id.trim().is_empty() check, add new code path for watched single cards"
+      },
+      {
+        "priority": "low",
+        "type": "documentation",
+        "suggestion": "Document --watch flag behavior (shows active cards only, requires no ID argument)",
+        "rationale": "Current implementation behavior is non-obvious from flag name alone",
+        "location": "help text or docs/cli-reference.md"
+      },
+      {
+        "priority": "low",
+        "type": "testing",
+        "suggestion": "Add integration test for `bop status --watch` invocation",
+        "rationale": "Verify watch mode properly invokes list_cards_watch and gracefully handles terminal interrupt",
+        "test_location": "crates/bop-cli/tests/ or existing status command tests"
+      },
+      {
+        "priority": "very_low",
+        "type": "consistency",
+        "suggestion": "Consider parameterizing the \"active\" filter string",
+        "rationale": "May enable future extensibility if other filters become useful in watch mode",
+        "current_state": "Hardcoded; acceptable for MVP"
+      }
+    ],
+    "subtask_id": "subtask-1-6",
+    "session_num": 7,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/main.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-6"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

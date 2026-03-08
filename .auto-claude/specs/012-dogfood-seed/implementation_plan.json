@@ -1,0 +1,324 @@
+{
+  "feature": "Dogfood: Seed bop's own backlog as bop cards",
+  "workflow_type": "simple",
+  "workflow_rationale": "Single-service task with no complex dependencies. Just creating cards and writing specs - no multi-phase coordination needed.",
+  "phases": [
+    {
+      "id": "phase-1-create-cards",
+      "name": "Create and populate cards",
+      "type": "implementation",
+      "description": "Create 7 cards across 4 teams with real specifications",
+      "depends_on": [],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Create watchpaths-dispatcher card for team-arch",
+          "service": "bop",
+          "files_to_create": [
+            ".cards/pending/{glyph}-watchpaths-dispatcher.bop/"
+          ],
+          "files_to_modify": [],
+          "patterns_from": [
+            ".cards/templates/implement.bop/"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo run --bin bop -- list --state pending --json | jq -r '.[] | select(.id == \"watchpaths-dispatcher\") | .id'",
+            "expected": "watchpaths-dispatcher"
+          },
+          "status": "completed",
+          "spec_content": "# WatchPaths Dispatcher Extension\n\n## Overview\nExtend the dispatcher's WatchPaths mechanism to monitor all team-*/pending directories, not just a single pending/ directory. This is a follow-on to spec 010.\n\n## Requirements\n- Watch all team-arch/pending, team-cli/pending, team-quality/pending, team-platform/pending, team-intelligence/pending directories\n- Trigger dispatcher when any .bop directory appears in any team's pending/ folder\n- Maintain single-threaded dispatcher guarantee (no concurrent dispatches per team)\n\n## Scope\n- IN: Extend WatchPaths event source in dispatcher.rs\n- IN: Update launchd plist to watch multiple directories\n- OUT: Does NOT change card movement logic or state machine\n\n## Acceptance Criteria\n- [ ] Dispatcher fires when card dropped in any team-*/pending/ directory\n- [ ] `cargo test` passes\n- [ ] `cargo clippy -- -D warnings` passes\n- [ ] No regression in existing pending/ directory monitoring",
+          "notes": "Created watchpaths-dispatcher card in .cards/team-arch/pending/ with complete spec.md describing the WatchPaths extension requirements. Card includes proper meta.json with heart glyph (🂱) for team-arch, Info.plist, links.md, and prompt.md template. Verified with `cargo run --bin bop -- list --state pending` showing the card is properly indexed.",
+          "updated_at": "2026-03-05T23:18:31.651369+00:00"
+        },
+        {
+          "id": "subtask-1-2",
+          "description": "Create jj-gitignore-audit card for team-arch",
+          "service": "bop",
+          "files_to_create": [
+            ".cards/pending/{glyph}-jj-gitignore-audit.bop/"
+          ],
+          "files_to_modify": [],
+          "patterns_from": [
+            ".cards/templates/implement.bop/"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo run --bin bop -- list --state pending --json | jq -r '.[] | select(.id == \"jj-gitignore-audit\") | .id'",
+            "expected": "jj-gitignore-audit"
+          },
+          "status": "completed",
+          "spec_content": "# JJ Gitignore Audit\n\n## Overview\nAudit the repository for large files that cause `jj snapshot` to fail or hang, and add appropriate patterns to .gitignore to prevent them from being tracked.\n\n## Requirements\n- Identify all files >10MB that are tracked or could be tracked\n- Find common patterns for build artifacts, logs, temp files\n- Add patterns to .gitignore that prevent jj from tracking these\n- Verify `jj st` completes in <2 seconds after changes\n\n## Scope\n- IN: Audit target/, logs/, .workspaces/, QuickLook/ directories\n- IN: Update .gitignore with size-based and pattern-based exclusions\n- IN: Test that jj snapshot works without hanging\n- OUT: Does NOT migrate existing jj history or rewrite commits\n\n## Acceptance Criteria\n- [ ] .gitignore includes patterns for all large file categories\n- [ ] `jj st` completes in <2 seconds\n- [ ] No large files (>10MB) appear in `jj st` output\n- [ ] Build artifacts are properly ignored",
+          "notes": "Created jj-gitignore-audit card in .cards/team-arch/pending/ with complete spec.md describing the jj .gitignore audit requirements. Card includes proper meta.json with heart glyph (🂲) for team-arch, Info.plist, links.md, and prompt.md template. Spec covers auditing large files (>1MB) that break jj snapshot, adding patterns to .gitignore, and verifying clean jj status. Verified with `cargo run --bin bop -- list --state pending --json` showing the card is properly indexed with id \"jj-gitignore-audit\".",
+          "updated_at": "2026-03-05T23:22:06.834449+00:00"
+        },
+        {
+          "id": "subtask-1-3",
+          "description": "Create bop-serve card for team-cli",
+          "service": "bop",
+          "files_to_create": [
+            ".cards/pending/{glyph}-bop-serve.bop/"
+          ],
+          "files_to_modify": [],
+          "patterns_from": [
+            ".cards/templates/implement.bop/"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo run --bin bop -- list --state pending --json | jq -r '.[] | select(.id == \"bop-serve\") | .id'",
+            "expected": "bop-serve"
+          },
+          "status": "completed",
+          "spec_content": "# Bop Serve HTTP Endpoint\n\n## Overview\nAdd `bop serve` command that runs an HTTP server accepting POST requests with spec content to create cards. This enables the ai-coding-job.yml GitHub Actions pattern without requiring self-hosted runners.\n\n## Requirements\n- HTTP endpoint at POST /cards accepting JSON: {\"id\": \"card-id\", \"template\": \"implement\", \"spec\": \"markdown content\", \"team\": \"cli\"}\n- Create card in pending/ directory with provided spec\n- Return 201 with card path on success, 400/409 on validation errors\n- Support authentication via bearer token from environment variable\n\n## Scope\n- IN: New `bop serve` subcommand in main.rs\n- IN: HTTP server using warp or axum\n- IN: Card creation via existing create_card() function\n- OUT: Does NOT include dispatcher integration (cards sit in pending/)\n- OUT: Does NOT include GitHub webhook handling\n\n## Acceptance Criteria\n- [ ] `bop serve --port 8080` starts HTTP server\n- [ ] POST /cards creates valid card in pending/\n- [ ] Invalid requests return appropriate error codes\n- [ ] `cargo test` passes with new integration tests\n- [ ] `cargo clippy -- -D warnings` passes",
+          "notes": "Created bop-serve card in .cards/pending/🂢-bop-serve.bop/ using `bop new implement bop-serve --team team-cli`. Updated spec.md with comprehensive requirements for HTTP endpoint that accepts spec body via POST to create cards, enabling ai-coding-job.yml pattern without self-hosted runners. Card includes: JSON request format, validation/error handling, basic auth token support, configurable host:port, graceful shutdown, and comprehensive acceptance criteria. Verified card is indexed correctly with id \"bop-serve\" using verification command.",
+          "updated_at": "2026-03-05T23:25:09.020525+00:00"
+        },
+        {
+          "id": "subtask-1-4",
+          "description": "Create bop-doctor-checks card for team-cli",
+          "service": "bop",
+          "files_to_create": [
+            ".cards/pending/{glyph}-bop-doctor-checks.bop/"
+          ],
+          "files_to_modify": [],
+          "patterns_from": [
+            ".cards/templates/implement.bop/"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo run --bin bop -- list --state pending --json | jq -r '.[] | select(.id == \"bop-doctor-checks\") | .id'",
+            "expected": "bop-doctor-checks"
+          },
+          "status": "completed",
+          "spec_content": "# Bop Doctor Enhanced Checks\n\n## Overview\nExpand `bop doctor` command to check for required tools (nu, jj), adapter availability, and launchd plist status. Provide actionable diagnostics.\n\n## Requirements\n- Check `nu --version` exists and is >= 0.111.0\n- Check `jj --version` exists and is functional\n- Verify all adapters/*.nu files exist and are executable\n- Check launchd plist status: loaded, enabled, running\n- Report missing dependencies with installation instructions\n\n## Scope\n- IN: Extend doctor.rs with version checks\n- IN: Add adapter availability scan (check adapters/*.nu paths)\n- IN: Add launchd plist status check via `launchctl list`\n- OUT: Does NOT auto-fix issues (just reports them)\n- OUT: Does NOT install missing dependencies\n\n## Acceptance Criteria\n- [ ] `bop doctor` reports nu version status\n- [ ] `bop doctor` reports jj version status\n- [ ] `bop doctor` lists available adapters\n- [ ] `bop doctor` shows launchd plist status\n- [ ] `cargo test` passes\n- [ ] `cargo clippy -- -D warnings` passes",
+          "notes": "Created bop-doctor-checks card with spec for expanding bop doctor to check nu version, jj version, adapter availability, and launchd plist status. Card uses 🂡 (ace of spades) glyph for team-cli. Verification passed: bop list shows the card correctly.",
+          "updated_at": "2026-03-05T23:28:47.373167+00:00"
+        },
+        {
+          "id": "subtask-1-5",
+          "description": "Create e2e-factory-test card for team-quality",
+          "service": "bop",
+          "files_to_create": [
+            ".cards/pending/{glyph}-e2e-factory-test.bop/"
+          ],
+          "files_to_modify": [],
+          "patterns_from": [
+            ".cards/templates/implement.bop/"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo run --bin bop -- list --state pending --json | jq -r '.[] | select(.id == \"e2e-factory-test\") | .id'",
+            "expected": "e2e-factory-test"
+          },
+          "status": "completed",
+          "spec_content": "# E2E Factory Test\n\n## Overview\nCreate end-to-end integration test verifying that `bop factory install` + dropping a card triggers dispatcher and moves card to done/ without manual daemon management.\n\n## Requirements\n- Test script that runs: factory install → create test card → verify dispatcher fires → check card in done/\n- Clean setup/teardown (unload plist before, restore after)\n- Use mock adapter for predictable behavior\n- Test should complete in <30 seconds\n\n## Scope\n- IN: New integration test in tests/ or scripts/\n- IN: Verify launchd WatchPaths triggers dispatcher\n- IN: Verify card state transitions (pending → running → done)\n- OUT: Does NOT test real adapters (use mock only)\n- OUT: Does NOT test merge-gate or PR creation\n\n## Acceptance Criteria\n- [ ] Test creates card, factory triggers dispatcher automatically\n- [ ] Card moves from pending/ to running/ to done/\n- [ ] Test cleans up launchd plist after run\n- [ ] Test passes on clean macOS system\n- [ ] Test script is documented and runnable via `make`",
+          "notes": "Created e2e-factory-test card in .cards/pending/🃁-e2e-factory-test.bop/ with comprehensive spec.md describing the end-to-end factory test requirements. Card includes proper meta.json with diamond glyph (🃁) for team-quality, Info.plist, links.md, and prompt.md template. Spec covers testing the complete workflow: bop factory install → drop card → dispatcher fires → card moves to done/ without manual intervention. Verified with verification command showing card is properly indexed with id \"e2e-factory-test\". Card committed to repository with proper git commit message.",
+          "updated_at": "2026-03-05T23:33:17.926178+00:00"
+        },
+        {
+          "id": "subtask-1-6",
+          "description": "Create adapter-stress-test card for team-quality",
+          "service": "bop",
+          "files_to_create": [
+            ".cards/pending/{glyph}-adapter-stress-test.bop/"
+          ],
+          "files_to_modify": [],
+          "patterns_from": [
+            ".cards/templates/implement.bop/"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo run --bin bop -- list --state pending --json | jq -r '.[] | select(.id == \"adapter-stress-test\") | .id'",
+            "expected": "adapter-stress-test"
+          },
+          "status": "completed",
+          "spec_content": "# Adapter Stress Test\n\n## Overview\nRun 10 cards concurrently through the ollama adapter to verify no race conditions, proper PID tracking, and correct orphan reaper behavior under load.\n\n## Requirements\n- Spawn 10 cards simultaneously using dispatcher with --max-workers 10\n- All cards use ollama-local adapter\n- Verify no PID collisions or lost processes\n- Confirm orphan reaper handles all child processes correctly\n- Check for file descriptor leaks or resource exhaustion\n\n## Scope\n- IN: Stress test script using dispatcher with high concurrency\n- IN: Verify reaper.rs correctly tracks all spawned PIDs\n- IN: Check no cards stuck in running/ after test\n- OUT: Does NOT test non-ollama adapters\n- OUT: Does NOT test network failure scenarios\n\n## Acceptance Criteria\n- [ ] All 10 cards complete successfully (in done/ or failed/)\n- [ ] No cards remain in running/ after dispatcher exits\n- [ ] No orphaned ollama processes remain (`ps aux | grep ollama`)\n- [ ] Test completes in <5 minutes\n- [ ] Test logs show clean PID lifecycle for all cards",
+          "notes": "Created adapter-stress-test card in .cards/pending/🃂-adapter-stress-test.bop/ with comprehensive spec.md describing requirements for stress testing the ollama adapter with 10 concurrent cards. Card includes proper meta.json with diamond glyph (🃂) for team-quality, Info.plist, links.md, and prompt.md template. Spec covers concurrent dispatch with --max-workers 10, PID tracking verification, orphan reaper behavior, and resource leak checks. Verified with verification command showing card is properly indexed with id \"adapter-stress-test\". Card committed to repository with proper git commit message.",
+          "updated_at": "2026-03-05T23:37:45.000000+00:00"
+        },
+        {
+          "id": "subtask-1-7",
+          "description": "Create model-routing card for team-intelligence",
+          "service": "bop",
+          "files_to_create": [
+            ".cards/pending/{glyph}-model-routing.bop/"
+          ],
+          "files_to_modify": [],
+          "patterns_from": [
+            ".cards/templates/implement.bop/"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo run --bin bop -- list --state pending --json | jq -r '.[] | select(.id == \"model-routing\") | .id'",
+            "expected": "model-routing"
+          },
+          "status": "completed",
+          "spec_content": "# Model Routing by Cost\n\n## Overview\nRoute cards to cheap models (claude-haiku) vs capable models (claude-sonnet/opus) based on a `cost` field in meta.json. This optimizes spend for simple vs complex tasks.\n\n## Requirements\n- Add optional `cost` field to meta.json: \"cheap\" | \"capable\" | \"premium\"\n- Default to \"capable\" if not specified\n- Map cost to model selection: cheap=haiku, capable=sonnet, premium=opus\n- Dispatcher selects model based on cost field before invoking adapter\n\n## Scope\n- IN: Add cost field to Meta struct in bop-core/src/meta.rs\n- IN: Add model routing logic in dispatcher.rs\n- IN: Update templates to include cost field\n- OUT: Does NOT change existing provider_chain or stage_models logic\n- OUT: Does NOT add dynamic cost estimation (manual field only)\n\n## Acceptance Criteria\n- [ ] meta.json supports \"cost\" field\n- [ ] Cards with cost=\"cheap\" use claude-haiku\n- [ ] Cards with cost=\"capable\" use claude-sonnet (default)\n- [ ] Cards with cost=\"premium\" use claude-opus\n- [ ] `cargo test` passes\n- [ ] `cargo clippy -- -D warnings` passes",
+          "notes": "Created model-routing card in .cards/team-intelligence/pending/🃓-model-routing.bop/ with comprehensive spec.md describing requirements for routing cards to different model tiers based on cost field in meta.json. Card includes proper meta.json with club glyph (🃓) for team-intelligence, Info.plist, links.md, and prompt.md template. Spec covers adding optional cost field (cheap/capable/premium), model selection logic in dispatcher, and template updates. Verified with verification command showing card is properly indexed with id \"model-routing\".",
+          "updated_at": "2026-03-05T23:40:52.514841+00:00"
+        },
+        {
+          "id": "subtask-1-8",
+          "description": "Verify all cards created and listed",
+          "service": "bop",
+          "files_to_create": [],
+          "files_to_modify": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "test $(cargo run --bin bop -- list --state pending --json | jq '. | length') -ge 7",
+            "expected": "exit code 0 (true)"
+          },
+          "status": "completed",
+          "notes": "Verification successful: 8 pending cards found (>= 7 required). Cards distributed across pending/ (5), team-arch/pending/ (2), and team-intelligence/pending/ (1).",
+          "updated_at": "2026-03-05T23:43:04.535095+00:00"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_phases": 1,
+    "total_subtasks": 8,
+    "services_involved": [
+      "bop"
+    ],
+    "parallelism": {
+      "max_parallel_phases": 1,
+      "parallel_groups": [],
+      "recommended_workers": 1,
+      "speedup_estimate": "N/A - sequential card creation"
+    },
+    "startup_command": "source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 012 --parallel 1"
+  },
+  "verification_strategy": {
+    "risk_level": "low",
+    "skip_validation": false,
+    "test_creation_phase": "post_implementation",
+    "test_types_required": [
+      "command"
+    ],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      "bop list --state pending shows >= 7 cards",
+      "Each card has a real spec.md (not template placeholder)",
+      "bop list --json --state pending | jq '.id' outputs all card IDs"
+    ],
+    "verification_steps": [
+      {
+        "name": "List Pending Cards",
+        "command": "cargo run --bin bop -- list --state pending",
+        "expected_outcome": "Shows at least 7 cards",
+        "type": "command",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Verify Card IDs",
+        "command": "cargo run --bin bop -- list --state pending --json | jq -r '.[].id' | sort",
+        "expected_outcome": "Shows: adapter-stress-test, bop-doctor-checks, bop-serve, e2e-factory-test, jj-gitignore-audit, model-routing, watchpaths-dispatcher",
+        "type": "command",
+        "required": true,
+        "blocking": true
+      }
+    ],
+    "reasoning": "Low risk - only creating card files, not modifying code. Command-based verification is sufficient."
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": false,
+      "commands": [],
+      "minimum_coverage": null
+    },
+    "integration_tests": {
+      "required": false,
+      "commands": [],
+      "services_to_test": []
+    },
+    "e2e_tests": {
+      "required": false,
+      "commands": [],
+      "flows": []
+    },
+    "browser_verification": {
+      "required": false,
+      "pages": []
+    },
+    "database_verification": {
+      "required": false,
+      "checks": []
+    },
+    "command_verification": {
+      "required": true,
+      "commands": [
+        {
+          "description": "List all pending cards",
+          "command": "cargo run --bin bop -- list --state pending",
+          "expected": "Shows at least 7 cards"
+        },
+        {
+          "description": "Verify card count",
+          "command": "cargo run --bin bop -- list --state pending --json | jq '. | length'",
+          "expected": "Output >= 7"
+        },
+        {
+          "description": "Verify all card IDs present",
+          "command": "cargo run --bin bop -- list --state pending --json | jq -r '.[].id' | grep -c watchpaths-dispatcher",
+          "expected": "Output: 1"
+        }
+      ]
+    }
+  },
+  "qa_signoff": null,
+  "last_updated": "2026-03-05T23:43:04.535104+00:00",
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "error",
+      "timestamp": "2026-03-05T23:45:40.665287+00:00",
+      "issues": [
+        {
+          "title": "QA error",
+          "description": "QA agent did not update implementation_plan.json"
+        }
+      ]
+    },
+    {
+      "iteration": 2,
+      "status": "error",
+      "timestamp": "2026-03-05T23:45:47.367641+00:00",
+      "issues": [
+        {
+          "title": "QA error",
+          "description": "QA agent did not update implementation_plan.json (No tools were used by agent)"
+        }
+      ]
+    },
+    {
+      "iteration": 3,
+      "status": "error",
+      "timestamp": "2026-03-05T23:45:54.339911+00:00",
+      "issues": [
+        {
+          "title": "QA error",
+          "description": "QA agent did not update implementation_plan.json (No tools were used by agent)"
+        }
+      ]
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 3,
+    "last_iteration": 3,
+    "last_status": "error",
+    "issues_by_type": {
+      "unknown": 3
+    }
+  },
+  "status": "human_review",
+  "planStatus": "review",
+  "reviewReason": "completed",
+  "updated_at": "2026-03-07T23:57:36.589Z",
+  "xstateState": "human_review",
+  "executionPhase": "complete"
+}

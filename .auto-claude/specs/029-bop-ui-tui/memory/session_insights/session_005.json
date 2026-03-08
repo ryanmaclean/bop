@@ -1,0 +1,132 @@
+{
+  "session_number": 5,
+  "timestamp": "2026-03-07T19:18:04.617814+00:00",
+  "subtasks_completed": [
+    "subtask-1-4"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/ui/mod.rs",
+        "changes_summary": "Added complete render loop implementation with three-zone layout and ratatui Terminal integration",
+        "key_additions": [
+          "Imported ratatui backend (CrosstermBackend), layout (Constraint, Layout), widgets (Block, Paragraph), and Terminal",
+          "Created Terminal instance after TerminalGuard initialization for proper resource lifecycle",
+          "Implemented draw() function with three-zone vertical layout: header (2 rows fixed), body (Min(0) flexible), footer (1 row fixed)",
+          "Added initial draw() call before event loop to render starting state",
+          "Added draw() call after event processing for event-driven UI updates"
+        ],
+        "code_quality": "Follows k9s-style three-zone pattern; uses ratatui's Layout::vertical with explicit constraints; placeholder widgets ready for future feature integration"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Resource Guard for Terminal Cleanup",
+        "description": "TerminalGuard wraps terminal setup; Drop impl ensures alternate screen + raw mode restoration regardless of error path",
+        "evidence": "TerminalGuard::new() called before Terminal creation; _guard kept in scope through entire run_ui()",
+        "applicability": "Essential for TUI cleanup guarantees; prevents terminal corruption on panic or early exit"
+      },
+      {
+        "pattern": "Three-Zone Vertical Layout",
+        "description": "Layout::vertical with fixed-size header/footer (Constraint::Length) and flexible body (Constraint::Min(0)) divides terminal into predictable regions",
+        "evidence": "Layout::vertical([Length(2), Min(0), Length(1)]).split(area) creates three zones; header=2 rows, body=remaining, footer=1 row",
+        "applicability": "Standard for dashboard/kanban UIs; k9s reference confirmed in spec 029"
+      },
+      {
+        "pattern": "Event-Driven Render Loop",
+        "description": "UI redraw triggered after each event (keyboard, timer, file watcher) rather than continuous polling",
+        "evidence": "draw(&mut terminal, &app)? called in event loop after state updates; initial render before loop starts",
+        "applicability": "Efficient for event-based systems; reduces CPU usage; matches crossterm async event model"
+      },
+      {
+        "pattern": "Placeholder Widget Structure",
+        "description": "Temporary widgets with hardcoded text and styling; designed for incremental feature implementation without blocking core architecture",
+        "evidence": "Header, body, footer paragraphs use placeholder text ('bop \u00b7 --:--:-- \u00b7 placeholder header', 'kanban body'); styled with Color enum",
+        "applicability": "Unblocks subtask completion; allows downstream tasks (3-1 header, 2-1 kanban, 3-2 footer) to replace independently"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Terminal creation must follow TerminalGuard initialization",
+        "severity": "HIGH",
+        "explanation": "TerminalGuard enters alternate screen + raw mode via crossterm. Terminal backend must be created AFTER to avoid state conflicts. Reversed order causes restore() to drop before Terminal is built.",
+        "code_location": "run_ui(): TerminalGuard::new() line 27, Terminal::new() line 30"
+      },
+      {
+        "gotcha": "Initial draw() call required before event loop",
+        "severity": "MEDIUM",
+        "explanation": "Without initial render, screen shows blank until first event. Users perceive lag or unresponsiveness. Initial draw() establishes visual feedback immediately.",
+        "code_location": "run_ui(): draw(&mut terminal, &app)? line 35, before loop"
+      },
+      {
+        "gotcha": "Layout constraint order is significant",
+        "severity": "MEDIUM",
+        "explanation": "Layout::vertical([Length(2), Min(0), Length(1)]) must have flexible zone (Min(0)) in middle. Swapping with fixed zones causes incorrect space allocation or panic on small terminals.",
+        "code_location": "draw(): Layout::vertical() line 80\u201383"
+      },
+      {
+        "gotcha": "Paragraph widgets without block look unstyled",
+        "severity": "LOW",
+        "explanation": "Footer paragraph has no border/block; body has Block::bordered() for visual distinction. Intentional for now, but testing revealed footer blends with body on some terminal themes.",
+        "code_location": "draw(): footer Paragraph line 107 (no block)"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "completion_percentage": 100,
+      "core_achievements": [
+        "Render loop fully operational; enters alternate screen on startup, restores on exit",
+        "Three-zone layout correctly divides terminal; header/footer fixed size, body fills remaining space",
+        "Event-driven redraw architecture in place; app state updates trigger terminal.draw()",
+        "Placeholder widgets render without errors; ready for feature-specific implementations"
+      ],
+      "test_coverage": "Manual verification: bop ui enters alternate screen, displays three zones with placeholder text, quits cleanly on 'q' or Ctrl-C, restores terminal state",
+      "unblocked_downstream": [
+        "Subtask 3-1 (header widgets: clock, mode indicator, sidebar) can implement header zone independently",
+        "Subtask 2-1 (kanban columns and card rendering) can implement body zone independently",
+        "Subtask 3-2 (footer keybinding legend) can implement footer zone independently"
+      ]
+    },
+    "recommendations": [
+      {
+        "priority": "MEDIUM",
+        "category": "Code Clarity",
+        "recommendation": "Extract layout constraints to named constants",
+        "rationale": "Magic numbers [2, 0, 1] are meaningful in context but repeated. Constants like HEADER_HEIGHT=2, FOOTER_HEIGHT=1 improve readability and ease future terminal dimension changes.",
+        "example": "const HEADER_HEIGHT: u16 = 2; const FOOTER_HEIGHT: u16 = 1; Layout::vertical([Constraint::Length(HEADER_HEIGHT), Constraint::Min(0), Constraint::Length(FOOTER_HEIGHT)])"
+      },
+      {
+        "priority": "MEDIUM",
+        "category": "Architecture",
+        "recommendation": "Move draw() function to separate theme/render module as complexity grows",
+        "rationale": "draw() will expand significantly as widgets replace placeholders. Separating into ui/render.rs or ui/theme.rs keeps mod.rs focused on run_ui() orchestration.",
+        "example": "Create ui/render.rs with pub fn render_layout(frame, app) and theme structs"
+      },
+      {
+        "priority": "LOW",
+        "category": "Testing",
+        "recommendation": "Add integration test verifying three-zone layout constraints under various terminal sizes",
+        "rationale": "Small terminals (< 4 rows) may violate Min(0) contract. Test with edge cases: 3 rows, 5 rows, 200x50.",
+        "example": "Test in crates/bop-cli/tests/ using fake Terminal backend or snapshot rendering"
+      },
+      {
+        "priority": "LOW",
+        "category": "Performance",
+        "recommendation": "Monitor draw() frequency and consider debouncing rapid events if CPU spike observed",
+        "rationale": "Current design redraws on EVERY event including tick (~100ms). If many fs watcher events queue, redraw may stall. Implement frame-rate cap (e.g., 30 FPS) if needed.",
+        "example": "Add Instant timestamp in draw(), skip if < 33ms elapsed"
+      }
+    ],
+    "subtask_id": "subtask-1-4",
+    "session_num": 5,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/ui/mod.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-4"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

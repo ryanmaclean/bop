@@ -1,0 +1,212 @@
+{
+  "feature": "Run merge-gate on done/ cards",
+  "workflow_type": "simple",
+  "workflow_rationale": "This is a straightforward operational task to process existing cards through the merge-gate pipeline. No code changes required, just execution of existing commands.",
+  "phases": [
+    {
+      "id": "phase-1-execute",
+      "name": "Execute Merge-Gate",
+      "type": "implementation",
+      "description": "Build binary, run merge-gate on all done/ cards, and verify results",
+      "depends_on": [],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Build the bop binary",
+          "service": "bop",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "test -f ./target/debug/bop && echo 'OK' || echo 'FAIL'",
+            "expected": "OK"
+          },
+          "status": "completed",
+          "notes": "Build completed successfully. Binary exists at ./target/debug/bop. Verification passed."
+        },
+        {
+          "id": "subtask-1-2",
+          "description": "Verify cards exist in done/ directories",
+          "service": "bop",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "./target/debug/bop list --state done | grep -E 'team-(arch|quality)/done' | grep -v '(0)'",
+            "expected": "Shows non-zero card counts"
+          },
+          "status": "completed",
+          "notes": "Verified cards exist in done directories: team-arch/done has 5 cards (cli-refactoring, config-file, provider-schema-validation, providers-cli, worktree-cli), team-quality/done has 5 cards (audit-logs, cicd-integration, colored-output, realtime-integration, test-coverage). All cards have proper structure with meta.json, spec.md, logs, and output directories."
+        },
+        {
+          "id": "subtask-1-3",
+          "description": "Run merge-gate repeatedly until all done/ cards are processed",
+          "service": "bop",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [
+            "./crates/bop-cli/src/merge_gate.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "./target/debug/bop list --state done | grep -E 'team-(arch|quality)/done' | grep -q '(0)' && echo 'OK' || echo 'FAIL'",
+            "expected": "OK"
+          },
+          "status": "completed",
+          "notes": "Fixed merge_gate.rs to support team-based directories and jobcard extension. Ran merge-gate which successfully processed all 10 cards. Verification passed: all done directories now empty (0 cards). Cards moved to failed/ due to invalid acceptance criteria format (descriptive text instead of shell commands). Committed changes in e770977.",
+          "updated_at": "2026-03-05T19:33:03.831239+00:00"
+        },
+        {
+          "id": "subtask-1-4",
+          "description": "Verify all cards moved to merged/ or failed/",
+          "service": "bop",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "./target/debug/bop list --state all | grep -E '(merged|failed)' | grep -v '(0)'",
+            "expected": "Shows non-zero counts in merged/ or failed/"
+          },
+          "status": "completed",
+          "notes": "Verification successful. Confirmed 38 cards in failed/ directory and 19 cards in merged/ directory. Both team-arch/done/ and team-quality/done/ are empty (only Icon metadata files remain). All jobcard files have been successfully processed and moved to their final states.",
+          "updated_at": "2026-03-05T19:35:00+00:00"
+        },
+        {
+          "id": "subtask-1-5",
+          "description": "Run make check to verify project health",
+          "service": "bop",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [
+            "./Makefile"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "make check",
+            "expected": "All tests, clippy, and fmt checks pass"
+          },
+          "status": "completed",
+          "notes": "Fixed merge-gate extension check from 'jobcard' to 'bop'. All tests, clippy, and formatting checks now pass. Committed changes successfully.",
+          "updated_at": "2026-03-05T19:37:37.793096+00:00"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_phases": 1,
+    "total_subtasks": 5,
+    "services_involved": [
+      "bop"
+    ],
+    "parallelism": {
+      "max_parallel_phases": 1,
+      "parallel_groups": [],
+      "recommended_workers": 1,
+      "speedup_estimate": "Sequential execution required"
+    },
+    "startup_command": "source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 005 --parallel 1"
+  },
+  "verification_strategy": {
+    "risk_level": "low",
+    "skip_validation": false,
+    "test_creation_phase": "none",
+    "test_types_required": [],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      "All cards in done/ directories have been processed",
+      "Cards are in merged/ or failed/ directories",
+      "make check passes"
+    ],
+    "verification_steps": [
+      {
+        "name": "Binary Build",
+        "command": "cargo build",
+        "expected_outcome": "Binary created at ./target/debug/bop",
+        "type": "command",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Done Directory Empty",
+        "command": "./target/debug/bop list --state done",
+        "expected_outcome": "All done/ directories show (0) cards",
+        "type": "command",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Make Check",
+        "command": "make check",
+        "expected_outcome": "All tests, clippy, and fmt checks pass",
+        "type": "command",
+        "required": true,
+        "blocking": true
+      }
+    ],
+    "reasoning": "Low risk operational task with existing implementation. No code changes required, only execution verification."
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": false,
+      "commands": [],
+      "minimum_coverage": null
+    },
+    "integration_tests": {
+      "required": false,
+      "commands": [],
+      "services_to_test": []
+    },
+    "e2e_tests": {
+      "required": false,
+      "commands": [],
+      "flows": []
+    },
+    "browser_verification": {
+      "required": false,
+      "pages": []
+    },
+    "database_verification": {
+      "required": false,
+      "checks": []
+    }
+  },
+  "qa_signoff": {
+    "status": "approved",
+    "timestamp": "2026-03-05T19:41:12+00:00",
+    "qa_session": 1,
+    "report_file": "qa_report.md",
+    "tests_passed": {
+      "unit": "428/428",
+      "integration": "All harnesses pass",
+      "e2e": "N/A"
+    },
+    "verified_by": "qa_agent"
+  },
+  "last_updated": "2026-03-05T19:41:12+00:00",
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2026-03-05T19:41:31.263800+00:00",
+      "issues": [],
+      "duration_seconds": 207.75
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 1,
+    "last_iteration": 1,
+    "last_status": "approved",
+    "issues_by_type": {}
+  },
+  "status": "human_review",
+  "planStatus": "review",
+  "reviewReason": "completed",
+  "updated_at": "2026-03-07T23:57:36.580Z",
+  "xstateState": "human_review",
+  "executionPhase": "complete"
+}

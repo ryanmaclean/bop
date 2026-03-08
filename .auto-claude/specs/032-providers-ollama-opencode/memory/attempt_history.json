@@ -1,0 +1,40 @@
+{
+  "subtasks": {
+    "subtask-1-1": {
+      "attempts": [
+        {
+          "session": 844,
+          "timestamp": "2026-03-08T06:32:56.020356+00:00",
+          "approach": "Implemented: Add loaded_models: Option<Vec<String>> field to ProviderSnapshot struct with serde skip_serializing_",
+          "success": true,
+          "error": null
+        },
+        {
+          "session": 1,
+          "timestamp": "2026-03-08T06:34:16.725067+00:00",
+          "approach": "Implemented: Add loaded_models: Option<Vec<String>> field to ProviderSnapshot struct with serde skip_serializing_",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-2-1": {
+      "attempts": [
+        {
+          "session": 2,
+          "timestamp": "2026-03-08T06:37:02.016940+00:00",
+          "approach": "Implemented: Create crates/bop-cli/src/providers/ollama.rs with OllamaLocalProvider. detect(): use std::net::TcpS",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    }
+  },
+  "stuck_subtasks": [],
+  "metadata": {
+    "created_at": "2026-03-08T04:28:14.685130+00:00",
+    "last_updated": "2026-03-08T06:37:02.016954+00:00"
+  }
+}

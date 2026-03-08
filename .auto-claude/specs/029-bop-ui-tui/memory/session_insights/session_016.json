@@ -1,0 +1,122 @@
+{
+  "session_number": 16,
+  "timestamp": "2026-03-07T20:15:16.237686+00:00",
+  "subtasks_completed": [
+    "subtask-5-2"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/ui/widgets/newcard.rs",
+        "insight": "New focused module with single responsibility: spawning `bop new` subprocess. Uses anyhow for consistent error propagation. Synchronous Command execution with stderr capture for error messages. Minimal test placeholder acknowledges PATH resolution uncertainty in test environments."
+      },
+      {
+        "file": "crates/bop-cli/src/ui/app.rs",
+        "insight": "App struct extended minimally with single new field: `newcard_input: String`. Initialized in constructor. Clean separation\u2014no creation logic, just state management for input buffer."
+      },
+      {
+        "file": "crates/bop-cli/src/ui/input.rs",
+        "insight": "NewCard mode handler fully wired with 4 key cases: Esc (cancel), Enter (create), Backspace (delete), Char (append). Mode switching properly clears input on entry and restore to Normal on exit. Calls `build_columns()` for refresh after creation\u2014best-effort, errors logged non-fatally."
+      },
+      {
+        "file": "crates/bop-cli/src/ui/widgets/footer.rs",
+        "insight": "Footer rendering now shows live input buffer in NewCard legend: `new_card_legend(&app.newcard_input)`. Previously hardcoded empty string; now reflects typed ID in real-time."
+      },
+      {
+        "file": "crates/bop-cli/src/ui/widgets/mod.rs",
+        "insight": "Module export added for newcard; follows existing pattern (action, detail, etc.). Public re-export of `create_card` function."
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Mode switching with state reset",
+        "detail": "'n' clears input buffer, enters NewCard mode; Esc/Enter clears and returns to Normal. Guards against stale input across mode transitions."
+      },
+      {
+        "pattern": "Best-effort subprocess execution",
+        "detail": "Errors from `bop new` are logged to stderr but do NOT crash TUI. Cards refresh happens unconditionally, allowing user to see failure and retry."
+      },
+      {
+        "pattern": "Synchronous column refresh",
+        "detail": "After card creation, `build_columns()` called directly to reload filesystem state. Rebuilds entire column structure from `.cards/` root."
+      },
+      {
+        "pattern": "Minimal input validation",
+        "detail": "Only checks `!id.is_empty()` before calling `bop new`. Format validation delegated to subprocess (binary is authority)."
+      },
+      {
+        "pattern": "Input accumulation with backspace",
+        "detail": "Printable chars pushed to buffer; Backspace pops. Standard terminal input pattern."
+      },
+      {
+        "pattern": "Test uncertainty acknowledgment",
+        "detail": "Test function includes comment: 'We can't assert success because bop may not be on PATH in test environments.' Recognizes environment variability."
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Synchronous Command blocks TUI thread",
+        "detail": "If `bop new` is slow (large template clone, disk I/O), TUI freezes until completion. No spinner/progress feedback to user. May require async refactor for responsive UX at scale."
+      },
+      {
+        "gotcha": "PATH resolution in packaged binary",
+        "detail": "Code assumes `bop` is on PATH. In self-contained macOS .app or single-binary deployments, may need to resolve bop binary location dynamically (e.g., via current_exe or bundle path)."
+      },
+      {
+        "gotcha": "No input format validation in widget",
+        "detail": "Valid card IDs may have naming rules (e.g., team prefix, alphanumeric-only) that aren't checked in TUI. Errors surface only after subprocess runs. Early validation would improve UX."
+      },
+      {
+        "gotcha": "Duplicate card ID handling",
+        "detail": "Widget doesn't check if card ID already exists in `.cards/`. Subprocess will fail, error logged, but no user feedback that ID was already taken."
+      },
+      {
+        "gotcha": "Refresh happens synchronously after creation",
+        "detail": "If card file appears slowly (async move from template, COW clone overhead), refresh may read stale state. No polling/watch mechanism to ensure consistency."
+      }
+    ],
+    "approach_outcome": "SUCCESS \u2014 Inline card creation fully integrated into TUI. NewCard mode enters on 'n', input accumulates, Enter spawns `bop new default <id>`, Esc cancels. Footer shows live input. Refresh fires automatically. Error handling is defensive (logged, non-fatal). Code is minimal, focused, and follows existing patterns (mode switching, subprocess execution, state management).",
+    "recommendations": [
+      {
+        "priority": "medium",
+        "recommendation": "Migrate Command execution to async with timeout",
+        "rationale": "Prevent TUI freeze during slow card creation. Spawn in background task, show spinner in footer, update on completion/error. Use tokio::task::spawn_blocking + timeout crate."
+      },
+      {
+        "priority": "medium",
+        "recommendation": "Add input validation for card ID format",
+        "rationale": "Check naming rules (team prefix, alphanumeric, length limits) before subprocess. Fail fast with user feedback in footer ('Invalid ID format: ...')."
+      },
+      {
+        "priority": "low",
+        "recommendation": "Resolve bop binary path relative to current_exe",
+        "rationale": "Ensure packaged app (.app bundle, single binary) can locate bop without PATH. Use std::env::current_exe() and walk up to find cargo workspace root or sibling binary."
+      },
+      {
+        "priority": "low",
+        "recommendation": "Add duplicate ID detection",
+        "rationale": "Scan `.cards/*/` for existing ID before creation attempt. Show 'Card already exists' warning in footer before subprocess execution."
+      },
+      {
+        "priority": "low",
+        "recommendation": "Implement polling watch for card filesystem",
+        "rationale": "After creation, wait for card file to appear (up to 1s timeout) before refresh. Ensures build_columns() sees the new card consistently."
+      }
+    ],
+    "subtask_id": "subtask-5-2",
+    "session_num": 16,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/ui/app.rs",
+      "crates/bop-cli/src/ui/input.rs",
+      "crates/bop-cli/src/ui/widgets/footer.rs",
+      "crates/bop-cli/src/ui/widgets/mod.rs",
+      "crates/bop-cli/src/ui/widgets/newcard.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-5-2"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

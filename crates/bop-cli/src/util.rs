@@ -40,6 +40,24 @@ pub fn append_log_line(path: &Path, line: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Read the last non-empty line from a log file and truncate to max_bytes.
+/// Returns None if the file doesn't exist or has no non-empty lines.
+pub fn read_last_nonempty_line(path: &Path, max_bytes: usize) -> Option<String> {
+    let content = fs::read_to_string(path).ok()?;
+    let last_line = content
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())?
+        .to_string();
+
+    // Truncate to max_bytes if needed
+    if last_line.len() > max_bytes {
+        Some(last_line.chars().take(max_bytes).collect())
+    } else {
+        Some(last_line)
+    }
+}
+
 pub fn copy_dir_all(src: &Path, dst: &Path) -> anyhow::Result<()> {
     fs::create_dir_all(dst)?;
     for entry in WalkDir::new(src).min_depth(1) {
@@ -102,6 +120,50 @@ pub fn find_repo_script(start: &Path, script_rel: &str) -> Option<PathBuf> {
             None
         }
     })
+}
+
+/// Detect terminal width via ioctl, COLUMNS env, or fallback to 100.
+/// Works inside Zellij panes, tmux, and normal terminals.
+pub fn term_width() -> usize {
+    // 1. Try ioctl TIOCGWINSZ (works in Zellij panes, tmux, etc.)
+    #[cfg(unix)]
+    {
+        use std::mem::MaybeUninit;
+        #[repr(C)]
+        struct Winsize {
+            ws_row: u16,
+            ws_col: u16,
+            ws_xpixel: u16,
+            ws_ypixel: u16,
+        }
+        unsafe {
+            let mut ws = MaybeUninit::<Winsize>::uninit();
+            // TIOCGWINSZ = 0x40087468 on macOS, 0x5413 on Linux
+            #[cfg(target_os = "macos")]
+            let request = 0x40087468u64;
+            #[cfg(target_os = "linux")]
+            let request = 0x5413u64;
+            if libc_ioctl(1, request, ws.as_mut_ptr() as *mut u8) == 0 {
+                let ws = ws.assume_init();
+                if ws.ws_col > 0 {
+                    return ws.ws_col as usize;
+                }
+            }
+        }
+    }
+    // 2. Fallback to COLUMNS env
+    std::env::var("COLUMNS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(100)
+}
+
+#[cfg(unix)]
+unsafe fn libc_ioctl(fd: i32, request: u64, arg: *mut u8) -> i32 {
+    extern "C" {
+        fn ioctl(fd: i32, request: u64, ...) -> i32;
+    }
+    ioctl(fd, request, arg)
 }
 
 #[cfg(test)]

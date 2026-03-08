@@ -1,0 +1,36 @@
+{
+  "files_to_modify": {
+    "bop-core": ["crates/bop-core/src/lib.rs"],
+    "bop-cli": [
+      "crates/bop-cli/src/main.rs",
+      "crates/bop-cli/src/cards.rs",
+      "crates/bop-cli/src/dispatcher.rs"
+    ],
+    "output": ["output/result.md"]
+  },
+  "files_to_reference": [
+    "crates/bop-cli/src/cards.rs",
+    "crates/bop-cli/src/reaper.rs",
+    "crates/bop-cli/src/dispatcher.rs"
+  ],
+  "patterns": {
+    "command_pattern": "Commands are defined as enum variants in main.rs Command enum, implemented as cmd_* functions in cards.rs or dedicated modules",
+    "card_movement": "Use fs::rename() for atomic state transitions, write meta before rename, render thumbnail after",
+    "process_management": "PIDs stored in xattr sh.bop.agent-pid, use kill -0 to check liveness, SIGTERM for graceful stop, SIGKILL for force",
+    "meta_updates": "Use bop_core::read_meta() and bop_core::write_meta(), update fields before fs::rename()"
+  },
+  "existing_implementations": {
+    "description": "cmd_retry moves cards from any state to pending/, cmd_kill stops running processes via SIGTERM, dispatcher already handles exit code 75 for rate-limiting",
+    "relevant_files": [
+      "crates/bop-cli/src/cards.rs",
+      "crates/bop-cli/src/reaper.rs",
+      "crates/bop-cli/src/dispatcher.rs"
+    ]
+  },
+  "critical_requirements": {
+    "pause_race_condition": "Must check card still in running/ immediately before rename to avoid double-move with concurrent dispatcher",
+    "exit_75_handling": "Pause must NOT move cards that voluntarily exit with code 75 - dispatcher owns those",
+    "transient_patterns": "Use const TRANSIENT_PATTERNS slice, check both failure_reason and stderr last line",
+    "stderr_reading": "Read last non-empty line from logs/stderr, truncate to 256 bytes for failure_reason"
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "session_number": 9,
+  "timestamp": "2026-03-07T19:40:14.482250+00:00",
+  "subtasks_completed": [
+    "subtask-3-2"
+  ],
+  "discoveries": {
+    "file_insights": {
+      "crates/bop-cli/src/ui/widgets/footer.rs": {
+        "type": "new_file",
+        "size_lines": 314,
+        "responsibilities": [
+          "Render context-sensitive keybinding hints based on Mode",
+          "Support 7 distinct mode legends (Normal, Detail, LogTail, Filter, ActionPopup, NewCard, Subshell)",
+          "Conditionally render F-key bar when terminal height > 30 rows",
+          "Apply syntax-highlighted color spans (Cyan for keys, DarkGray for labels, Yellow for prompts)"
+        ],
+        "key_functions": [
+          "render_footer() \u2014 main entry point",
+          "normal_legend(), detail_legend(), logtail_legend(), filter_legend(), action_popup_legend(), new_card_legend(), subshell_legend() \u2014 mode-specific builders",
+          "fkey_bar() \u2014 mc-style secondary legend"
+        ],
+        "test_coverage": "12 unit tests covering all legend builders and F-key bar"
+      },
+      "crates/bop-cli/src/ui/mod.rs": {
+        "changes": [
+          "Footer height now dynamic: 2 rows when terminal_height > 30, else 1 row",
+          "Replaced static Paragraph footer with render_footer() call",
+          "Updated Layout constraint from Length(1) to Length(footer_height)",
+          "Added terminal_height calculation and pass-through to render_footer"
+        ],
+        "design": "Three-zone layout (header 2 rows, body fill, footer 1-2 rows)"
+      },
+      "crates/bop-cli/src/ui/widgets/mod.rs": {
+        "changes": "Added render_footer to public exports"
+      }
+    },
+    "patterns_discovered": {
+      "mode_dispatch_pattern": "Switch statement on app.mode returns appropriate legend spans \u2014 extensible for new modes",
+      "span_builder_pattern": "Each mode has dedicated legend builder returning Vec<Span<'static>> \u2014 alternates key styling (Cyan) with description (DarkGray)",
+      "conditional_rendering": "F-key bar only renders when area.height >= 2 AND terminal_height > FKEY_BAR_MIN_HEIGHT \u2014 prevents layout overflow",
+      "color_semantics": {
+        "Cyan": "Interactive keys",
+        "DarkGray": "Label/description text",
+        "Yellow": "Input prompts (Filter, NewCard)",
+        "White": "User input content",
+        "Black bg + Cyan": "F-key button labels (mc-style)"
+      },
+      "input_field_pattern": "Format string with query/input + BLOCK_CURSOR (\u2588) for visual cursor feedback",
+      "early_return_guard": "Check area.height/width > 0 before rendering to avoid panic on zero-sized regions"
+    },
+    "gotchas_discovered": {
+      "newcard_mode_incomplete": "NewCard legend renders empty input initially \u2014 comment indicates NewCard input buffer wiring deferred to separate subtask",
+      "fkey_bar_boundary": "F-key bar only shows when terminal_height STRICTLY > 30 (not >=) \u2014 matches mc convention but could be misunderstood",
+      "layout_allocation_coupling": "Caller must allocate 2 rows in Layout::vertical when terminal_height > 30, else footer gets truncated \u2014 tight coupling between mod.rs and footer.rs",
+      "static_lifetime_spans": "All legend spans use 'static lifetime via String::into() \u2014 acceptable for fixed strings but requires care if dynamic content is added later",
+      "zero_size_area_silent_fail": "render_footer returns early if area.height/width == 0 \u2014 silent no-op, no error logged"
+    },
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "completeness": "100% \u2014 all 7 modes implemented with keybindings, colors, and tests",
+      "design_alignment": "Follows spec exactly: Normal mode shows [h/l]col [j/k]card [...], Detail shows [j/k]scroll [F3]logs [...], etc.",
+      "integration": "Cleanly wired into render loop; footer height dynamically allocated based on terminal size",
+      "test_coverage": "12 unit tests for legend builders and keybinding presence",
+      "code_quality": "Well-documented with inline comments; consistent naming (normal_legend, detail_legend, etc.); modular builder functions"
+    },
+    "recommendations": [
+      {
+        "priority": "high",
+        "category": "follow_up_subtasks",
+        "item": "Wire NewCard input buffer in NewCard subtask \u2014 currently renders placeholder empty input; need to pass input state from app.rs"
+      },
+      {
+        "priority": "medium",
+        "category": "configurability",
+        "item": "Make keybinding colors/styles configurable via theme struct \u2014 currently hardcoded (Cyan, DarkGray, Yellow); allow user/theme overrides"
+      },
+      {
+        "priority": "medium",
+        "category": "feature_enhancement",
+        "item": "Add optional F-key bar toggle in app state \u2014 currently always shown when height > 30; some users may prefer minimal mode"
+      },
+      {
+        "priority": "low",
+        "category": "ux_polish",
+        "item": "Consider subtle mode-transition animation (fade/color pulse) when switching between modes \u2014 footer already updates per frame, could add visual feedback"
+      },
+      {
+        "priority": "low",
+        "category": "testing",
+        "item": "Add integration test in harness that renders footer in different terminal heights and validates F-key bar presence/absence"
+      },
+      {
+        "priority": "technical_debt",
+        "category": "documentation",
+        "item": "Add reference to F-key bar behavior in main bop UI docs \u2014 30-row threshold is currently only documented in footer.rs constant"
+      }
+    ],
+    "subtask_id": "subtask-3-2",
+    "session_num": 9,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/ui/mod.rs",
+      "crates/bop-cli/src/ui/widgets/footer.rs",
+      "crates/bop-cli/src/ui/widgets/mod.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-3-2"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

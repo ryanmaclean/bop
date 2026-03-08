@@ -1,0 +1,48 @@
+{
+  "files_to_modify": {
+    "bop-cli": [
+      "crates/bop-cli/src/providers/mod.rs"
+    ]
+  },
+  "files_to_create": {
+    "bop-cli": [
+      "crates/bop-cli/src/providers/ollama.rs",
+      "crates/bop-cli/src/providers/opencode.rs"
+    ]
+  },
+  "files_to_reference": [
+    "crates/bop-cli/src/providers/claude.rs",
+    "crates/bop-cli/src/providers/codex.rs",
+    "crates/bop-cli/src/providers/gemini.rs",
+    "crates/bop-cli/src/providers/history.rs",
+    "adapters/ollama.nu",
+    "adapters/opencode.nu"
+  ],
+  "patterns": {
+    "provider_trait": "All providers implement async_trait Provider with fn name() -> &str, fn detect() -> bool (sync, no network), async fn fetch() -> Result<ProviderSnapshot>",
+    "error_handling": "On transient failures, return a ProviderSnapshot with error field set, never propagate. Every error path returns Ok(ProviderSnapshot{..., error: Some(...)}).",
+    "registration": "New providers added to all_providers() in mod.rs as Box::new(Foo::new()), with pub mod foo; declaration",
+    "credentials_pattern": "Each provider checks local files or env vars in detect(). File paths via dirs::home_dir(). Binary existence via which command.",
+    "http_client": "reqwest 0.12 with json + rustls-tls. Client::new() used directly in fetch(). No shared client pool.",
+    "test_pattern": "Each provider has a parse function (e.g. parse_usage_response) separated from fetch() for unit testing without network. Tests in #[cfg(test)] mod tests at bottom of file.",
+    "table_rendering": "pct_bar(pct, width) shows colored bar for Some(pct), dim dash for None. print_providers_table renders header + rows. Reset shown as relative duration.",
+    "snapshot_source": "Source field: 'oauth', 'rpc', 'pty', 'http', 'log', 'error'. Ollama and OpenCode will use 'http'."
+  },
+  "existing_implementations": {
+    "description": "Three providers already exist: Claude (OAuth), Codex (OAuth+RPC+PTY fallback), Gemini (OAuth+PTY). All follow the same Provider trait. The Provider trait detect() is sync — Ollama/OpenCode will use std::net::TcpStream::connect_timeout for port checks.",
+    "relevant_files": [
+      "crates/bop-cli/src/providers/claude.rs",
+      "crates/bop-cli/src/providers/codex.rs",
+      "crates/bop-cli/src/providers/gemini.rs",
+      "crates/bop-cli/src/providers/mod.rs"
+    ]
+  },
+  "design_decisions": {
+    "ollama_two_providers": "OllamaLocalProvider (port 11434 detect) and OllamaCloudProvider (env var / config file detect) are separate Provider impls in one file, since they have different detect() and auth logic",
+    "detect_sync_port_check": "Since detect() is sync, use std::net::TcpStream::connect_timeout(addr, Duration::from_millis(500)) for Ollama local and OpenCode — lightweight, no HTTP overhead, sync-compatible",
+    "loaded_models_field": "Add loaded_models: Option<Vec<String>> to ProviderSnapshot for Ollama's custom JSON output. serde skip_serializing_if = Option::is_none keeps it invisible for other providers.",
+    "table_display_update": "When primary_pct is None and loaded_models is set, display model names in the row after the dash columns. Otherwise keep existing display.",
+    "sse_deferred": "OpenCode SSE subscription (--watch enhancement) is documented in spec as additive. Implement REST fetch first; SSE can be a follow-up since it may need an SSE parsing crate or manual chunked parsing.",
+    "no_new_deps": "reqwest 0.12, async-trait, tokio, chrono, serde, dirs are all already in Cargo.toml. No new dependencies needed."
+  }
+}

@@ -1,0 +1,188 @@
+{
+  "feature": "Verify make check passes and document install-hooks Linux completion",
+  "workflow_type": "simple",
+  "workflow_rationale": "This is a verification and documentation task. Previous agents have already implemented the install-hooks feature with full Linux systemd support. No code changes are needed - only verification that everything works and documentation of the implementation status.",
+  "phases": [
+    {
+      "id": "phase-1-verify",
+      "name": "Verification",
+      "type": "implementation",
+      "description": "Verify that make check passes and install-hooks Linux implementation is complete",
+      "depends_on": [],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Run make check to verify tests, clippy, and format all pass",
+          "service": "bop",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [
+            "Makefile"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "make check",
+            "expected": "All tests pass, clippy has zero warnings, format check passes"
+          },
+          "status": "completed",
+          "notes": "Successfully ran make check: all 446 tests passed, clippy completed with zero warnings (-D warnings), and format check passed. Verification complete.",
+          "updated_at": "2026-03-07T02:57:37.048031+00:00"
+        },
+        {
+          "id": "subtask-1-2",
+          "description": "Verify install_hooks_linux implementation completeness",
+          "service": "bop",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/factory.rs"
+          ],
+          "verification": {
+            "type": "manual",
+            "instructions": "Review factory.rs lines 359-415 to confirm: (1) .service and .path files are written to ~/.config/systemd/user/, (2) daemon-reload is called, (3) enable is called for both units, (4) start is called for both units. Review lines 639-674 to confirm --uninstall: (1) stops both units, (2) disables both units, (3) removes both files, (4) runs daemon-reload."
+          },
+          "status": "completed",
+          "notes": "Verified install_hooks_linux implementation in factory.rs. INSTALL (lines 359-415): ✓ writes .service/.path files to ~/.config/systemd/user/, ✓ runs daemon-reload, ✓ enables both units with error handling, ✓ starts both units with error handling. UNINSTALL (lines 639-674): ✓ stops both units, ✓ disables both units, ✓ removes both files, ✓ runs daemon-reload. All 8 requirements verified and complete.",
+          "updated_at": "2026-03-07T02:59:07.564082+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-2-document",
+      "name": "Documentation",
+      "type": "implementation",
+      "description": "Create output/result.md documenting the verification results",
+      "depends_on": [
+        "phase-1-verify"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-2-1",
+          "description": "Write output/result.md summarizing verification results",
+          "service": "bop",
+          "files_to_modify": [],
+          "files_to_create": [
+            "output/result.md"
+          ],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "test -f output/result.md && grep -q 'make check' output/result.md",
+            "expected": "File exists and contains verification summary"
+          },
+          "status": "completed",
+          "notes": "Created comprehensive verification summary in output/result.md. Documented: (1) make check passing status (446 tests, zero clippy warnings, format check passed), (2) install_hooks_linux implementation completeness (8/8 requirements verified), (3) all acceptance criteria satisfied. Verification command passed successfully.",
+          "updated_at": "2026-03-07T03:03:15.000000+00:00"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_phases": 2,
+    "total_subtasks": 3,
+    "services_involved": [
+      "bop"
+    ],
+    "parallelism": {
+      "max_parallel_phases": 1,
+      "parallel_groups": [],
+      "recommended_workers": 1,
+      "speedup_estimate": "No parallelism - sequential verification then documentation"
+    },
+    "startup_command": "source .auto-claude/.venv/bin/activate && python .auto-claude/backend/run.py --spec 014 --direct"
+  },
+  "verification_strategy": {
+    "risk_level": "trivial",
+    "skip_validation": false,
+    "test_creation_phase": "none",
+    "test_types_required": [],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      "make check exits 0 (test + clippy + fmt)",
+      "install_hooks_linux has all required systemd operations",
+      "output/result.md exists with summary"
+    ],
+    "verification_steps": [
+      {
+        "name": "Make Check",
+        "command": "make check",
+        "expected_outcome": "Exit code 0, zero clippy warnings",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      }
+    ],
+    "reasoning": "This is a verification task with no code changes. Risk is trivial since we're only documenting existing functionality."
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": true,
+      "commands": [
+        "cargo test"
+      ],
+      "minimum_coverage": null
+    },
+    "integration_tests": {
+      "required": false,
+      "commands": [],
+      "services_to_test": []
+    },
+    "e2e_tests": {
+      "required": false,
+      "commands": [],
+      "flows": []
+    },
+    "browser_verification": {
+      "required": false,
+      "pages": []
+    },
+    "database_verification": {
+      "required": false,
+      "checks": []
+    },
+    "manual_verification": {
+      "required": true,
+      "steps": [
+        "Verify make check passes with zero warnings",
+        "Verify output/result.md contains accurate verification summary"
+      ]
+    }
+  },
+  "qa_signoff": {
+    "status": "approved",
+    "timestamp": "2026-03-07T03:30:00+00:00",
+    "qa_session": 1,
+    "report_file": "qa_report.md",
+    "tests_passed": {
+      "unit": "446/446",
+      "integration": "all_passed",
+      "e2e": "n/a"
+    },
+    "verified_by": "qa_agent"
+  },
+  "last_updated": "2026-03-07T03:03:15.000000+00:00",
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2026-03-07T03:05:46.659443+00:00",
+      "issues": [],
+      "duration_seconds": 197.98
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 1,
+    "last_iteration": 1,
+    "last_status": "approved",
+    "issues_by_type": {}
+  },
+  "status": "human_review",
+  "planStatus": "review",
+  "reviewReason": "completed",
+  "updated_at": "2026-03-07T23:57:36.591Z",
+  "xstateState": "human_review",
+  "executionPhase": "complete"
+}

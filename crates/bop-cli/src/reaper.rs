@@ -129,6 +129,68 @@ pub async fn is_alive(pid: i32) -> anyhow::Result<bool> {
     Ok(status.success())
 }
 
+pub async fn recover_orphans(
+    running_dir: &Path,
+    pending_dir: &Path,
+) -> anyhow::Result<Vec<String>> {
+    let mut recovered = Vec::new();
+    let entries = match fs::read_dir(running_dir) {
+        Ok(e) => e,
+        Err(_) => return Ok(recovered),
+    };
+
+    for ent in entries.flatten() {
+        let card_dir = ent.path();
+        if !card_dir.is_dir() {
+            continue;
+        }
+        if card_dir.extension().and_then(|s| s.to_str()).unwrap_or("") != "bop" {
+            continue;
+        }
+
+        let pid = read_pid(&card_dir).await?;
+        let pid_dead = match pid {
+            Some(pid) => !is_alive(pid).await?,
+            None => true, // No PID means orphaned
+        };
+
+        if !pid_dead {
+            continue;
+        }
+
+        // Try to read meta.json, create minimal one if corrupt/missing
+        let meta = match bop_core::read_meta(&card_dir) {
+            Ok(m) => m,
+            Err(_) => {
+                // Corrupt or missing meta.json - create minimal recovery meta
+                let id = card_dir
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let minimal_meta = bop_core::Meta {
+                    id: id.clone(),
+                    stage: "pending".to_string(),
+                    ..Default::default()
+                };
+                let _ = bop_core::write_meta(&card_dir, &minimal_meta);
+                minimal_meta
+            }
+        };
+
+        let name = match card_dir.file_name().and_then(|s| s.to_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        let target = pending_dir.join(&name);
+        let _ = fs::rename(&card_dir, &target);
+        quicklook::render_card_thumbnail(&target);
+        recovered.push(meta.id);
+    }
+
+    Ok(recovered)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -325,5 +387,113 @@ mod tests {
         let result = reap_orphans(&running, &pending, &failed, 3, Duration::from_secs(30)).await;
 
         assert!(result.is_ok());
+    }
+
+    // ── recover_orphans ───────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn recover_orphans_moves_dead_pid_card_to_pending() {
+        let td = tempdir().unwrap();
+        let (running, pending, _failed) = setup_card_dirs(td.path());
+
+        let meta = test_meta("orphan-card", None);
+        create_running_card(&running, "orphan-card", 999999, &meta);
+
+        let recovered = recover_orphans(&running, &pending).await.unwrap();
+
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0], "orphan-card");
+        assert!(pending.join("orphan-card.bop").exists());
+        assert!(!running.join("orphan-card.bop").exists());
+    }
+
+    #[tokio::test]
+    async fn recover_orphans_handles_corrupt_meta_json() {
+        let td = tempdir().unwrap();
+        let (running, pending, _failed) = setup_card_dirs(td.path());
+
+        // Create card with corrupt meta.json
+        let card_dir = running.join("corrupt-card.bop");
+        fs::create_dir_all(card_dir.join("logs")).unwrap();
+        fs::write(card_dir.join("logs").join("pid"), "999999").unwrap();
+        fs::write(card_dir.join("meta.json"), "{ invalid json }").unwrap();
+
+        let recovered = recover_orphans(&running, &pending).await.unwrap();
+
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0], "corrupt-card");
+        assert!(pending.join("corrupt-card.bop").exists());
+
+        // Verify minimal meta was created
+        let recovered_meta = bop_core::read_meta(&pending.join("corrupt-card.bop")).unwrap();
+        assert_eq!(recovered_meta.id, "corrupt-card");
+        assert_eq!(recovered_meta.stage, "pending");
+    }
+
+    #[tokio::test]
+    async fn recover_orphans_handles_missing_meta_json() {
+        let td = tempdir().unwrap();
+        let (running, pending, _failed) = setup_card_dirs(td.path());
+
+        // Create card without meta.json
+        let card_dir = running.join("missing-meta.bop");
+        fs::create_dir_all(card_dir.join("logs")).unwrap();
+        fs::write(card_dir.join("logs").join("pid"), "999999").unwrap();
+
+        let recovered = recover_orphans(&running, &pending).await.unwrap();
+
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0], "missing-meta");
+        assert!(pending.join("missing-meta.bop").exists());
+
+        // Verify minimal meta was created
+        let recovered_meta = bop_core::read_meta(&pending.join("missing-meta.bop")).unwrap();
+        assert_eq!(recovered_meta.id, "missing-meta");
+        assert_eq!(recovered_meta.stage, "pending");
+    }
+
+    #[tokio::test]
+    async fn recover_orphans_skips_live_pid_cards() {
+        let td = tempdir().unwrap();
+        let (running, pending, _failed) = setup_card_dirs(td.path());
+
+        // Create card with live PID (own process)
+        let meta = test_meta("live-card", None);
+        let live_pid = std::process::id() as i32;
+        create_running_card(&running, "live-card", live_pid, &meta);
+
+        let recovered = recover_orphans(&running, &pending).await.unwrap();
+
+        assert_eq!(recovered.len(), 0);
+        assert!(running.join("live-card.bop").exists());
+        assert!(!pending.join("live-card.bop").exists());
+    }
+
+    #[tokio::test]
+    async fn recover_orphans_handles_empty_running_dir() {
+        let td = tempdir().unwrap();
+        let (running, pending, _failed) = setup_card_dirs(td.path());
+
+        let recovered = recover_orphans(&running, &pending).await.unwrap();
+
+        assert_eq!(recovered.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn recover_orphans_handles_card_without_pid_file() {
+        let td = tempdir().unwrap();
+        let (running, pending, _failed) = setup_card_dirs(td.path());
+
+        // Create card without PID file (treated as orphan)
+        let card_dir = running.join("no-pid.bop");
+        fs::create_dir_all(&card_dir).unwrap();
+        let meta = test_meta("no-pid", None);
+        write_meta(&card_dir, &meta).unwrap();
+
+        let recovered = recover_orphans(&running, &pending).await.unwrap();
+
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0], "no-pid");
+        assert!(pending.join("no-pid.bop").exists());
     }
 }

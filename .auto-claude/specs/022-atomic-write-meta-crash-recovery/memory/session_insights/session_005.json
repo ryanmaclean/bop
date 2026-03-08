@@ -1,0 +1,177 @@
+{
+  "session_number": 5,
+  "timestamp": "2026-03-07T07:19:50.649517+00:00",
+  "subtasks_completed": [
+    "subtask-1-4"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": ".auto-claude/specs/026-storage-resilience-wal-events/spec.md",
+        "type": "specification",
+        "status": "new",
+        "lines": 113,
+        "key_content": [
+          "Addresses real production corruption from badly-behaved adapters (ollama, opencode) overwriting meta.json",
+          "Proposes JSONL write-ahead log (logs/events.jsonl) per card with atomic O_APPEND writes",
+          "Adds SHA256 checksum validation to Meta struct, computed on serialization",
+          "Implements recovery_meta_from_events() fallback to reconstruct last valid Meta from JSONL replay",
+          "File permission boundary: set_readonly(meta.json) after writes prevents adapter overwrite",
+          "Clear acceptance criteria: JSONL appended on meta writes and stage transitions, checksum validation, readonly enforcement",
+          "Defers deeper implementation (items 1-5) to spec 026 work; this subtask only triggers startup recovery"
+        ]
+      },
+      {
+        "file": "crates/bop-cli/src/dispatcher.rs",
+        "type": "implementation",
+        "status": "modified",
+        "change_type": "addition",
+        "lines_added": 10,
+        "key_content": [
+          "Added call to reaper::recover_orphans(&running_dir, &pending_dir) on dispatcher startup",
+          "Location: after reap_until calculation, before lineage_enabled check",
+          "Non-blocking recovery: logs recovered card count and IDs, continues dispatcher if empty",
+          "Handles crash scenario where cards were stuck in running/ state from previous failures",
+          "Uses async await pattern, returns anyhow::Result<Vec<...>> with recovered card names"
+        ]
+      },
+      {
+        "file": "dispatch.nu",
+        "type": "orchestration",
+        "status": "modified",
+        "change_type": "addition + update",
+        "changes": [
+          "Added spec 026 to specs table: 'storage resilience: JSONL WAL + checksum + file perms' with effort 8, complexity 3",
+          "Updated target_waves from [0 1 2 3 4 5 6] to [0 1 2 3 4 5 6 7 8] to include wave 7 and 8 execution"
+        ]
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "name": "Spec-first resilience design",
+        "description": "Full specification written upfront with detailed acceptance criteria before implementation. Spec 026 defines multi-phase approach: JSONL WAL + checksums + recovery + file perms, but only orphan recovery (smallest piece) lands in subtask-1-4.",
+        "impact": "Reduces rework by establishing clear contract for resilience improvements; phases implementation incrementally"
+      },
+      {
+        "name": "Two-commit pattern for specs",
+        "description": "Separate commits: one for spec.md creation (13e2dec), one for implementation (91da314). Spec commit includes acceptance criteria; implementation commit focuses only on required subtask.",
+        "impact": "Maintains spec history independent from implementation; clarifies scope boundaries"
+      },
+      {
+        "name": "Non-blocking recovery on startup",
+        "description": "Orphan recovery called early in dispatcher.run_dispatcher() before main event loop; failures are logged but don't block dispatcher execution. Recovered card IDs are visible for operator awareness.",
+        "impact": "Increases resilience without blocking normal operation; operator can monitor recovery success via stderr logs"
+      },
+      {
+        "name": "Atomic O_APPEND for crash safety",
+        "description": "JSONL WAL design leverages POSIX O_APPEND atomicity for writes <4096 bytes, avoiding explicit locking and reducing corruption window.",
+        "impact": "Crash-safe event logging without mutex/rwlock overhead; simplifies concurrent access model"
+      },
+      {
+        "name": "Fallback reconstruction from event log",
+        "description": "If meta.json corrupts, recover_meta_from_events() replays JSONL events to rebuild last known-good state. JSONL becomes source of truth for state transitions.",
+        "impact": "Reduces data loss from adapter crashes or mid-flight writes; JSONL acts as audit trail and recovery vector"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Stale absolute paths after fs::rename moves card directories",
+        "context": "MEMORY.md 2026-03-01: Card workspace moves from running/\u2192done/ via fs::rename, but cargo incremental artifacts retain absolute paths. Even CARGO_INCREMENTAL=0 insufficient; target/ must be removed before ACs in merge-gate.",
+        "impact": "Orphan recovery must account for target/ dir state; rebuild artifacts after card state transitions to avoid path staleness affecting future adapters",
+        "mitigation": "Always remove target/ before re-launching same card; consider caching strategy if card is retried"
+      },
+      {
+        "gotcha": "Badly-behaved adapters can overwrite meta.json directly if writable",
+        "context": "Spec 026 notes ollama and opencode have write access to card dir; without file permissions, they can corrupt meta.json mid-flight",
+        "impact": "Current design allows adapter process to trash metadata; recovery required on startup",
+        "mitigation": "Spec 026 phase includes set_readonly(meta.json) boundary; adapter only has write access to logs/ and output/"
+      },
+      {
+        "gotcha": "fs::write() truncates-then-writes creates crash window",
+        "context": "Spec 026 notes crash between truncate and write can leave empty/partial meta.json even with tmp+rename fix from spec 022",
+        "impact": "Meta.json can be unreadable after adapter crash; checksum validation and JSONL recovery becomes essential",
+        "mitigation": "Implement checksum validation on every read; implement JSONL replay fallback for corruption detection"
+      },
+      {
+        "gotcha": "Orphan recovery must find cards in correct state dirs across renames",
+        "context": "bop new ID uniqueness issue (MEMORY.md 2026-03-02): only checked pending/ for conflicts; dispatcher may have moved card to running/. Fixed by scanning all 5 state dirs.",
+        "impact": "recover_orphans must search running/ and possibly done/ for stuck cards; simple pending/ scan insufficient",
+        "mitigation": "Scan multiple state dirs; consider adding card metadata index (future optimization)"
+      },
+      {
+        "gotcha": "Checksum computation adds latency to every meta write",
+        "context": "Spec 026 requires SHA256 computation before writing meta.json; affects all dispatcher transitions",
+        "impact": "Performance cost on every card state transition; observable if many cards in flight",
+        "mitigation": "Benchmark with realistic card concurrency; consider lazy evaluation for optional checksums in high-throughput scenarios"
+      }
+    ],
+    "approach_outcome": {
+      "strategy": "Multi-phase storage resilience: spec 026 defines full resilience stack (JSONL WAL, checksums, file perms, recovery); subtask-1-4 implements only orphan recovery on startup as foundational piece",
+      "execution": "SUCCESS - recover_orphans integrated into dispatcher.run_dispatcher() startup path",
+      "deliverables": [
+        "Spec 026 with clear acceptance criteria for JSONL, checksums, recovery, readonly perms, storage-decision.md doc",
+        "recover_orphans() call in dispatcher.rs with non-blocking error handling",
+        "dispatch.nu updated with spec 026 table entry and wave 7/8 execution support"
+      ],
+      "outcome_quality": "Spec is comprehensive and defers complex implementation to later subtasks; recovery mechanism is minimal, non-blocking, and operator-visible; two-commit separation maintains clarity",
+      "next_phase": "Implement JSONL event appending, checksum validation, and recovery_meta_from_events() in subsequent subtasks"
+    },
+    "recommendations": [
+      {
+        "priority": "high",
+        "category": "implementation",
+        "recommendation": "Implement JSONL event appending in write_meta() (spec 026 item 1) with O_APPEND atomicity test; verify no locking contention under concurrent adapter loads",
+        "rationale": "JSONL is core recovery vector; atomicity guarantee is key assumption in crash safety model"
+      },
+      {
+        "priority": "high",
+        "category": "testing",
+        "recommendation": "Add test harness for meta.json corruption scenario: simulate partial write, verify checksum detection and JSONL replay recovery path",
+        "rationale": "Acceptance criteria requires checksum validation and fallback recovery; test validates entire recovery loop"
+      },
+      {
+        "priority": "high",
+        "category": "compatibility",
+        "recommendation": "Verify sha2 and hex crate licenses are permissive (spec mentions 0.4); add license check to CI",
+        "rationale": "MEMORY.md zam project hard rule: NO GPL/LGPL/APSL/CDDL; bop should enforce same for consistency"
+      },
+      {
+        "priority": "medium",
+        "category": "documentation",
+        "recommendation": "Write docs/storage-decision.md early (spec 026 item 5) to establish filesystem+JSONL rationale before deeper implementation; reference in ADR if project has one",
+        "rationale": "Justifies design choice vs SQLite/Dolt; helps future maintainers understand trade-offs"
+      },
+      {
+        "priority": "medium",
+        "category": "backwards_compatibility",
+        "recommendation": "Design logs/events.jsonl creation to be lazy; handle missing JSONL gracefully in recovery path for old cards lacking event log",
+        "rationale": "Existing cards may not have logs/ dir; recovery must work on partial state"
+      },
+      {
+        "priority": "medium",
+        "category": "performance",
+        "recommendation": "Benchmark orphan recovery with 1000+ cards in running/ state; consider optional indexing (card ID cache) if scan becomes bottleneck",
+        "rationale": "Startup scalability important for production dispatcher; early data prevents regrets"
+      },
+      {
+        "priority": "low",
+        "category": "observability",
+        "recommendation": "Add structured logging (json) to orphan recovery output for integration with log aggregation; consider metrics (cards_recovered gauge)",
+        "rationale": "Helps ops team monitor resilience; identifies repeated crash patterns"
+      }
+    ],
+    "subtask_id": "subtask-1-4",
+    "session_num": 5,
+    "success": true,
+    "changed_files": [
+      ".auto-claude/specs/026-storage-resilience-wal-events/spec.md",
+      "crates/bop-cli/src/dispatcher.rs",
+      "dispatch.nu"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-4"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

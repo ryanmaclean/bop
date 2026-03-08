@@ -4,6 +4,9 @@ use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::path::Path;
 
+use crate::colors::{state_ansi, state_ansi_bg, state_color, BOLD, DIM, RESET};
+use crate::util::term_width;
+
 struct Bar {
     id: String,
     glyph: String,
@@ -15,17 +18,6 @@ struct Bar {
     dur_s: f64,
     tokens: Option<u64>,
     cost: Option<f64>,
-}
-
-fn state_color(state: &str) -> &'static str {
-    match state {
-        "pending" => "#3A5A8A",
-        "running" => "#B8690F",
-        "done" => "#1E8A45",
-        "failed" => "#C43030",
-        "merged" => "#6B3DB8",
-        _ => "#555",
-    }
 }
 
 fn parse_ts(s: &str) -> Option<DateTime<Utc>> {
@@ -144,34 +136,6 @@ fn dur_label(s: f64) -> String {
 }
 
 // ── ANSI terminal rendering ─────────────────────────────────────────────────
-
-/// ANSI 256-color codes for each state.
-fn state_ansi(state: &str) -> &'static str {
-    match state {
-        "pending" => "\x1b[38;5;67m",  // steel blue
-        "running" => "\x1b[38;5;172m", // amber
-        "done" => "\x1b[38;5;71m",     // green
-        "failed" => "\x1b[38;5;160m",  // red
-        "merged" => "\x1b[38;5;134m",  // violet
-        _ => "\x1b[38;5;240m",         // gray
-    }
-}
-
-/// ANSI background block for bar fill.
-fn state_ansi_bg(state: &str) -> &'static str {
-    match state {
-        "pending" => "\x1b[48;5;67m",
-        "running" => "\x1b[48;5;172m",
-        "done" => "\x1b[48;5;71m",
-        "failed" => "\x1b[48;5;160m",
-        "merged" => "\x1b[48;5;134m",
-        _ => "\x1b[48;5;240m",
-    }
-}
-
-const RESET: &str = "\x1b[0m";
-const DIM: &str = "\x1b[2m";
-const BOLD: &str = "\x1b[1m";
 
 fn render_ansi(bars: &[Bar], term_width: usize) {
     let clusters = cluster(bars);
@@ -507,50 +471,6 @@ h1 span {{ color:#999; font-weight:400 }}
     html.push_str("</div>\n</body></html>\n");
 
     html
-}
-
-/// Detect terminal width via ioctl, COLUMNS env, or fallback to 100.
-/// Works inside Zellij panes, tmux, and normal terminals.
-fn term_width() -> usize {
-    // 1. Try ioctl TIOCGWINSZ (works in Zellij panes, tmux, etc.)
-    #[cfg(unix)]
-    {
-        use std::mem::MaybeUninit;
-        #[repr(C)]
-        struct Winsize {
-            ws_row: u16,
-            ws_col: u16,
-            ws_xpixel: u16,
-            ws_ypixel: u16,
-        }
-        unsafe {
-            let mut ws = MaybeUninit::<Winsize>::uninit();
-            // TIOCGWINSZ = 0x40087468 on macOS, 0x5413 on Linux
-            #[cfg(target_os = "macos")]
-            let request = 0x40087468u64;
-            #[cfg(target_os = "linux")]
-            let request = 0x5413u64;
-            if libc_ioctl(1, request, ws.as_mut_ptr() as *mut u8) == 0 {
-                let ws = ws.assume_init();
-                if ws.ws_col > 0 {
-                    return ws.ws_col as usize;
-                }
-            }
-        }
-    }
-    // 2. Fallback to COLUMNS env
-    std::env::var("COLUMNS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(100)
-}
-
-#[cfg(unix)]
-unsafe fn libc_ioctl(fd: i32, request: u64, arg: *mut u8) -> i32 {
-    extern "C" {
-        fn ioctl(fd: i32, request: u64, ...) -> i32;
-    }
-    ioctl(fd, request, arg)
 }
 
 pub fn cmd_gantt(root: &Path, html: bool, open: bool, width_override: Option<usize>) -> Result<()> {

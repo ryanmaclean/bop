@@ -1,0 +1,105 @@
+{
+  "subtasks": {
+    "subtask-1-1": {
+      "attempts": [
+        {
+          "session": 2,
+          "timestamp": "2026-03-05T23:18:54.566506+00:00",
+          "approach": "Implemented: Create watchpaths-dispatcher card for team-arch",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-2": {
+      "attempts": [
+        {
+          "session": 3,
+          "timestamp": "2026-03-05T23:22:25.338015+00:00",
+          "approach": "Implemented: Create jj-gitignore-audit card for team-arch",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-3": {
+      "attempts": [
+        {
+          "session": 4,
+          "timestamp": "2026-03-05T23:25:18.238182+00:00",
+          "approach": "Implemented: Create bop-serve card for team-cli",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-4": {
+      "attempts": [
+        {
+          "session": 5,
+          "timestamp": "2026-03-05T23:28:59.487210+00:00",
+          "approach": "Implemented: Create bop-doctor-checks card for team-cli",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-5": {
+      "attempts": [
+        {
+          "session": 6,
+          "timestamp": "2026-03-05T23:33:36.601997+00:00",
+          "approach": "Implemented: Create e2e-factory-test card for team-quality",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-6": {
+      "attempts": [
+        {
+          "session": 7,
+          "timestamp": "2026-03-05T23:37:08.393367+00:00",
+          "approach": "Implemented: Create adapter-stress-test card for team-quality",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-7": {
+      "attempts": [
+        {
+          "session": 8,
+          "timestamp": "2026-03-05T23:41:10.275003+00:00",
+          "approach": "Implemented: Create model-routing card for team-intelligence",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-8": {
+      "attempts": [
+        {
+          "session": 9,
+          "timestamp": "2026-03-05T23:43:12.838666+00:00",
+          "approach": "Implemented: Verify all cards created and listed",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    }
+  },
+  "stuck_subtasks": [],
+  "metadata": {
+    "created_at": "2026-03-05T23:11:01.080724+00:00",
+    "last_updated": "2026-03-05T23:43:12.838682+00:00"
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "session_number": 17,
+  "timestamp": "2026-03-07T20:22:37.572792+00:00",
+  "subtasks_completed": [
+    "subtask-6-1"
+  ],
+  "discoveries": {
+    "file_insights": {
+      "app.rs": {
+        "changes": "Added `status_message: Option<String>` field to App struct for transient footer status display",
+        "purpose": "Enable error/success message display on card operations",
+        "impact": "Allows non-blocking user feedback on card state changes"
+      },
+      "input.rs": {
+        "changes": "Added CardMoveDir enum, allowed_target_state() validation function, try_move_card() implementation, and three async action dispatch functions (dispatch_action_pause/kill/retry)",
+        "purposes": [
+          "Handle Shift+H/L keypresses for card movement",
+          "Validate state transitions (done\u2192pending, failed\u2192pending only)",
+          "Spawn async tasks for pause/kill/retry without blocking render loop",
+          "Provide filesystem-level card directory renames with error handling"
+        ],
+        "impact": "Complete card movement and action execution pathway"
+      },
+      "footer.rs": {
+        "changes": "Modified render_footer() to prepend status_message to legend_spans if present",
+        "purpose": "Display transient operation results in footer before legend",
+        "styling": "Yellow text with dark gray separator"
+      }
+    },
+    "patterns_discovered": [
+      {
+        "name": "Fire-and-forget async task dispatch",
+        "usage": "Pause/Kill/Retry actions spawn tokio tasks without awaiting; errors logged via eprintln",
+        "rationale": "Prevents blocking the render loop while letting operations complete asynchronously"
+      },
+      {
+        "name": "Transient status messages with automatic clearing",
+        "usage": "Status message set on operation, cleared on next keypress in handle_normal()",
+        "rationale": "Provides ephemeral feedback without persistent footer clutter"
+      },
+      {
+        "name": "Multi-level path validation before rename",
+        "usage": "try_move_card() validates source existence, target directory, duplicate detection before fs::rename",
+        "rationale": "Ensures atomicity of filesystem operations and prevents data loss"
+      },
+      {
+        "name": "Team directory structure preservation",
+        "usage": "Path extraction logic preserves nested team directories (.cards/team-xxx/state/card.bop \u2192 .cards/team-xxx/new-state/card.bop)",
+        "rationale": "Maintains card organization hierarchy across state transitions"
+      },
+      {
+        "name": "State machine transition validation",
+        "usage": "allowed_target_state() explicitly whitelists safe moves (done\u2192pending, failed\u2192pending)",
+        "rationale": "Prevents invalid state transitions from TUI; dispatcher owns pending\u2192running"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Status message lifecycle requires explicit clearing on new input",
+        "symptom": "Stale status messages persist in footer across unrelated operations",
+        "mitigation": "Clear status_message at start of handle_normal() before any keypress handling"
+      },
+      {
+        "issue": "Target directory creation must happen before rename",
+        "symptom": "fs::rename fails with ENOENT if parent directory doesn't exist (e.g., team-xxx/pending/ missing)",
+        "mitigation": "fs::create_dir_all() on target_dir before calling fs::rename"
+      },
+      {
+        "issue": "Duplicate card detection requires explicit exists() check",
+        "symptom": "fs::rename silently fails if card already exists in target state",
+        "mitigation": "Check target_path.exists() and display user-friendly error before rename"
+      },
+      {
+        "issue": "Async task errors are only logged to eprintln (no UI feedback)",
+        "symptom": "User cannot see if pause/kill/retry failed without checking stderr",
+        "rationale": "Fire-and-forget pattern intentionally non-blocking; permanent fix deferred to future subtask"
+      },
+      {
+        "issue": "paths::find_card() must work correctly with team subdirectories",
+        "symptom": "Card movement fails if find_card() doesn't search nested team directories",
+        "assumption": "find_card() implementation already handles team subdirectory traversal"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "completed_requirements": [
+        "Shift+H/L card movement handlers added to handle_normal()",
+        "Safe move validation (done\u2192pending, failed\u2192pending only)",
+        "fs::rename() with full path validation and error handling",
+        "Async action dispatch for pause/kill/retry via tokio::spawn()",
+        "Transient status messages in footer (cleared on next keypress)",
+        "Card refresh via rebuild_columns() after successful rename"
+      ],
+      "not_completed": [
+        "Zellij action (wired in future subtask)",
+        "Remove action (wired in future subtask)"
+      ],
+      "quality_notes": "Implementation is defensive with 5-level validation chain before fs operations; error messages are user-facing; async tasks are properly spawned without blocking render loop"
+    },
+    "recommendations": [
+      {
+        "priority": "HIGH",
+        "category": "Testing",
+        "item": "Add unit tests for allowed_target_state() covering all legal/illegal move combinations"
+      },
+      {
+        "priority": "HIGH",
+        "category": "Error Handling",
+        "item": "Implement persistent error log or toast notification system instead of eprintln for async task failures (pause/kill/retry errors currently invisible to user)"
+      },
+      {
+        "priority": "MEDIUM",
+        "category": "UX",
+        "item": "Add visual spinner/indicator in footer when async actions are in-flight (pause/kill/retry can take seconds)"
+      },
+      {
+        "priority": "MEDIUM",
+        "category": "Safety",
+        "item": "Rate-limit or debounce rapid Shift+H/L presses to prevent race conditions if user mashes keys during concurrent dispatcher operations"
+      },
+      {
+        "priority": "MEDIUM",
+        "category": "Logging",
+        "item": "Log card movement operations (source, target, result) to persistent audit trail for debugging"
+      },
+      {
+        "priority": "LOW",
+        "category": "Code Quality",
+        "item": "Extract CardMoveDir enum and validation logic into separate module (e.g., card_ops.rs) as more operations are added"
+      }
+    ],
+    "subtask_id": "subtask-6-1",
+    "session_num": 17,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/ui/app.rs",
+      "crates/bop-cli/src/ui/input.rs",
+      "crates/bop-cli/src/ui/widgets/footer.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-6-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

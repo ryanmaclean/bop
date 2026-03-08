@@ -1,0 +1,168 @@
+{
+  "session_number": 13,
+  "timestamp": "2026-03-07T19:53:04.776635+00:00",
+  "subtasks_completed": [
+    "subtask-4-2"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file_path": "crates/bop-cli/src/ui/widgets/action.rs",
+        "type": "new_file",
+        "lines_of_code": 301,
+        "key_components": [
+          "ActionKind enum (6 variants: Logs, Zellij, Pause, Kill, Retry, Remove)",
+          "ActionEntry struct (kind, key_hint, label)",
+          "actions_for_state() function filtering by card state (running/done/failed/pending/merged)",
+          "render_action_popup() using ratatui Clear + Block for centered overlay",
+          "centered_rect() helper for viewport calculation",
+          "Unit tests for action filtering by state"
+        ],
+        "dependencies": "ratatui widgets (Block, Clear, List, ListItem, ListState), style primitives"
+      },
+      {
+        "file_path": "crates/bop-cli/src/ui/app.rs",
+        "type": "modified",
+        "additions": [
+          "action_list_state: ListState field on App struct",
+          "open_action_popup() method to initialize ListState and switch Mode::ActionPopup",
+          "Import of actions_for_state from action module"
+        ],
+        "pattern": "Stateful widget management - ListState tracks selected action index"
+      },
+      {
+        "file_path": "crates/bop-cli/src/ui/input.rs",
+        "type": "modified",
+        "additions": [
+          "handle_action_popup() dedicated mode handler (81 lines)",
+          "Enter key binding in handle_normal() to call open_action_popup()",
+          "Navigation: j/Down for next, k/Up for previous (cyclic wrapping)",
+          "Action execution dispatch on Enter, mode return on Esc"
+        ],
+        "pattern": "Mode-based input dispatch with dedicated handlers per mode"
+      },
+      {
+        "file_path": "crates/bop-cli/src/ui/widgets/mod.rs",
+        "type": "modified",
+        "additions": [
+          "pub mod action; declaration"
+        ]
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "name": "State-filtered action palette",
+        "description": "actions_for_state() matches card.state string and returns Vec<ActionEntry> with state-appropriate actions: running=[logs,zellij,pause,kill], done/failed=[retry], pending=[remove], merged=[]",
+        "benefit": "Automatic action availability based on card lifecycle state without UI branching"
+      },
+      {
+        "name": "Ratatui overlay pattern",
+        "description": "Clear widget erases background, Block provides border/title, List provides selectable items, all rendered within centered_rect() viewport",
+        "benefit": "Reusable centered popup template for command palettes"
+      },
+      {
+        "name": "Cyclic list navigation",
+        "description": "ListState selection wraps: j at last\u21920, k at first\u2192len-1. Prevents off-bounds selection.",
+        "benefit": "Familiar vim-like navigation without dead ends"
+      },
+      {
+        "name": "Deferred async execution",
+        "description": "ActionKind::Pause/Kill/Retry/Remove close popup and return Mode::Normal, but action execution deferred to future subtask. Only LogTail mode switches immediately.",
+        "benefit": "Separates UI layer (immediate) from filesystem operations (future)"
+      },
+      {
+        "name": "Viewport-aware sizing",
+        "description": "Popup width clamped 30-50 chars, height bounded by action_count+2 and available space. Fallback render_empty_popup() for no-actions case.",
+        "benefit": "Graceful degradation for small terminals and edge states"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Partial implementation of action execution",
+        "description": "When Enter is pressed on Pause/Kill/Retry/Remove, popup closes and mode returns to Normal, but no actual command is executed. Only LogTail mode switching is complete. Remaining actions await subtask 4-4+.",
+        "impact": "User can open popup and select actions, but won't see effects until command execution is wired",
+        "mitigation": "Acceptable per spec - explicitly deferred; tested via mode transition coverage"
+      },
+      {
+        "gotcha": "Empty state special case",
+        "description": "Cards with merged state have no available actions. render_action_popup() returns early and calls render_empty_popup() which uses different styling (DarkGray) and message ('no actions available')",
+        "impact": "User sees confirmation popup was opened, not a silent no-op",
+        "mitigation": "Extra render path adds ~20 lines but improves UX clarity"
+      },
+      {
+        "gotcha": "ListState initialization edge case",
+        "description": "open_action_popup() only calls state.select(Some(0)) if actions vector is non-empty. If state.selected() is called on empty list, returns None.",
+        "impact": "Prevents panic on enumerate/index but requires null-checks in handle_action_popup()",
+        "mitigation": "action_count guard checks action_list_state operations"
+      },
+      {
+        "gotcha": "Cyclic navigation without bounds check",
+        "description": "Navigation math (current >= len-1 \u2192 0, current == 0 \u2192 len-1) assumes action_count > 0. If list is empty, logic never executes due to outer if guard.",
+        "impact": "No panic but navigation is no-op for empty lists",
+        "mitigation": "Guard at entry: 'if action_count > 0'"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "approach_details": {
+      "subtask_id": "subtask-4-2",
+      "completion_status": "fully_implemented",
+      "requirements_met": [
+        "ActionPopupWidget created as separate module",
+        "Renders as centered overlay using ratatui Clear + Block",
+        "State-filtered action list (running/done/failed/pending/merged)",
+        "Selectable List with j/k and arrow navigation",
+        "Enter in Normal mode opens popup, Esc closes it",
+        "Action dispatch via ActionKind enum",
+        "Existing cmd_* function hooks prepared (deferred execution)"
+      ],
+      "test_coverage": "Unit tests for actions_for_state() verify all 5 state branches, test helper function in tests module",
+      "deferred_work": "Command execution for Pause/Kill/Retry/Remove deferred to future subtasks; LogTail mode wiring deferred to 4-3"
+    },
+    "recommendations": [
+      {
+        "priority": "high",
+        "area": "Async action execution",
+        "recommendation": "Implement command dispatch for Pause/Kill/Retry/Remove in next subtask. Consider wrapping cmd_pause() etc. in tokio::spawn() to avoid blocking render loop.",
+        "rationale": "Current implementation only switches modes; no actual card state changes occur"
+      },
+      {
+        "priority": "high",
+        "area": "LogTail mode integration",
+        "recommendation": "Complete LogTail mode wiring (subtask 4-3) to fully enable Logs action",
+        "rationale": "Only ActionKind::Logs mode switch is wired; others deferred"
+      },
+      {
+        "priority": "medium",
+        "area": "Destructive action confirmation",
+        "recommendation": "Add confirmation popup for Kill/Remove actions before dispatch",
+        "rationale": "Prevents accidental card deletion; common UX pattern in kanban tools"
+      },
+      {
+        "priority": "medium",
+        "area": "Performance optimization",
+        "recommendation": "Memoize actions_for_state() results if called on every render frame",
+        "rationale": "Currently recalculated on every navigation keystroke; card state rarely changes mid-frame"
+      },
+      {
+        "priority": "low",
+        "area": "Testing coverage",
+        "recommendation": "Add integration tests for Mode::Normal \u2192 Mode::ActionPopup \u2192 Mode::Normal transitions",
+        "rationale": "Current tests only cover action filtering; mode transitions tested manually"
+      }
+    ],
+    "subtask_id": "subtask-4-2",
+    "session_num": 13,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/ui/app.rs",
+      "crates/bop-cli/src/ui/input.rs",
+      "crates/bop-cli/src/ui/widgets/action.rs",
+      "crates/bop-cli/src/ui/widgets/mod.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-4-2"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

@@ -1,0 +1,55 @@
+{
+  "files_to_modify": {
+    "bop-cli": [
+      "crates/bop-cli/Cargo.toml",
+      "crates/bop-cli/src/main.rs",
+      "crates/bop-cli/src/providers.rs"
+    ]
+  },
+  "files_to_create": {
+    "bop-cli": [
+      "crates/bop-cli/src/providers/mod.rs",
+      "crates/bop-cli/src/providers/claude.rs",
+      "crates/bop-cli/src/providers/history.rs"
+    ]
+  },
+  "files_to_reference": [
+    "crates/bop-cli/src/providers.rs",
+    "crates/bop-cli/src/serve.rs",
+    "crates/bop-cli/src/gantt.rs",
+    "crates/bop-cli/src/list.rs",
+    "crates/bop-core/src/config.rs"
+  ],
+  "patterns": {
+    "module_structure": "All CLI modules are flat files in src/ (e.g., serve.rs, gantt.rs, list.rs). No cmd/ directory. Commands wired via Command enum in main.rs.",
+    "command_wiring": "Each subcommand variant in Command enum routes to a function like module::cmd_foo(&root, args). See main.rs match arms.",
+    "test_pattern": "#[cfg(test)] mod tests {} blocks inside each source file. Uses tempfile::tempdir() for filesystem tests.",
+    "error_handling": "anyhow::Result everywhere. Use .context() for error messages. bail!() for validation errors.",
+    "http_deps": "No HTTP client crate currently in project. Must add reqwest (async, matches existing tokio runtime) or ureq (blocking).",
+    "home_dir_pattern": "dirs::home_dir() used in bop-core/config.rs for ~/.bop/ paths. Same pattern for ~/.claude/.",
+    "serialization": "serde + serde_json throughout. #[serde(default)] and skip_serializing_if for optional fields.",
+    "existing_providers_file": "providers.rs is a flat file handling .cards/providers.json (adapter selection). Must be refactored into providers/ directory module while preserving all existing code.",
+    "async_runtime": "tokio with rt-multi-thread. main.rs uses #[tokio::main]."
+  },
+  "existing_implementations": {
+    "description": "providers.rs has Provider struct (adapter config), ProvidersFile, select_provider(), rotate_provider_chain(), and 16 unit tests. This is the adapter selection system, NOT the quota-monitoring system that spec 030 adds. The new Provider trait and ProviderSnapshot must coexist with the existing Provider struct (naming conflict to resolve).",
+    "relevant_files": [
+      "crates/bop-cli/src/providers.rs",
+      "crates/bop-core/src/config.rs",
+      "crates/bop-cli/src/serve.rs"
+    ],
+    "naming_conflict": "Existing providers.rs has a struct named 'Provider' (adapter config). The spec wants a trait named 'Provider' (quota monitor). Must rename one: suggest AdapterConfig for the existing struct, or QuotaProvider for the new trait."
+  },
+  "dependencies_to_add": {
+    "reqwest": "0.12 with features [json, rustls-tls] — async HTTP client for OAuth usage API",
+    "async-trait": "0.1 — for #[async_trait] on Provider trait"
+  },
+  "key_decisions": [
+    "Convert providers.rs to providers/mod.rs directory module (preserves all existing adapter selection code)",
+    "Rename existing Provider struct to AdapterConfig to avoid naming collision with new Provider trait",
+    "Use reqwest (not ureq) since project is already async with tokio",
+    "Provider history at ~/.bop/provider-history.jsonl (uses existing dirs::home_dir() pattern)",
+    "detect() for macOS Keychain uses security CLI subprocess (std::process::Command)",
+    "CLI command follows existing pattern: add Providers variant to Command enum, route to handler function"
+  ]
+}

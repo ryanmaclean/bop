@@ -10,6 +10,7 @@ use crate::util;
 pub const LEASE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 pub const LEASE_STALE_FLOOR: Duration = Duration::from_secs(30);
 pub const DISPATCHER_LOCK_REL: &str = ".locks/dispatcher.lock";
+pub const WATCH_LOCK_REL: &str = ".locks/watch.lock";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunLease {
@@ -104,6 +105,68 @@ pub fn acquire_dispatcher_lock(cards_dir: &Path) -> anyhow::Result<DispatcherLoc
         "failed to acquire dispatcher lock at {}",
         lock_dir.display()
     )
+}
+
+/// Acquire a singleton lock for `bop status --watch`.
+///
+/// Uses the same mkdir-atomicity pattern as the dispatcher lock.
+/// Returns a guard that removes the lock directory on drop.
+/// If another watch instance is already running (live PID), returns an error
+/// with a human-readable message so the caller can print and exit gracefully.
+pub fn acquire_watch_lock(cards_dir: &Path) -> anyhow::Result<DispatcherLockGuard> {
+    let lock_dir = cards_dir.join(WATCH_LOCK_REL);
+    if let Some(parent) = lock_dir.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let owner = DispatcherLockOwner {
+        pid: std::process::id() as i32,
+        host: util::host_name(),
+        started_at: Utc::now(),
+    };
+    let owner_json = serde_json::to_vec_pretty(&owner)?;
+
+    for _ in 0..2 {
+        match fs::create_dir(&lock_dir) {
+            Ok(()) => {
+                if let Err(err) = fs::write(lock_owner_path(&lock_dir), &owner_json) {
+                    let _ = fs::remove_dir_all(&lock_dir);
+                    return Err(err.into());
+                }
+                return Ok(DispatcherLockGuard { path: lock_dir });
+            }
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+                let lock_owner = fs::read(lock_owner_path(&lock_dir))
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice::<DispatcherLockOwner>(&bytes).ok());
+
+                let stale = lock_owner
+                    .as_ref()
+                    .map(|o| !util::pid_is_alive_sync(o.pid))
+                    .unwrap_or(true);
+                if stale {
+                    let _ = fs::remove_dir_all(&lock_dir);
+                    continue;
+                }
+
+                if let Some(owner) = lock_owner {
+                    anyhow::bail!(
+                        "bop status --watch already running (pid {} on {}, started {})\nOnly one watch instance allowed.",
+                        owner.pid,
+                        owner.host,
+                        owner.started_at
+                    );
+                }
+                anyhow::bail!(
+                    "bop status --watch lock already exists at {}; remove stale lock if no watch is running",
+                    lock_dir.display()
+                );
+            }
+            Err(err) => return Err(err.into()),
+        }
+    }
+
+    anyhow::bail!("failed to acquire watch lock at {}", lock_dir.display())
 }
 
 pub fn write_run_lease(card_dir: &Path, lease: &RunLease) -> anyhow::Result<()> {

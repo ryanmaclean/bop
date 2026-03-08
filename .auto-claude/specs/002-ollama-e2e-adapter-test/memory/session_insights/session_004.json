@@ -1,0 +1,214 @@
+{
+  "session_number": 4,
+  "timestamp": "2026-03-05T17:12:30.383699+00:00",
+  "subtasks_completed": [
+    "subtask-3-1"
+  ],
+  "discoveries": {
+    "file_insights": {
+      "dispatcher.rs": {
+        "change_type": "major_refactor",
+        "key_additions": [
+          "make_pending_watcher() function using notify crate with event-driven filesystem watching",
+          "tokio::sync::mpsc channels for inter-task event signaling",
+          "tokio::select! replacing pure sleep polling with hybrid event/timeout waiting",
+          "Channel keepalive pattern via _wake_tx_keepalive clone",
+          "concurrent_rename_claim_only_one_wins() test with Arc<AtomicUsize>",
+          "watcher_channel_fires_on_new_bop_dir() async test with timeout"
+        ],
+        "removals": [
+          "dispatcher_lock acquisition (lock::acquire_dispatcher_lock)",
+          "pure sleep polling loop"
+        ],
+        "test_coverage": "Added 2 new tests: atomicity test for fs::rename and watcher event test"
+      },
+      "Cargo.toml": {
+        "change_type": "dependency_management",
+        "additions": "notify crate with macos_kqueue feature flag",
+        "rationale": "Event-driven filesystem watching for pending directory"
+      },
+      "crates/bop-cli/Cargo.toml": {
+        "change_type": "workspace_alignment",
+        "changes": [
+          "Added tokio feature: sync (for mpsc channels)",
+          "Changed notify from direct dep to workspace dependency"
+        ]
+      },
+      "crates/bop-cli/src/list.rs": {
+        "change_type": "code_quality",
+        "refactoring": "Extracted resolve_states() function for state filter logic"
+      },
+      "adapters/ollama-local.nu": {
+        "change_type": "deletion",
+        "size": "148 lines",
+        "functionality": "Local Ollama model adapter with file output support",
+        "implications": "Indicates adapter consolidation or migration away from Ollama support"
+      },
+      "Cargo.lock": {
+        "change_type": "cleanup",
+        "removed_packages": [
+          "crossbeam-channel 0.5.15",
+          "crossbeam-utils 0.8.21",
+          "fsevent-sys 4.1.0"
+        ],
+        "reason": "Indirect dependencies no longer needed after notify dependency update"
+      }
+    },
+    "patterns_discovered": [
+      {
+        "pattern": "Filesystem Watcher with Tokio",
+        "description": "Using notify::RecommendedWatcher wrapped in make_pending_watcher() that sends events to tokio mpsc channel for async event handling",
+        "location": "dispatcher.rs:14-43",
+        "benefit": "Event-driven dispatch reduces latency and CPU usage vs polling"
+      },
+      {
+        "pattern": "Channel Keepalive Pattern",
+        "description": "Storing _wake_tx_keepalive clone of sender to prevent channel closure when watcher fails to init",
+        "location": "dispatcher.rs:76-80",
+        "benefit": "Prevents wake_rx.recv() from immediately returning None, avoiding 100% CPU spin"
+      },
+      {
+        "pattern": "Graceful Degradation",
+        "description": "Watcher returns Option, falls back to poll-only mode if platform doesn't support filesystem watching",
+        "location": "dispatcher.rs:77-81",
+        "benefit": "Cross-platform compatibility without hard failures"
+      },
+      {
+        "pattern": "Atomic Concurrency Testing",
+        "description": "Using Arc<AtomicUsize> with spawn threads to validate fs::rename atomicity under concurrent load",
+        "location": "dispatcher.rs:1265-1300",
+        "benefit": "Proves only one card claim succeeds despite 4 simultaneous attempts"
+      },
+      {
+        "pattern": "Hybrid Polling with Event Wakeup",
+        "description": "tokio::select! waits for filesystem events OR poll timeout, whichever comes first",
+        "location": "dispatcher.rs:376-379",
+        "benefit": "Responsive event handling with guaranteed polling fallback"
+      },
+      {
+        "pattern": "Workspace-level Dependency Management",
+        "description": "Centralizing notify in root Cargo.toml with feature flags, sub-crates reference via workspace",
+        "location": "Cargo.toml, crates/bop-cli/Cargo.toml",
+        "benefit": "Consistent versions across workspace, easier feature control"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Channel Closure Spin Loop",
+        "description": "Without _wake_tx_keepalive clone, the only sender would be in the watcher. If watcher init fails, sender count becomes 0, causing wake_rx.recv() to immediately return None forever, spinning at 100% CPU in tokio::select!",
+        "severity": "critical",
+        "prevention": "Always keep a clone of the sender alive for the lifetime of the receiver"
+      },
+      {
+        "gotcha": "Platform Watcher Unavailability",
+        "description": "notify::RecommendedWatcher may fail initialization on some platforms, returning None from make_pending_watcher(). Dispatcher must gracefully fall back to poll-only mode.",
+        "severity": "medium",
+        "location": "dispatcher.rs:77-81",
+        "handling": "Logged as warning, dispatcher continues with polling"
+      },
+      {
+        "gotcha": "Filesystem Event Latency",
+        "description": "Created .bop files may take up to 500ms to trigger filesystem events due to async kernel notification delivery",
+        "severity": "low",
+        "location": "dispatcher.rs:1362 (test timeout)",
+        "implication": "Cards may have perceptible startup delay on slow filesystems"
+      },
+      {
+        "gotcha": "Dispatcher Lock Removal",
+        "description": "Code removed lock::acquire_dispatcher_lock() call. Ensures only one dispatcher instance runs per cards_dir was lost. Concurrent dispatcher invocations may cause race conditions.",
+        "severity": "high",
+        "location": "dispatcher.rs removed line 30-31",
+        "risk": "Multiple dispatchers could claim same card or create duplicate work"
+      },
+      {
+        "gotcha": "Tokio Sync Feature Required",
+        "description": "Using tokio::sync::mpsc requires explicit 'sync' feature in tokio dependency. Missing feature causes compilation failure.",
+        "severity": "medium",
+        "location": "crates/bop-cli/Cargo.toml line 15",
+        "prevention": "Added feature during cargo check/test pass"
+      },
+      {
+        "gotcha": "Ollama Adapter Deletion",
+        "description": "adapters/ollama-local.nu (148 lines) was completely deleted with no replacement or migration notes",
+        "severity": "medium",
+        "location": "root of repo",
+        "implication": "May break any workflows relying on Ollama provider"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "approach_details": {
+      "task": "Run make check (test + clippy + fmt)",
+      "session_number": 4,
+      "execution": "Single attempt, all checks passed",
+      "changes_scope": "10 files modified/deleted, significant refactor of dispatcher event loop and dependency cleanup",
+      "test_additions": 2,
+      "test_types": [
+        "concurrent_rename_atomicity",
+        "watcher_event_firing"
+      ],
+      "breaking_changes": [
+        "Removed dispatcher_lock - may require external coordination if multiple dispatchers can run",
+        "Deleted ollama-local.nu adapter"
+      ],
+      "code_quality": "Improved - extracted functions, added tests, removed unused deps"
+    },
+    "recommendations": [
+      {
+        "priority": "high",
+        "item": "Investigate dispatcher lock removal implications",
+        "description": "Verify that only one dispatcher instance can run per cards_dir. Consider adding a new synchronization mechanism if external coordination is not guaranteed.",
+        "risk_if_ignored": "Race conditions between concurrent dispatcher invocations"
+      },
+      {
+        "priority": "high",
+        "item": "Document ollama-local.nu removal",
+        "description": "Clarify in commit message or PR description whether deletion is permanent or part of adapter consolidation. Update documentation if Ollama support is being sunset.",
+        "risk_if_ignored": "User confusion and broken workflows"
+      },
+      {
+        "priority": "medium",
+        "item": "Add platform-specific watcher tests",
+        "description": "Current timeout-based test (500ms) is forgiving. Add integration tests that validate real filesystem events on macOS, Linux, and Windows platforms.",
+        "benefit": "Higher confidence in cross-platform event delivery"
+      },
+      {
+        "priority": "medium",
+        "item": "Document filesystem event latency",
+        "description": "Add comment or docs explaining that newly-pending cards may take up to 500ms to trigger dispatch due to kernel event delivery latency.",
+        "benefit": "Prevents user confusion about startup delays"
+      },
+      {
+        "priority": "low",
+        "item": "Monitor poll_ms fallback frequency",
+        "description": "Log poll fallback events periodically to detect if watcher is failing frequently and degrading to poll-only mode.",
+        "benefit": "Observability into dispatcher health"
+      },
+      {
+        "priority": "low",
+        "item": "Consider explicit watcher graceful shutdown",
+        "description": "Current _pending_watcher is dropped implicitly. Consider explicit drop with logging when dispatcher exits.",
+        "benefit": "Better resource cleanup visibility"
+      }
+    ],
+    "subtask_id": "subtask-3-1",
+    "session_num": 4,
+    "success": true,
+    "changed_files": [
+      "Cargo.lock",
+      "Cargo.toml",
+      "adapters/ollama-local.nu",
+      "crates/bop-cli/Cargo.toml",
+      "crates/bop-cli/src/dispatcher.rs",
+      "crates/bop-cli/src/list.rs",
+      "crates/bop-cli/src/lock.rs",
+      "crates/bop-cli/src/main.rs",
+      "crates/bop-cli/src/util.rs",
+      "crates/bop-cli/tests/dispatcher_harness.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-3-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

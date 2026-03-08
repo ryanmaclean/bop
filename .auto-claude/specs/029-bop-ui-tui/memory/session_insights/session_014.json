@@ -1,0 +1,173 @@
+{
+  "session_number": 14,
+  "timestamp": "2026-03-07T20:03:39.611223+00:00",
+  "subtasks_completed": [
+    "subtask-4-3"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/ui/app.rs",
+        "purpose": "Core app state and LogTail mode logic",
+        "changes": [
+          "Added 8 new fields to App struct for LogTail state management: log_scroll, log_follow, log_tail_card_id, log_stdout_pos, log_stderr_pos, log_stdout_incomplete, log_stderr_incomplete",
+          "Implemented enter_log_tail() to initialize LogTail mode with existing log content (last 200 lines)",
+          "Implemented exit_log_tail() to clean up tailing state",
+          "Implemented poll_log_files() called on each tick to perform incremental polling",
+          "Added read_log_chunk() function implementing newline-gated streaming with 6 unit tests"
+        ],
+        "key_patterns": "Newline-gated streaming (bytes buffered, only complete lines emitted); incremental file polling with position tracking; file truncation detection"
+      },
+      {
+        "file": "crates/bop-cli/src/ui/input.rs",
+        "purpose": "LogTail mode input handling",
+        "changes": [
+          "Wired handle_logtail() to Mode::LogTail branch",
+          "Implemented navigation: \u2191/k scroll up, \u2193/j scroll down, f toggle follow mode, c clear, Esc exit",
+          "Modified ActionPopup to call app.enter_log_tail() instead of just setting mode"
+        ],
+        "key_patterns": "vim-style navigation (j/k), follow mode toggle, scroll position tracking with follow mode disabling"
+      },
+      {
+        "file": "crates/bop-cli/src/ui/widgets/logtail.rs",
+        "purpose": "LogTailWidget rendering",
+        "changes": [
+          "Full-height overlay widget replacing body zone",
+          "Renders log buffer with scroll tracking and follow mode",
+          "Shows card ID in header with [ FOLLOW ] indicator",
+          "Footer legend: j/k scroll, f follow, c clear, Esc exit"
+        ],
+        "key_patterns": "Overlay-style widget; ratatui Paragraph with calculated scroll offset; stateful rendering based on follow mode"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Newline-gated streaming",
+        "description": "Bytes appended to incomplete buffer; only complete lines (\\n-terminated) extracted and emitted. Partial lines remain in buffer for next poll cycle. Prevents partial ANSI escape sequence rendering flicker.",
+        "implementation": "read_log_chunk() with incomplete String buffer, find('\\n') extraction",
+        "applicability": "Any streaming log UI needing real-time updates without flicker"
+      },
+      {
+        "pattern": "Incremental file polling with position tracking",
+        "description": "Track file position (bytes read) across poll cycles. Seek to position, read delta, advance position. Allows efficient polling without re-reading entire file.",
+        "implementation": "log_stdout_pos, log_stderr_pos fields; fs::seek(SeekFrom::Start) before read",
+        "applicability": "Log tailing, metrics collection, any append-only log consumption"
+      },
+      {
+        "pattern": "File truncation detection",
+        "description": "When file_len < pos (e.g. log rotation), reset pos=0 and clear incomplete buffer. Prevents seeking past EOF or delivering stale content.",
+        "implementation": "Check metadata.len() < pos at poll start",
+        "applicability": "Production logs with rotation, temporary files"
+      },
+      {
+        "pattern": "Follow mode toggle for auto-scroll",
+        "description": "Boolean flag disables manual scroll when user navigates; auto-scroll resume on 'f' key. Prevents position fighting when new content arrives during scroll.",
+        "implementation": "log_follow flag set false on scroll key, toggled via 'f' key",
+        "applicability": "Live-updating log/event displays"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "UTF-8 boundary handling in newline-gated streaming",
+        "detail": "Multi-byte UTF-8 sequences may split across poll boundaries. String::from_utf8_lossy() used to handle incomplete bytes gracefully; invalid sequences replaced with U+FFFD.",
+        "mitigation": "Rely on from_utf8_lossy() and store partial lines in incomplete buffer across cycles",
+        "severity": "medium"
+      },
+      {
+        "gotcha": "File truncation breaks position-based seeking",
+        "detail": "Log rotation (or explicit truncation) makes stored position invalid. Seeking to pos > file_len may fail or return stale content from new file.",
+        "mitigation": "Check metadata.len() vs pos at poll start; reset pos=0 if file shrunk",
+        "severity": "high"
+      },
+      {
+        "gotcha": "Incomplete lines lost if app exits during partial line",
+        "detail": "incomplete buffers not persisted; if card selection changes mid-line, partial content is discarded (acceptable for TUI, notable for audit logs).",
+        "mitigation": "Current design is acceptable for interactive TUI; document that incomplete lines on exit are lost",
+        "severity": "low"
+      },
+      {
+        "gotcha": "Follow mode fighting with manual scroll",
+        "detail": "If follow mode on and new content arrives, auto-scroll offset may jump while user is scrolling, causing disorientation.",
+        "mitigation": "Follow mode disabled on any \u2191/\u2193 key; user must press 'f' to resume auto-scroll",
+        "severity": "medium"
+      },
+      {
+        "gotcha": "Two independent position trackers (stdout/stderr) can desync",
+        "detail": "If one log file fills much faster than the other, poll cycles may see out-of-order lines from different streams.",
+        "mitigation": "Current design acceptable (logs merged by insertion order); note in docs that events may appear out of order across streams",
+        "severity": "low"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "summary": "Implemented full LogTail overlay mode with newline-gated streaming, incremental file polling, and follow-mode auto-scroll. All input handling wired, rendering complete, 6 unit tests added for read_log_chunk().",
+      "key_achievements": [
+        "read_log_chunk() function provides reusable newline-gated streaming logic with file truncation handling",
+        "App state cleanly separates LogTail concerns: log_scroll (position), log_follow (auto-scroll), log_tail_card_id (current card), position/incomplete buffers per stream",
+        "Input handling fully specified: vim-style nav (j/k), follow toggle (f), clear (c), exit (Esc)",
+        "on_tick() integration: polls log files only when in LogTail mode (250ms cadence), no overhead in Normal mode",
+        "6 unit tests cover: complete lines, incomplete line buffering, multi-poll completion, missing files, truncation, no-new-data cases"
+      ],
+      "test_coverage": [
+        "read_log_chunk_extracts_complete_lines \u2014 validates newline extraction",
+        "read_log_chunk_buffers_incomplete_lines \u2014 validates partial line buffering",
+        "read_log_chunk_completes_buffered_line_on_next_read \u2014 validates cross-poll line completion",
+        "read_log_chunk_handles_missing_file \u2014 validates graceful missing file handling",
+        "read_log_chunk_handles_file_truncation \u2014 validates log rotation detection",
+        "read_log_chunk_no_new_data \u2014 validates idempotent polling"
+      ]
+    },
+    "recommendations": [
+      {
+        "category": "Code Quality",
+        "recommendation": "Extract common stdout/stderr polling into helper function to reduce duplication",
+        "detail": "poll_log_files() calls read_log_chunk() twice with identical pattern; could parameterize as poll_stream(path, pos_field, incomplete_field)",
+        "priority": "low",
+        "effort": "1-2 hours"
+      },
+      {
+        "category": "Performance",
+        "recommendation": "Add metrics for poll latency and log buffer memory usage",
+        "detail": "Track time spent in poll_log_files() per tick; warn if buffer exceeds threshold (e.g. >1MB)",
+        "priority": "medium",
+        "effort": "2-3 hours"
+      },
+      {
+        "category": "Testing",
+        "recommendation": "Add integration test for large log files (>10MB) to verify memory efficiency",
+        "detail": "Ensure read_log_chunk() does not load entire file into memory, only buffered delta",
+        "priority": "high",
+        "effort": "2-3 hours"
+      },
+      {
+        "category": "UX",
+        "recommendation": "Display poll latency or byte rate in LogTail footer",
+        "detail": "Users monitoring slow-moving logs appreciate feedback that tailing is active (e.g. '\u2193 2.3 KB/s' in footer)",
+        "priority": "low",
+        "effort": "1-2 hours"
+      },
+      {
+        "category": "Documentation",
+        "recommendation": "Document newline-gated streaming pattern for future contributors",
+        "detail": "Add code comment explaining why incomplete lines are buffered and when they are emitted; note UTF-8 handling assumptions",
+        "priority": "low",
+        "effort": "1 hour"
+      }
+    ],
+    "subtask_id": "subtask-4-3",
+    "session_num": 14,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/ui/app.rs",
+      "crates/bop-cli/src/ui/input.rs",
+      "crates/bop-cli/src/ui/mod.rs",
+      "crates/bop-cli/src/ui/widgets/logtail.rs",
+      "crates/bop-cli/src/ui/widgets/mod.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-4-3"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

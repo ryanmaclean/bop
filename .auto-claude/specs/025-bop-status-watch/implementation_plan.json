@@ -1,0 +1,312 @@
+{
+  "feature": "bop status --watch (live updating terminal view)",
+  "workflow_type": "simple",
+  "workflow_rationale": "Single-service task adding a watch mode to an existing CLI command. No multi-service coordination or architectural changes needed. All work is in the bop-cli crate.",
+  "phases": [
+    {
+      "id": "phase-1-implementation",
+      "name": "Implementation",
+      "type": "implementation",
+      "description": "Add --watch flag to bop status/list and implement live updating display with notify watcher",
+      "depends_on": [],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Add --watch/-w flag to Status command in main.rs",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cargo build --quiet && ./target/debug/bop status --help | grep -q 'watch'",
+            "expected": "Exit code 0"
+          },
+          "status": "completed"
+        },
+        {
+          "id": "subtask-1-2",
+          "description": "Extract term_width() from gantt.rs to util.rs for shared usage",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/gantt.rs",
+            "crates/bop-cli/src/util.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/gantt.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo build --quiet",
+            "expected": "Successful build"
+          },
+          "status": "completed"
+        },
+        {
+          "id": "subtask-1-3",
+          "description": "Create list_cards_watch() function with notify watcher and redraw loop",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/list.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/dispatcher.rs",
+            "crates/bop-cli/src/merge_gate.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo build --quiet",
+            "expected": "Successful build"
+          },
+          "status": "completed",
+          "notes": "Use notify-debouncer-mini with 100ms debounce. Watch .cards/ recursively. Spawn thread for watcher, send events over mpsc channel. Track line count for cursor-up positioning."
+        },
+        {
+          "id": "subtask-1-4",
+          "description": "Implement cursor positioning and minimal redraw logic in list_cards_watch()",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/list.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cargo build --quiet",
+            "expected": "Successful build"
+          },
+          "status": "completed",
+          "notes": "Use \\x1b[{N}A to move cursor up. Re-query terminal width on every redraw (do not cache). Only redraw if card counts changed to avoid flicker."
+        },
+        {
+          "id": "subtask-1-5",
+          "description": "Add live clock header and Ctrl-C clean shutdown handling",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/list.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cargo build --quiet",
+            "expected": "Successful build"
+          },
+          "status": "completed",
+          "notes": "Header format: 'bop · 14:23:07 · watching .cards/'. Use tokio::signal::ctrl_c() for graceful shutdown. Drop watcher to avoid fd leak."
+        },
+        {
+          "id": "subtask-1-6",
+          "description": "Wire --watch flag to list_cards_watch() in main.rs Status handler",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "manual",
+            "instructions": "Run 'bop status --watch' in terminal, create a card in .cards/pending/, verify in-place update occurs. Press Ctrl-C and verify clean exit."
+          },
+          "status": "completed",
+          "notes": "Added conditional branch in Status handler: if watch flag is true and id is empty, call list_cards_watch() with 'active' state filter. Otherwise use existing status logic. Verified compilation and basic functionality with timeout test."
+        },
+        {
+          "id": "subtask-1-7",
+          "description": "Create output/result.md with ASCII screenshot of watch output",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [
+            "output/result.md"
+          ],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "test -f output/result.md && grep -q 'watching .cards/' output/result.md",
+            "expected": "File exists with expected content"
+          },
+          "status": "completed",
+          "notes": "Created output/result.md with ASCII screenshot showing the live status layout from the spec: header with clock, running cards with progress bars, pending/done/failed counts, summary line. Verification passed."
+        },
+        {
+          "id": "subtask-1-8",
+          "description": "Run make check to verify tests, clippy, and formatting",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "make check",
+            "expected": "All checks pass"
+          },
+          "status": "completed",
+          "notes": "Fixed clippy warnings (unused assignments, collapsible if). All checks pass: tests (373 passed), clippy, and formatting. Committed changes.",
+          "updated_at": "2026-03-07T12:17:01.731880+00:00"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_phases": 1,
+    "total_subtasks": 8,
+    "services_involved": [
+      "bop-cli"
+    ],
+    "parallelism": {
+      "max_parallel_phases": 1,
+      "parallel_groups": [],
+      "recommended_workers": 1,
+      "speedup_estimate": "N/A - sequential implementation required"
+    },
+    "startup_command": "source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 025 --direct"
+  },
+  "verification_strategy": {
+    "risk_level": "low",
+    "skip_validation": false,
+    "test_creation_phase": "post_implementation",
+    "test_types_required": [
+      "unit"
+    ],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      "bop status --watch updates display in-place on .cards/ changes",
+      "Terminal width is re-queried on every redraw",
+      "Running cards show elapsed time and progress bars",
+      "Ctrl-C exits cleanly without fd leaks",
+      "Works in any terminal width (no full-screen TUI)",
+      "make check passes (tests + clippy + formatting)",
+      "output/result.md with sample output exists"
+    ],
+    "verification_steps": [
+      {
+        "name": "Build Check",
+        "command": "cargo build",
+        "expected_outcome": "Clean build with no errors",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Unit Tests",
+        "command": "cargo test",
+        "expected_outcome": "All tests pass",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Clippy Lints",
+        "command": "cargo clippy -- -D warnings",
+        "expected_outcome": "No clippy warnings",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Formatting Check",
+        "command": "cargo fmt --check",
+        "expected_outcome": "Code is properly formatted",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Manual Watch Test",
+        "command": "bop status --watch (manual test)",
+        "expected_outcome": "Live updates work, Ctrl-C exits cleanly",
+        "type": "manual",
+        "required": true,
+        "blocking": false
+      }
+    ],
+    "reasoning": "Low risk feature addition to existing command. Uses already-integrated dependencies (notify). Manual testing required for interactive watch mode. No security concerns."
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": true,
+      "commands": [
+        "cargo test"
+      ],
+      "minimum_coverage": null
+    },
+    "integration_tests": {
+      "required": false,
+      "commands": [],
+      "services_to_test": []
+    },
+    "e2e_tests": {
+      "required": false,
+      "commands": [],
+      "flows": []
+    },
+    "browser_verification": {
+      "required": false,
+      "pages": []
+    },
+    "database_verification": {
+      "required": false,
+      "checks": []
+    },
+    "manual_verification": {
+      "required": true,
+      "instructions": [
+        "Run 'bop status --watch' in a terminal",
+        "Create/move cards in .cards/ and verify in-place updates occur",
+        "Resize terminal and verify display adapts",
+        "Press Ctrl-C and verify clean exit with no error messages",
+        "Verify output/result.md contains sample ASCII screenshot"
+      ]
+    }
+  },
+  "qa_signoff": {
+    "status": "approved",
+    "timestamp": "2026-03-07T04:19:45Z",
+    "qa_session": 1,
+    "report_file": "qa_report.md",
+    "tests_passed": {
+      "unit": "96/96 + 1 doc test",
+      "integration": "N/A",
+      "e2e": "N/A"
+    },
+    "verified_by": "qa_agent",
+    "key_verifications": [
+      "All 10 spec requirements implemented and verified",
+      "Terminal width re-queried on every redraw (not cached)",
+      "ANSI cursor control for in-place updates working",
+      "Minimal redraw logic prevents flicker",
+      "Ctrl-C clean shutdown with tokio::signal",
+      "No security issues or regressions",
+      "Functional test confirms live watch mode works",
+      "output/result.md with comprehensive ASCII screenshot"
+    ]
+  },
+  "last_updated": "2026-03-07T04:19:45Z",
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2026-03-07T12:22:17.282711+00:00",
+      "issues": [],
+      "duration_seconds": 296.41
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 1,
+    "last_iteration": 1,
+    "last_status": "approved",
+    "issues_by_type": {}
+  },
+  "status": "human_review",
+  "planStatus": "review",
+  "reviewReason": "completed",
+  "updated_at": "2026-03-07T23:57:36.611Z",
+  "xstateState": "human_review",
+  "executionPhase": "complete"
+}

@@ -1,0 +1,28 @@
+{
+  "files_to_modify": {
+    "scripts": ["scripts/test-real-adapters.nu"]
+  },
+  "files_to_reference": [
+    "adapters/claude.nu",
+    "adapters/mock.nu",
+    "scripts/test-real-adapters.nu"
+  ],
+  "patterns": {
+    "adapter_pattern": "Adapters use nu scripts with signature: <workdir> <prompt_file> <stdout_log> <stderr_log> [memory_out]. Exit codes: 0=success, 75=rate-limit/transient, 1+=failure",
+    "test_pattern": "Nushell test scripts use 'use std/assert' and return nothing on success, error on failure",
+    "build_pattern": "make check = cargo test + cargo clippy + cargo fmt --check"
+  },
+  "existing_implementations": {
+    "description": "test-real-adapters.nu already exists and tests claude, ollama, and codex adapters end-to-end through the dispatcher pipeline. It creates temp dirs, initializes .cards structure, writes templates, creates cards, starts dispatcher, and waits for card completion.",
+    "relevant_files": [
+      "scripts/test-real-adapters.nu",
+      "adapters/claude.nu",
+      "Makefile"
+    ]
+  },
+  "task_context": {
+    "spec_003_context": "Spec 003 updated the prompt template in test-real-adapters.nu to be more explicit about using the Write tool",
+    "blocked_subtask": "Running the claude adapter test end-to-end and confirming it exits 0",
+    "prompt_location": "Line 308-311 in test-real-adapters.nu - spec.md content for the template"
+  }
+}

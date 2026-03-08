@@ -1,0 +1,32 @@
+{
+  "files_to_modify": {
+    "dispatcher": ["crates/bop-cli/src/dispatcher.rs"],
+    "quicklook": ["macos/bop/PreviewViewController.swift"]
+  },
+  "files_to_reference": [
+    "crates/bop-core/src/lib.rs",
+    "crates/bop-cli/src/workspace.rs",
+    "macos/bop/PreviewViewController.swift"
+  ],
+  "patterns": {
+    "rust_meta_update": "Use write_meta(&path, &meta) to persist changes to meta.json",
+    "rust_env_access": "Use std::env::var(\"VAR_NAME\").unwrap_or(default) for env vars",
+    "swift_button_pattern": "HStack with icon + text, styled with .foregroundColor, .padding, .background, .clipShape",
+    "swift_swiftui_views": "SwiftUI views embedded in existing card layout with proper state management",
+    "swift_file_access": "Use URL.appendingPathComponent() and Data(contentsOf:) for file reading"
+  },
+  "existing_implementations": {
+    "description": "Meta struct already has zellij_session and zellij_pane fields; PreviewViewController already has BopCardMeta with matching properties; existing Attach button uses custom bop:// URL scheme",
+    "relevant_files": [
+      "crates/bop-core/src/lib.rs (lines 259, 263 - zellij fields)",
+      "crates/bop-cli/src/dispatcher.rs (lines 200-204 - existing zellij_session setting)",
+      "macos/bop/PreviewViewController.swift (lines 23-24 - BopCardMeta fields, lines 800-816 - Attach button)"
+    ]
+  },
+  "key_insights": {
+    "log_file_naming": "Spec asks for logs/stdout (no extension), but code uses logs/stdout.log - verify actual file name",
+    "zellij_web_port": "Zellij 0.43+ web client is at http://127.0.0.1:8082/<session-name>",
+    "pane_naming": "Pane name is the card name (variable 'name' in dispatcher)",
+    "swiftui_timer": "Use TimelineView(.periodic(from:by:)) for 2-second refresh cycle"
+  }
+}

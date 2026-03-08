@@ -1,0 +1,17 @@
+---
+source: crates/bop-cli/src/ui/mod.rs
+assertion_line: 667
+expression: content
+---
+┌ build-ui — logs [FOLLOW] ────────────────────────────────┐
+│INFO starting build                                       │
+│DEBUG compiling crate                                     │
+│WARN unused import                                        │
+│ERROR build failed                                        │
+│card-1 → done                                             │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+└──────────────────────────────────────────────────────────┘

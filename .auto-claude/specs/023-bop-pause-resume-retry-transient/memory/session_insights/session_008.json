@@ -1,0 +1,150 @@
+{
+  "session_number": 8,
+  "timestamp": "2026-03-07T08:30:58.676753+00:00",
+  "subtasks_completed": [
+    "subtask-5-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/cards.rs",
+        "changes": "Added TRANSIENT_PATTERNS constant containing 11 network/transient failure indicators (rate limit, 429/503 errors, timeout, connection refused, ECONNRESET, EX_TEMPFAIL, name resolution, no route to host, 524)",
+        "purpose": "Enable bop retry-transient command to distinguish transient failures from permanent failures",
+        "impact": "low - single const definition, no behavioral changes yet"
+      },
+      {
+        "file": ".auto-claude/specs/028-terminal-card-renderer/spec.md",
+        "changes": "New 254-line specification for terminal card renderer with 5 capability levels, trait-based rendering architecture, and progressive degradation strategy",
+        "purpose": "Define rich ANSI terminal UI for bop status/list commands matching vibe-kanban quality with demoscene-inspired styling",
+        "impact": "high - defines entire new subsystem architecture"
+      },
+      {
+        "file": "dispatch.nu",
+        "changes": "Reordered specs: 028 now wave 9 (before 027), updated 027 to wave 10, added wave 10 to target_waves loop",
+        "purpose": "Correct dependency order: renderer trait/TermCaps must exist before plan progress rendering uses them",
+        "impact": "medium - affects wave scheduling but maintains dependency correctness"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Progressive Degradation Architecture",
+        "description": "5-level terminal capability hierarchy (Dumb\u2192Basic\u2192Extended\u2192Full\u2192TrueColor) with graceful fallbacks and feature gating per level",
+        "examples": [
+          "Dumb: ASCII only, no color",
+          "Extended: 16-color + box-drawing",
+          "TrueColor: RGB gradient + double-line boxes"
+        ]
+      },
+      {
+        "pattern": "Trait-Based Renderer Dispatch",
+        "description": "CardRenderer trait enables swappable implementations per capability level without conditional logic in callers",
+        "code": "pub trait CardRenderer { render_section_header, render_card_row, render_progress, render_footer }"
+      },
+      {
+        "pattern": "Dynamic Terminal Capability Detection",
+        "description": "TermCaps::detect() checks ZELLIJ env, COLORTERM, TERM variables in order of specificity to classify terminal class",
+        "keys": [
+          "Zellij always \u2192 Full",
+          "COLORTERM=truecolor \u2192 TrueColor",
+          "TERM=*256color \u2192 Full"
+        ]
+      },
+      {
+        "pattern": "Demoscene/Retro ASCII Art Style",
+        "description": "Uses dithered fade headers (\u2591\u2592\u2593 LABEL \u2593\u2592\u2591) and dice glyphs (\u2680\u2681\u2682\u2683\u2684\u2685) for priority encoding, matching classic BBS aesthetics",
+        "constraint": "All glyphs BMP-safe (U+0000\u2013U+FFFF); SMP glyphs only if glyph field + level \u2265 Full"
+      },
+      {
+        "pattern": "Transient vs Permanent Failure Classification",
+        "description": "String pattern matching on failure output to separate network/timing issues from build/test failures",
+        "trigger_terms": [
+          "rate limit",
+          "429/503",
+          "timeout",
+          "connection refused",
+          "ECONNRESET",
+          "EX_TEMPFAIL"
+        ]
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Terminal width must not be cached",
+        "reason": "bop status --watch (spec 025) requires dynamic resize handling; width queried on every render",
+        "consequence": "Caching would break responsive layout on terminal resize"
+      },
+      {
+        "issue": "Zellij detection overrides COLORTERM/TERM hierarchy",
+        "reason": "Zellij always provides Full capability regardless of env vars",
+        "consequence": "Ensure ZELLIJ check runs first in detect_level()"
+      },
+      {
+        "issue": "SMP glyphs (playing cards U+1F0xx) require glyph field + level >= Full",
+        "reason": "Not all terminals support SMP; safe fallback uses BMP-only dice glyphs",
+        "consequence": "Renderer must check both glyph field presence AND capability level before using SMP"
+      },
+      {
+        "issue": "Two-column layout only at width >= 100",
+        "reason": "Below 100 chars, single-column with double box is more readable than cramped two-column",
+        "consequence": "Layout selection depends on TermCaps.two_column flag derived from width"
+      },
+      {
+        "issue": "RGB gradient progress bar only at TrueColor level",
+        "reason": "256-color (Full) and below cannot express smooth amber\u2192green gradient",
+        "consequence": "Full/Extended levels fallback to fixed amber block; gradient is TrueColor-only enhancement"
+      },
+      {
+        "issue": "CardView assembly is caller's responsibility",
+        "reason": "Renderer trait takes flat CardView, does not read files; prevents renderer coupling to Meta format",
+        "consequence": "bop list/status commands must build CardView from Meta + optional AC plan before rendering"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "outcome_summary": "Subtask completed successfully. TRANSIENT_PATTERNS const defined with 11 network failure indicators. Comprehensive spec 028 created defining 5-level terminal renderer architecture with trait-based dispatch, demoscene styling, and graceful degradation. Dependency chain corrected: spec 028 (wave 9, core infrastructure) before spec 027 (wave 10, AC plan integration). All changes align with bop's VM-first, minimal-complexity architecture.",
+    "recommendations": [
+      {
+        "priority": "high",
+        "recommendation": "Implement modular render/ subdirectory structure (mod.rs, dumb.rs, basic.rs, extended.rs, full.rs, truecolor.rs) per spec architecture to keep renderer logic isolated and testable",
+        "rationale": "5-level dispatch grows complex; separate files prevent single render file from becoming too large"
+      },
+      {
+        "priority": "high",
+        "recommendation": "Add integration tests for TermCaps::detect() across SSH, local, Zellij, and dumb terminal environments to validate capability hierarchy",
+        "rationale": "Terminal detection is environment-sensitive; regression risks silent fallback to degraded output"
+      },
+      {
+        "priority": "high",
+        "recommendation": "Validate BMP glyph restrictions across all 5 levels; audit dithering chars (\u2591\u2592\u2593) and dice (\u2680\u2013\u2685) for compatibility in real terminals (SSH, macOS Terminal, iTerm2, Zellij)",
+        "rationale": "Spec assumes BMP safety but real-world terminals vary; SMP fallback required for edge cases"
+      },
+      {
+        "priority": "medium",
+        "recommendation": "Consider SIGWINCH-aware resize detection for bop status --watch, invalidating cached width on signal rather than polling every render",
+        "rationale": "Terminal re-query on every render is safe but inefficient; SIGWINCH handler balances responsiveness with CPU cost"
+      },
+      {
+        "priority": "medium",
+        "recommendation": "Precompute section header fill (\u2591\u2592\u2593 LABEL \u2593\u2592\u2591\u2591) at render time using terminal_size crate, not at spec write time",
+        "rationale": "Spec shows static examples; actual fill width must adapt to terminal.width to avoid line wrapping"
+      },
+      {
+        "priority": "low",
+        "recommendation": "Document TRANSIENT_PATTERNS in crates/bop-cli/src/lib.rs or update bop-retry-transient spec when implemented to reference these patterns",
+        "rationale": "Const is defined but no code yet calls is_transient_failure(); documentation prevents orphaned const"
+      }
+    ],
+    "subtask_id": "subtask-5-1",
+    "session_num": 8,
+    "success": true,
+    "changed_files": [
+      ".auto-claude/specs/028-terminal-card-renderer/spec.md",
+      "crates/bop-cli/src/cards.rs",
+      "dispatch.nu"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-5-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

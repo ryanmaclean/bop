@@ -1,0 +1,121 @@
+{
+  "session_number": 3,
+  "timestamp": "2026-03-07T12:32:19.249747+00:00",
+  "subtasks_completed": [
+    "subtask-2-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-core/src/lib.rs",
+        "type": "modification",
+        "changes": [
+          "Added `Event` struct (7 fields: ts, event, stage, provider, pid, exit_code, from, to)",
+          "Added `append_event()` function for JSONL WAL operations",
+          "Added 6 comprehensive unit tests covering nominal and edge cases",
+          "New imports: `OpenOptions` from `std::fs`, `Write` from `std::io`"
+        ],
+        "lines_added": 143,
+        "test_coverage": "6 new tests with 100% pass rate"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Atomic O_APPEND write pattern",
+        "location": "append_event() function",
+        "details": "Uses `OpenOptions::new().append(true)` for atomic writes; enforces 512-byte size limit to stay within PIPE_BUF (4096) atomicity guarantee"
+      },
+      {
+        "pattern": "Serde field control",
+        "location": "Event struct",
+        "details": "Uses `#[serde(default, skip_serializing_if = \"Option::is_none\")]` to emit compact JSON without null fields"
+      },
+      {
+        "pattern": "Context-aware error handling",
+        "location": "append_event() function",
+        "details": "Uses `anyhow::Context` with `.with_context(|| ...)` for readable error messages with path context"
+      },
+      {
+        "pattern": "Defensive size validation",
+        "location": "append_event() pre-write check",
+        "details": "Validates serialized event size before write; rejects oversized records with descriptive error"
+      },
+      {
+        "pattern": "Comprehensive test matrix",
+        "location": "tests module",
+        "details": "Tests cover: directory creation, multi-event appending, compact JSON format, optional field skipping, size rejection"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "O_APPEND atomicity boundary",
+        "severity": "HIGH",
+        "context": "512-byte max event size is enforced to guarantee atomic writes; exceeding PIPE_BUF (4096) breaks atomicity guarantee",
+        "solution": "Test `append_event_rejects_oversized_records()` catches this; runtime validation prevents silent data loss"
+      },
+      {
+        "gotcha": "Optional field serialization",
+        "severity": "MEDIUM",
+        "context": "None fields omitted from JSON; test explicitly verifies `\"provider\"` absent when None",
+        "solution": "Test `append_event_skips_none_fields()` validates correct serde behavior"
+      },
+      {
+        "gotcha": "Directory creation side-effect",
+        "severity": "LOW",
+        "context": "`logs/` directory created on first append_event() call; subsequent calls reuse existing directory",
+        "solution": "Test `append_event_creates_logs_dir_and_jsonl_file()` validates idempotency"
+      },
+      {
+        "gotcha": "Compact JSON vs pretty-print",
+        "severity": "LOW",
+        "context": "Used `serde_json::to_vec()` (compact) not `to_string_pretty()`; ensures predictable size for 512-byte check",
+        "solution": "Test `append_event_compact_json_no_pretty_print()` prevents regression"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "approach_details": {
+      "summary": "Implemented JSONL write-ahead log append function with strict atomicity guarantees and comprehensive test coverage",
+      "strategy": "Storage decision from project memory: filesystem state machine + JSONL append-only event log. Event struct is flexible (optional fields) to support different event types. Size-limited records guarantee O_APPEND atomicity without locks.",
+      "test_strategy": "6 unit tests covering: creation, multi-append, JSON format, optional fields, size rejection",
+      "integration_status": "Ready for use in dispatcher and merge-gate; complements existing `read_meta()` and `write_meta()` functions"
+    },
+    "recommendations": [
+      {
+        "priority": "HIGH",
+        "action": "Add `read_events()` or `parse_events_jsonl()` function to consume audit log",
+        "rationale": "append_event() is one half of the WAL pattern; consumers (dashboard, lane_metrics, etc.) need to read and replay events"
+      },
+      {
+        "priority": "MEDIUM",
+        "action": "Document Event schema in docs/ or add schema comment in Event struct",
+        "rationale": "External tools (vibekanban provider, dispatch.nu) may parse events.jsonl; schema must be discoverable"
+      },
+      {
+        "priority": "MEDIUM",
+        "action": "Add event archival/rotation strategy for long-lived card directories",
+        "rationale": "Unbounded append will cause logs/ to grow indefinitely; consider moving old events to .tar.gz after card lands"
+      },
+      {
+        "priority": "LOW",
+        "action": "Consider adding helper constructors (e.g., `Event::stage_transition()`, `Event::meta_written()`)",
+        "rationale": "Callers must manually construct Event with timestamp; reduce boilerplate in dispatcher/merge-gate"
+      },
+      {
+        "priority": "LOW",
+        "action": "Add telemetry aggregation function (event counts by type, timing analysis)",
+        "rationale": "lane_metrics.nu could consume events.jsonl for latency/throughput dashboards instead of parsing log files"
+      }
+    ],
+    "subtask_id": "subtask-2-1",
+    "session_num": 3,
+    "success": true,
+    "changed_files": [
+      "crates/bop-core/src/lib.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-2-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

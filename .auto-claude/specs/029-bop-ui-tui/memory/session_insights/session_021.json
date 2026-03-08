@@ -1,0 +1,111 @@
+{
+  "session_number": 21,
+  "timestamp": "2026-03-07T20:32:49.584850+00:00",
+  "subtasks_completed": [
+    "subtask-6-3"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/ui/app.rs",
+        "changes": [
+          "Added std::process::Command import for shell spawning",
+          "Added subshell_worktree: Option<PathBuf> field to App struct for storing pending subshell path",
+          "Implemented prepare_subshell() method with two-tier worktree lookup: meta.json workspace_path first, then .bop/workspaces/<id>/ fallback",
+          "Implemented run_subshell() method that spawns $SHELL in worktree with stderr user guidance messages",
+          "Both methods properly handle missing cards and worktrees with status messages"
+        ]
+      },
+      {
+        "file": "crates/bop-cli/src/ui/input.rs",
+        "changes": [
+          "Added KeyCode::Char('!') handler in handle_normal() that calls prepare_subshell()",
+          "Updated test helper struct to initialize subshell_worktree: None"
+        ]
+      },
+      {
+        "file": "crates/bop-cli/src/ui/mod.rs",
+        "changes": [
+          "Added crossterm imports for cursor, raw mode control, and screen mode (LeaveAlternateScreen, EnterAlternateScreen)",
+          "Implemented subshell execution block in event loop: check mode == Mode::Subshell, leave alt screen, disable raw mode, run_subshell(), restore terminal state, clear for redraw"
+        ]
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Two-phase subshell workflow",
+        "description": "Key handler (prepare_subshell) is called during event dispatch, sets mode and stores path. Event loop checks mode, manages terminal state, then executes run_subshell. This decouples key input from shell execution."
+      },
+      {
+        "pattern": "Worktree discovery fallback chain",
+        "description": "Tries meta.json workspace_path field first, then falls back to .bop/workspaces/<id>/ relative to project root. Validates each path with is_dir() before accepting."
+      },
+      {
+        "pattern": "Terminal state lifecycle management",
+        "description": "Before spawning subshell: cursor::Show, LeaveAlternateScreen, disable_raw_mode. After shell exits: enable_raw_mode, EnterAlternateScreen, cursor::Hide, terminal.clear(). Ensures TUI can resume cleanly."
+      },
+      {
+        "pattern": "User feedback via multiple channels",
+        "description": "Status messages in footer for errors (no card, no worktree). Stderr messages inform user of directory and how to return to bop ui."
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Terminal state must be fully restored after subshell",
+        "impact": "Failure to leave alt screen or disable raw mode before spawning shell causes terminal corruption when user types",
+        "mitigation": "Implementation properly pairs LeaveAlternateScreen/disable_raw_mode before, enable_raw_mode/EnterAlternateScreen/cursor::Hide after"
+      },
+      {
+        "gotcha": "$SHELL env var may not exist on all systems",
+        "impact": "Subshell spawn fails if SHELL unset and no fallback provided",
+        "mitigation": "Implements .unwrap_or_else(|_| '/bin/sh'.to_string()) for portable fallback"
+      },
+      {
+        "gotcha": "Worktree path validation critical",
+        "impact": "Code could attempt to spawn shell in non-existent directory, failing silently",
+        "mitigation": "Both lookup paths validated with is_dir() before setting subshell_worktree"
+      },
+      {
+        "gotcha": "Mode state mutation during event loop",
+        "impact": "If mode is set to Subshell but subshell_worktree is None, run_subshell() silently resets mode",
+        "mitigation": "prepare_subshell() ensures both are set together, run_subshell() takes ownership with .take()"
+      }
+    ],
+    "approach_outcome": "SUCCESS - Vim :! convention fully implemented with proper terminal lifecycle management. Key press triggers prepare_subshell() which validates worktree and sets mode. Event loop detects mode, suspends TUI (leaves alt screen, disables raw mode), executes run_subshell() synchronously, restores TUI state, and forces redraw. Comprehensive error handling for missing cards/worktrees via status messages. User experience includes stderr guidance text showing directory and exit instructions.",
+    "recommendations": [
+      {
+        "category": "UX Enhancement",
+        "recommendation": "Add help text to footer or F-key legend indicating ! key opens subshell (similar to how Ctrl+O is documented in mc pattern)"
+      },
+      {
+        "category": "Testing",
+        "recommendation": "Test with $SHELL pointing to zsh, fish, nushell, and various non-standard shells to verify fallback and path expansion works"
+      },
+      {
+        "category": "Feature Expansion",
+        "recommendation": "Consider tracking shell session history per card in meta.json or .bop/workspaces/<id>/shell_history for future audit/replay"
+      },
+      {
+        "category": "Error Messages",
+        "recommendation": "For 'no worktree' case, consider suggesting which cards have workspaces via status message (e.g., 'no worktree for card-123, try J to move')"
+      },
+      {
+        "category": "Documentation",
+        "recommendation": "Update bop ui keybinding docs to include ! \u2192 subshell mapping alongside existing Tab multi-select, Shift+H/L move, Ctrl+O patterns"
+      }
+    ],
+    "subtask_id": "subtask-6-3",
+    "session_num": 21,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/ui/app.rs",
+      "crates/bop-cli/src/ui/input.rs",
+      "crates/bop-cli/src/ui/mod.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-6-3"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

@@ -1,0 +1,87 @@
+=== AUTO-BUILD PROGRESS ===
+
+Project: bop ui — full interactive TUI (kanban-first)
+Workspace: managed by orchestrator
+Started: 2026-03-07
+
+Workflow Type: feature
+Rationale: Building a new interactive TUI from scratch in a single service (bop-cli).
+All code lives in one crate with new dependencies (ratatui, crossterm, nucleo).
+Phases follow functional layers: foundation → layout → overlays → actions → testing.
+
+Session 1 (Planner):
+- Created context.json with codebase findings
+- Created implementation_plan.json
+- Phases: 7
+- Total subtasks: 20
+- Created init.sh
+
+Phase Summary:
+- Phase 1 (TUI Foundation & Event Loop): 4 subtasks, no dependencies
+  → Deps, module structure, AppEvent/App/Mode, event loop, TerminalGuard, placeholder render
+- Phase 2 (Kanban Column Layout & Navigation): 2 subtasks, depends on Phase 1
+  → KanbanWidget (horizontal columns, collapse, WIP limit), h/l/j/k navigation
+- Phase 3 (Header Bar & Context-Sensitive Footer): 2 subtasks, depends on Phase 2
+  → Header (clock, provider meters, sparkline, ticker), Footer (mode-aware keybinds, F-keys)
+- Phase 4 (Overlays — Detail, Action Popup, Log Tail): 3 subtasks, depends on Phase 3
+  → Detail overlay (d), action popup (↵), log tail with newline-gated streaming (F3/L)
+- Phase 5 (Filter Mode & New Card): 2 subtasks, depends on Phase 2
+  → Nucleo fuzzy filter (/), new card inline prompt (n)
+- Phase 6 (Card Movement, Multi-Select, Subshell & Resize): 4 subtasks, depends on Phase 4 + 5
+  → Shift+H/L card movement, Tab multi-select, ! subshell, resize handling
+- Phase 7 (Snapshot Tests & Polish): 3 subtasks, depends on Phase 6
+  → insta snapshot tests, make check, output/result.md
+
+Services Involved:
+- bop-cli: All TUI code (ui/ module directory, 13 new source files)
+- bop-core: Referenced for Meta, CardView, read_meta — no modifications needed
+
+Parallelism Analysis:
+- Max parallel phases: 2 (Phase 4 + Phase 5 could overlap)
+- Recommended workers: 1 (shared files input.rs/app.rs make parallel risky)
+- Parallel groups: [Phase 4 (overlays), Phase 5 (filter/newcard)] — same dependency
+
+Key Codebase Patterns Identified:
+- CardView is the data contract — renderers never access filesystem
+- notify + debouncer + mpsc channel proven in list_cards_watch()
+- Progressive rendering via CardRenderer trait (5 levels)
+- Provider cooldown tracking for meter bar coloring
+- Singleton lock via mkdir-atomicity
+- Log follow via seek-based polling (200ms)
+- Card movement via fs::rename (atomic on POSIX/APFS)
+- Test setup: tempdir() + ensure_cards_layout() + from_meta()
+
+New Dependencies:
+- ratatui 0.29 (MIT) — double-buffer diff, widget system
+- crossterm 0.28 (MIT) — alternate screen, raw mode, events
+- nucleo 0.5 (MIT) — helix's fuzzy matcher
+- insta (dev-dep) — snapshot testing
+
+Files to Create (13 new):
+  crates/bop-cli/src/ui/mod.rs
+  crates/bop-cli/src/ui/app.rs
+  crates/bop-cli/src/ui/event.rs
+  crates/bop-cli/src/ui/input.rs
+  crates/bop-cli/src/ui/widgets/mod.rs
+  crates/bop-cli/src/ui/widgets/header.rs
+  crates/bop-cli/src/ui/widgets/kanban.rs
+  crates/bop-cli/src/ui/widgets/footer.rs
+  crates/bop-cli/src/ui/widgets/detail.rs
+  crates/bop-cli/src/ui/widgets/action.rs
+  crates/bop-cli/src/ui/widgets/logtail.rs
+  crates/bop-cli/src/ui/widgets/filter.rs
+  crates/bop-cli/src/ui/widgets/newcard.rs
+
+Files to Modify (2):
+  crates/bop-cli/Cargo.toml        (add ratatui, crossterm, nucleo, insta)
+  crates/bop-cli/src/main.rs       (add mod ui; add Ui subcommand variant)
+
+=== STARTUP COMMAND ===
+
+To continue building this spec, run:
+
+  PYTHONPATH=$(python3 -c 'import site; print(site.getsitepackages()[0])') \
+    env -u CLAUDECODE python3 /Applications/Auto-Claude.app/Contents/Resources/backend/run.py \
+    --spec 029 --project-dir /Users/studio/bop --direct
+
+=== END SESSION 1 ===

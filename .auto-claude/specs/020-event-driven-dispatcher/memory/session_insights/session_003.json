@@ -1,0 +1,189 @@
+{
+  "session_number": 3,
+  "timestamp": "2026-03-07T06:12:59.678406+00:00",
+  "subtasks_completed": [
+    "subtask-2-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/dispatcher.rs",
+        "role": "primary_change",
+        "description": "Refactored run_dispatcher to use notify file watcher with 100ms debounce instead of polling on pending/ directory. Enables event-driven card processing model (WatchPaths instead of polling loop).",
+        "change_type": "refactor",
+        "impact": "Architectural shift from polling to event-driven dispatch mechanism"
+      },
+      {
+        "file": ".auto-claude/dispatch-state.json",
+        "role": "state_tracking",
+        "description": "Dispatch orchestration state machine tracking spec completion progression. Shows specs 018 (cli-ux-colors-stats) and 019 (serve-security-hardening) transitioned to completed queue.",
+        "change_type": "state_update",
+        "impact": "Multi-spec workflow coordination"
+      },
+      {
+        "file": ".auto-claude/specs/020-event-driven-dispatcher/",
+        "role": "target_spec",
+        "description": "Event-driven dispatcher specification (spec 020) - this subtask is directly implementing the core refactoring for this spec. Contains build progress, implementation plan, and session insights tracking.",
+        "change_type": "metadata",
+        "impact": "Tracks progress of this subtask implementation"
+      },
+      {
+        "file": ".auto-claude/specs/018-cli-ux-colors-stats/qa_report.md",
+        "role": "quality_gate",
+        "description": "QA approval recorded in implementation_plan.json with qa_signoff status 'approved' (459/459 unit tests passed). Indicates spec 018 reached QA completion.",
+        "change_type": "qa_gate",
+        "impact": "Confirms feature quality before release"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Event-driven architecture shift",
+        "evidence": "Transition from polling-based dispatcher (implicit in previous code) to notify watcher with 100ms debounce (explicit in commit message). Aligns with MICROCLAW target architecture using WatchPaths events.",
+        "frequency": "one_time_refactor",
+        "reliability": "high"
+      },
+      {
+        "pattern": "Multi-spec orchestration via dispatch-state.json",
+        "evidence": "dispatch-state.json shows queue progression: specs 018-019 completed, implies 020 (event-driven-dispatcher) is current active spec. Session insights tracked per-spec.",
+        "frequency": "continuous",
+        "reliability": "high"
+      },
+      {
+        "pattern": "Session-level memory tracking",
+        "evidence": "Memory files created for sessions 015 and 016 (spec 018), sessions 001-009 (spec 019). Each contains attempt_history, build_commits, session_insights with timestamps.",
+        "frequency": "per_session",
+        "reliability": "high"
+      },
+      {
+        "pattern": "Debounce timing (100ms) as tunable parameter",
+        "evidence": "Commit message explicitly specifies '100ms debounce' for pending/ watcher. Suggests careful timing selection to batch rapid file system events.",
+        "frequency": "one_time_configuration",
+        "reliability": "medium"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Diff truncation obscures dispatcher.rs implementation details",
+        "severity": "medium",
+        "context": "Git diff output marked '(truncated, 1088976 chars total)' - unable to inspect actual notify watcher setup, error handling, and integration with card state machine.",
+        "mitigation": "Review full crates/bop-cli/src/dispatcher.rs directly; verify debounce implementation and event filtering logic"
+      },
+      {
+        "gotcha": "100ms debounce may batch unrelated events",
+        "severity": "low",
+        "context": "Multiple rapid card additions to pending/ will be collected into single dispatch cycle. Could mask ordering issues or race conditions.",
+        "mitigation": "Test with rapid card creation scenarios; monitor event ordering in logs; adjust debounce if needed"
+      },
+      {
+        "gotcha": "MICROCLAW target is not fully realized yet",
+        "severity": "medium",
+        "context": "Memory notes indicate 'adapters/*.nu are stepping stones only \u2014 QEMU adapter is the end state' (Wave 5+). Dispatcher refactor is prerequisite but not final architecture.",
+        "mitigation": "Track Wave 5+ specifications; plan QEMU integration after dispatcher stabilizes"
+      },
+      {
+        "gotcha": "File system event handling platform-specific",
+        "severity": "low",
+        "context": "notify crate behavior varies on macOS (FSEvents), Linux (inotify), Windows. Debounce tuning may need platform-specific overrides.",
+        "mitigation": "Test on target platform (macOS per MEMORY.md); monitor for event coalescing edge cases"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "summary": "Refactored run_dispatcher to use notify file watcher with 100ms debounce on pending/ directory. Core feature implemented as per spec 020 (event-driven-dispatcher). Related specs 018-019 advanced to QA completion status.",
+      "completion_percentage": 100,
+      "tests_passed": "459/459 unit tests (spec 018 QA)",
+      "blockers": "none",
+      "critical_path": "Dispatcher watcher implementation is prerequisite for Wave 5+ QEMU integration"
+    },
+    "recommendations": [
+      {
+        "priority": "high",
+        "category": "implementation",
+        "recommendation": "Document debounce timing rationale in dispatcher.rs comments. Justify 100ms choice: fast enough for interactive use, slow enough to batch rapid creates. Include tuning guide for different workload profiles.",
+        "rationale": "Future maintainers need to understand timing trade-offs; may need adjustment for VM-based workflow with 9P mount events"
+      },
+      {
+        "priority": "high",
+        "category": "testing",
+        "recommendation": "Add integration test for rapid card creation scenario: create 10+ cards in <200ms window. Verify watcher batches into single dispatch cycle. Test on macOS (FSEvents coalescing).",
+        "rationale": "Event batching is critical for performance; race conditions possible under load"
+      },
+      {
+        "priority": "medium",
+        "category": "monitoring",
+        "recommendation": "Instrument dispatcher with event count metrics: log number of pending/ events batched per dispatch cycle. Track debounce effectiveness (target: 2-5 events per cycle under normal load).",
+        "rationale": "Validates debounce tuning; early warning if file system events spike"
+      },
+      {
+        "priority": "medium",
+        "category": "architecture",
+        "recommendation": "Plan QEMU adapter integration (Wave 5+) as next dependency. Current dispatcher uses local notify watcher; QEMU version will need 9P event translation or polling fallback. Document protocol.",
+        "rationale": "Dispatcher refactor is stepping stone to MICROCLAW target; QEMU integration will require new event source handling"
+      },
+      {
+        "priority": "medium",
+        "category": "tooling",
+        "recommendation": "Add dispatcher debug mode: `--watch-verbose` flag to log all file system events, debounce intervals, and dispatch triggers. Helpful for diagnosing event batching issues.",
+        "rationale": "File system behavior is hard to debug; explicit logging of events aids root cause analysis"
+      },
+      {
+        "priority": "low",
+        "category": "documentation",
+        "recommendation": "Update MEMORY.md architecture section with event-driven dispatcher entry point and notify watcher lifecycle. Clarify relationship to Wave 5 QEMU adapter.",
+        "rationale": "Architectural knowledge concentration; future wave planning depends on understanding current state"
+      }
+    ],
+    "subtask_id": "subtask-2-1",
+    "session_num": 3,
+    "success": true,
+    "changed_files": [
+      ".auto-claude/dispatch-state.json",
+      ".auto-claude/specs/018-cli-ux-colors-stats/MANUAL_TEST_PLAN.md",
+      ".auto-claude/specs/018-cli-ux-colors-stats/implementation_plan.json",
+      ".auto-claude/specs/018-cli-ux-colors-stats/memory/attempt_history.json",
+      ".auto-claude/specs/018-cli-ux-colors-stats/memory/build_commits.json",
+      ".auto-claude/specs/018-cli-ux-colors-stats/memory/session_insights/session_001.json",
+      ".auto-claude/specs/018-cli-ux-colors-stats/memory/session_insights/session_015.json",
+      ".auto-claude/specs/018-cli-ux-colors-stats/memory/session_insights/session_016.json",
+      ".auto-claude/specs/018-cli-ux-colors-stats/qa_report.md",
+      ".auto-claude/specs/018-cli-ux-colors-stats/task_logs.json",
+      ".auto-claude/specs/019-serve-security-hardening/MANUAL_TEST_PLAN.md",
+      ".auto-claude/specs/019-serve-security-hardening/build-progress.txt",
+      ".auto-claude/specs/019-serve-security-hardening/context.json",
+      ".auto-claude/specs/019-serve-security-hardening/implementation_plan.json",
+      ".auto-claude/specs/019-serve-security-hardening/init.sh",
+      ".auto-claude/specs/019-serve-security-hardening/memory/attempt_history.json",
+      ".auto-claude/specs/019-serve-security-hardening/memory/build_commits.json",
+      ".auto-claude/specs/019-serve-security-hardening/memory/session_insights/session_001.json",
+      ".auto-claude/specs/019-serve-security-hardening/memory/session_insights/session_002.json",
+      ".auto-claude/specs/019-serve-security-hardening/memory/session_insights/session_003.json",
+      ".auto-claude/specs/019-serve-security-hardening/memory/session_insights/session_004.json",
+      ".auto-claude/specs/019-serve-security-hardening/memory/session_insights/session_005.json",
+      ".auto-claude/specs/019-serve-security-hardening/memory/session_insights/session_006.json",
+      ".auto-claude/specs/019-serve-security-hardening/memory/session_insights/session_007.json",
+      ".auto-claude/specs/019-serve-security-hardening/memory/session_insights/session_008.json",
+      ".auto-claude/specs/019-serve-security-hardening/memory/session_insights/session_009.json",
+      ".auto-claude/specs/019-serve-security-hardening/qa_report.md",
+      ".auto-claude/specs/019-serve-security-hardening/review_state.json",
+      ".auto-claude/specs/019-serve-security-hardening/task_logs.json",
+      ".auto-claude/specs/020-event-driven-dispatcher/build-progress.txt",
+      ".auto-claude/specs/020-event-driven-dispatcher/context.json",
+      ".auto-claude/specs/020-event-driven-dispatcher/implementation_plan.json",
+      ".auto-claude/specs/020-event-driven-dispatcher/init.sh",
+      ".auto-claude/specs/020-event-driven-dispatcher/memory/attempt_history.json",
+      ".auto-claude/specs/020-event-driven-dispatcher/memory/build_commits.json",
+      ".auto-claude/specs/020-event-driven-dispatcher/memory/session_insights/session_002.json",
+      ".auto-claude/specs/020-event-driven-dispatcher/project_index.json",
+      ".auto-claude/specs/020-event-driven-dispatcher/review_state.json",
+      ".auto-claude/specs/020-event-driven-dispatcher/task_logs.json",
+      ".secretsignore",
+      "Cargo.lock",
+      "crates/bop-cli/src/dispatcher.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-2-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

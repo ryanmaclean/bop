@@ -1,0 +1,56 @@
+{
+  "files_to_modify": {
+    "bop": []
+  },
+  "files_to_create": [
+    "adapters/qemu.nu",
+    "adapters/README.md"
+  ],
+  "files_to_reference": [
+    "adapters/claude.nu",
+    "adapters/mock.nu",
+    "adapters/timeout_wrapper.nu",
+    "scripts/test-real-adapters.nu"
+  ],
+  "patterns": {
+    "adapter_signature": "All adapters use: def main [workdir: string, prompt_file: string, stdout_log: string, stderr_log: string, _memory_out?: string, --test]",
+    "exit_codes": "0=success, 75=transient/rate-limit (retry), 1+=failure",
+    "path_handling": "Resolve relative paths to absolute before cd into workdir",
+    "self_tests": "All adapters have --test flag that runs internal validation using std/assert",
+    "providers_json": "Format: {providers: {name: {command: path, rate_limit_exit: 75}}}",
+    "prerequisite_checks": "Adapters check prerequisites and fail gracefully with clear error messages"
+  },
+  "existing_implementations": {
+    "description": "Found 8 existing adapters (claude, ollama, codex, aider, goose, opencode, mock, timeout_wrapper) all following consistent patterns",
+    "relevant_files": [
+      "adapters/claude.nu",
+      "adapters/mock.nu",
+      ".cards/providers.json"
+    ]
+  },
+  "external_dependencies": {
+    "qemu": {
+      "command": "qemu-system-x86_64",
+      "check": "which qemu-system-x86_64",
+      "install": "brew install qemu",
+      "status": "installed at /opt/homebrew/bin/qemu-system-x86_64"
+    },
+    "zam": {
+      "path": "/Users/studio/zam/target/zam.elf",
+      "status": "not_built_yet",
+      "note": "Adapter should fail gracefully until zam is available"
+    },
+    "dub": {
+      "path": "/Users/studio/efi",
+      "status": "separate_project",
+      "note": "UEFI bootloader for secure boot (future enhancement)"
+    }
+  },
+  "vm_architecture": {
+    "virtfs_9p": "Mount card bundle into VM via -virtfs local,path=<workdir>,mount_tag=card",
+    "serial_output": "VM output via -serial file:<stdout_log> to capture UART",
+    "kernel_direct": "Direct kernel boot with -kernel <zam_image> (no full UEFI yet)",
+    "memory": "128M allocated via -m 128M",
+    "flags": "-nographic -no-reboot for headless execution"
+  }
+}

@@ -236,9 +236,9 @@ mod tests {
 
     #[test]
     fn default_memory_ttl_is_reasonable() {
-        assert!(DEFAULT_MEMORY_TTL_SECONDS > 0);
-        let one_year = 60 * 60 * 24 * 365;
-        assert!(DEFAULT_MEMORY_TTL_SECONDS < one_year);
+        const { assert!(DEFAULT_MEMORY_TTL_SECONDS > 0) };
+        const ONE_YEAR: i64 = 60 * 60 * 24 * 365;
+        const { assert!(DEFAULT_MEMORY_TTL_SECONDS < ONE_YEAR) };
     }
 
     #[test]

@@ -1,0 +1,258 @@
+=== AUTO-BUILD PROGRESS ===
+
+Project: bop - Storage resilience: JSONL WAL + checksum
+Workspace: /Users/studio/bop
+Started: 2026-03-07
+
+Workflow Type: simple
+Rationale: Single Rust service, straightforward implementation with clear ordered steps. No multi-service coordination or investigation required.
+
+Session 1 (Planner):
+- Conducted deep codebase investigation
+- Found tmp+rename atomicity already implemented in write_meta (spec 022)
+- Located 5 fs::rename calls in dispatcher for event logging
+- Created context.json documenting patterns and existing code
+- Created implementation_plan.json with 6 phases, 10 subtasks
+- Created init.sh for environment setup
+- No hash dependencies (sha2/blake3) currently in project - will add blake3
+
+Phase Summary:
+Phase 1 (Add Hash Dependencies): 1 subtask, no dependencies
+  - Add blake3 dependency to bop-core/Cargo.toml
+
+Phase 2 (JSONL WAL Implementation): 2 subtasks, no dependencies
+  - Add append_event() function for JSONL WAL
+  - Call append_event in write_meta after tmp+rename
+
+Phase 3 (Checksum Field and Validation): 3 subtasks, depends on Phase 1
+  - Add checksum field to Meta struct
+  - Implement checksum computation in write_meta
+  - Implement checksum validation in read_meta
+
+Phase 4 (Dispatcher WAL Integration): 1 subtask, depends on Phase 2
+  - Add stage_transition event logging at all 5 fs::rename points
+
+Phase 5 (Documentation): 2 subtasks, no dependencies
+  - Write docs/storage-decision.md
+  - Write output/result.md with corruption scenarios
+
+Phase 6 (Final Verification): 1 subtask, depends on Phases 3, 4, 5
+  - Run make check and verify acceptance criteria
+
+Services Involved:
+- bop-core: Core library with Meta struct, read_meta, write_meta
+- bop-cli: Dispatcher with state transition logic
+
+Parallelism Analysis:
+- Max parallel phases: 2
+- Recommended workers: 1 (simple workflow, sequential is clearer)
+- Parallel groups:
+  * Phase 2 (WAL) + Phase 5 (Docs) can run together (different files)
+
+Key Files Modified:
+- crates/bop-core/src/lib.rs (Meta struct, read/write_meta, append_event)
+- crates/bop-core/Cargo.toml (add blake3)
+- crates/bop-cli/src/dispatcher.rs (event logging at fs::rename)
+- docs/storage-decision.md (NEW - rationale document)
+- output/result.md (NEW - spec result)
+
+Implementation Notes:
+- Use blake3 for checksum (smaller, faster than sha2)
+- JSONL events are best-effort only (let _ = append_event(...))
+- Checksum computed on compact JSON (to_vec NOT to_vec_pretty)
+- No automated JSONL replay - checksum Err handled by caller
+- Keep event records < 512 bytes (IDs, timestamps, exit codes only)
+
+Acceptance Criteria:
+✓ logs/events.jsonl appended on every meta write and stage transition
+✓ WAL write failure never aborts a state transition
+✓ meta.json has checksum field (blake3 of compact-JSON with checksum=None)
+✓ read_meta validates checksum and returns Err on mismatch
+✓ docs/storage-decision.md exists with format rationale
+✓ make check passes (test + clippy + fmt)
+✓ output/result.md documents corruption scenarios and mitigations
+
+=== STARTUP COMMAND ===
+
+To continue building this spec, run:
+
+  cd /Users/studio/bop
+  cargo build
+  cargo test
+
+Or use the orchestrator (if available):
+
+  source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 026 --parallel 1
+
+=== END SESSION 1 ===
+
+Session 2 (Coder - subtask-1-1):
+- ✅ Added blake3 = "1" dependency to crates/bop-core/Cargo.toml
+- ✅ Verified compilation: cargo build -p bop-core successful
+- ✅ blake3 v1.8.3 downloaded and compiled successfully
+- ✅ Committed changes: auto-claude: subtask-1-1 - Add blake3 dependency to bop-core/Cargo.toml
+- ✅ Updated implementation_plan.json: subtask-1-1 status = completed
+
+Phase 1 Progress: 1/1 subtasks complete (100%)
+
+=== END SESSION 2 ===
+Session 3 (Coder - subtask-2-1):
+- ✅ Added Event struct for JSONL WAL event records
+- ✅ Added append_event() function with best-effort error handling
+- ✅ Updated imports to include OpenOptions and Write
+- ✅ Implemented compact JSON serialization with 512-byte limit enforcement
+- ✅ Created logs/ directory automatically on first event
+- ✅ Used O_APPEND for atomic writes (no locking needed)
+- ✅ Added 5 comprehensive unit tests:
+  * append_event_creates_logs_dir_and_jsonl_file
+  * append_event_appends_multiple_events
+  * append_event_compact_json_no_pretty_print
+  * append_event_skips_none_fields
+  * append_event_rejects_oversized_records
+- ✅ Verified all tests pass: cargo test -p bop-core -- append_event
+- ✅ Verified compilation: cargo build -p bop-core successful
+- ✅ Committed changes: auto-claude: subtask-2-1 - Add append_event() function for JSONL WAL in lib.rs
+- ✅ Updated implementation_plan.json: subtask-2-1 status = completed
+
+Phase 2 Progress: 1/2 subtasks complete (50%)
+
+=== END SESSION 3 ===
+
+[2026-03-07 - subtask-2-2] Call append_event in write_meta after tmp+rename
+- Modified write_meta() in crates/bop-core/src/lib.rs
+- Added append_event call after successful persist() with meta_written event
+- Used best-effort pattern (let _ =) to ignore any WAL failures
+- Created test write_meta_appends_event_to_jsonl to verify:
+  - logs/events.jsonl is created when write_meta is called
+  - Event contains "meta_written" 
+  - Valid JSONL format (one line, ends with newline)
+- All 102 tests pass (was 101 before, added 1 new test)
+- Committed: d5a8bdc "auto-claude: subtask-2-2 - Call append_event in write_meta after tmp+rename"
+
+Status: ✅ COMPLETED
+Next: subtask-3-1 (Add checksum field to Meta struct)
+
+[2026-03-07 - subtask-3-3] Implement checksum validation in read_meta
+- Modified read_meta() in crates/bop-core/src/lib.rs
+- Added checksum validation logic:
+  1. Extract stored checksum from deserialized Meta
+  2. Clone Meta and set checksum to None
+  3. Reserialize to compact JSON with serde_json::to_vec
+  4. Compute blake3 hash of canonical bytes
+  5. Compare computed hash with stored checksum
+  6. Return Err with warning message on mismatch
+- Validation happens before hydrate_typed_metadata and meta.validate()
+- Created test read_meta_checksum to verify:
+  - read_meta succeeds with valid checksum (written by write_meta)
+  - read_meta fails when checksum is corrupted (manually modified)
+  - Error message contains "checksum mismatch"
+- All 104 tests pass (was 103 before, added 1 new test)
+- Committed: a1ae2f8 "auto-claude: subtask-3-3 - Implement checksum validation in read_meta"
+
+Status: ✅ COMPLETED
+Phase 3 Progress: 3/3 subtasks complete (100%)
+Next: subtask-4-1 (Add stage_transition event logging at all fs::rename points)
+
+## [2026-03-07 13:30] Subtask 4-1 COMPLETED: Add stage_transition event logging
+
+✓ Added stage_transition event logging at all 5 fs::rename points in dispatcher.rs:
+  1. pending → running (after line 341)
+  2. running → failed (workspace prepare failure, after line 372)
+  3. running → pending (no provider selected, after line 429)
+  4. running → pending (provider unreachable, after line 449)
+  5. running → done/pending/failed (job completion, after line 546)
+
+✓ Imported append_event and Event from bop_core
+✓ All event writes are best-effort using let _ = append_event(...)
+✓ Events include: ts, event="stage_transition", from, to, exit_code (when applicable)
+✓ Fixed 11 Meta initializers in cards.rs to include checksum: None field
+✓ Tests pass: cargo test -p bop --test dispatcher_harness (10/10 passed)
+
+Commit: ffb59e4 - "auto-claude: subtask-4-1 - Add stage_transition event logging at all fs::rename points"
+
+Next: Continue with remaining subtasks in Phase 4 (Dispatcher WAL Integration)
+
+## [2026-03-07 12:49] Subtask 5-1 COMPLETED: Write docs/storage-decision.md
+
+✓ Created comprehensive storage decision documentation (244 lines, 9.7KB)
+✓ Document structure:
+  - Decision Summary: Filesystem state machine + JSONL approach
+  - Design Constraints: Human-inspectable, tool-agnostic, zero daemon
+  - Why Filesystem State Machine: fs::rename atomicity, state-as-path
+  - Comparison table: fs::rename vs SQLite transactions
+  - Why JSONL Event Log: Append-only WAL, materialized view pattern
+  - Why Not SQLite: Binary format, schema migrations, locking complexity
+  - Why Not Dolt: Duplicate versioning layer, daemon requirement
+  - Portability and Zero-Daemon Philosophy
+  - When You WOULD Want a Database: Complex queries, fine-grained concurrency
+  - Scaling Considerations: 10K-100K+ cards with partitioning
+  - Related Designs: Maildir, Git, systemd, Kubernetes, Nix store
+
+✓ Key rationales covered:
+  - ACID via fs::rename (atomicity + durability from kernel)
+  - JSONL for human-readable audit trail
+  - meta.json with checksum for corruption detection
+  - No SQLite/Dolt/embedded DB (closed decision)
+  - Portability across POSIX systems
+  - Zero mandatory daemon philosophy
+
+✓ Follows same style as docs/format-storage-contract.md
+✓ Committed: 72ff9ff - "auto-claude: subtask-5-1 - Write docs/storage-decision.md"
+
+Next: subtask-5-2 (Write output/result.md with corruption scenarios)
+
+## [2026-03-07 12:53] Subtask 5-2 COMPLETED: Write output/result.md with corruption scenarios
+
+✓ Created comprehensive 385-line result documentation
+✓ Documented 4 corruption scenarios with mitigations:
+  1. Adapter crash mid-write → tmp+rename atomicity (spec 022)
+  2. Direct meta.json overwrite → Blake3 checksum validation
+  3. Filesystem/bit rot corruption → Same checksum detection
+  4. Race condition (dispatcher + adapter) → fs::rename atomicity + JSONL audit
+
+✓ Document structure:
+  - Summary of implementation
+  - Detailed corruption scenarios with code examples
+  - JSONL audit trail format (meta_written, stage_transition events)
+  - Storage format decision rationale (filesystem > SQLite/Dolt)
+  - Blake3 vs SHA256 comparison
+  - Testing summary (8 new unit tests, integration test coverage)
+  - Operations manual for corruption detection and recovery
+  - Acceptance criteria verification
+
+✓ Key content highlights:
+  - Code snippets for checksum computation and validation
+  - Event log examples with JSONL format
+  - Recovery procedures (bop recover, manual inspection, re-create)
+  - Prevention best practices
+  - Backward compatibility notes for checksum field
+
+✓ Follows same style as spec 023 and 015 result.md files
+✓ Committed: 71f2aa4 - "auto-claude: subtask-5-2 - Write output/result.md with corruption scenarios"
+
+Phase 5 Progress: 2/2 subtasks complete (100%)
+Next: subtask-6-1 (Run make check and verify acceptance criteria)
+
+## 2026-03-07 12:58 - subtask-6-1 COMPLETED
+
+**Task:** Run make check and verify acceptance criteria
+
+**Status:** ✅ COMPLETED
+
+**What was done:**
+1. Ran make check - found 2 failing tests related to orphan running card detection
+2. Root cause: write_meta now creates logs/events.jsonl automatically (added in this spec)
+3. Fixed orphan detection logic to ignore events.jsonl when checking for meaningful logs
+4. Re-ran make check - all tests pass (373 tests), clippy clean, fmt clean
+5. Verified all acceptance criteria met:
+   - logs/events.jsonl appended on every meta write and stage transition ✓
+   - WAL write failure never aborts state transitions ✓
+   - meta.json has checksum field (blake3 of compact JSON) ✓
+   - read_meta validates checksum and returns Err on mismatch ✓
+   - docs/storage-decision.md exists ✓
+   - output/result.md exists ✓
+   - make check passes ✓
+
+**Committed:** 57f7fb1 - Fix orphan detection to ignore events.jsonl
+
+**Spec 026 status:** ALL SUBTASKS COMPLETE - Ready for QA sign-off

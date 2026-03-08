@@ -1,0 +1,89 @@
+{
+  "session_number": 11,
+  "timestamp": "2026-03-07T09:25:06.252044+00:00",
+  "subtasks_completed": [
+    "subtask-4-3"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/dispatcher.rs",
+        "insight": "Connectivity probe integrated at optimal point: after metadata materialization but before expensive adapter spawn. This prevents resource waste on unreachable providers.",
+        "pattern": "Early failure detection in async workflow"
+      },
+      {
+        "file": "crates/bop-cli/src/dispatcher.rs",
+        "insight": "State machine consistency maintained: failed connectivity check triggers fs::rename(running \u2192 pending) with corresponding event log record and thumbnail re-render. Preserves idempotency.",
+        "pattern": "Atomic state transitions with audit trail"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Pre-flight async validation before expensive I/O",
+        "context": "provider_reachable() await gates run_card() invocation, reducing unnecessary subprocess spawns",
+        "applicability": "All adapter-launching dispatcher paths"
+      },
+      {
+        "pattern": "Graceful backoff via state machine",
+        "context": "Failed connectivity check returns card to pending state for automatic retry, no explicit retry logic needed",
+        "applicability": "Transient failure handling"
+      },
+      {
+        "pattern": "Metadata-first then action pattern",
+        "context": "Meta written to running_path immediately after state transition, consistency preserved via record() audit trail",
+        "applicability": "Fault-tolerant state management"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "provider_reachable() dependency not visible in diff",
+        "impact": "Function must be defined elsewhere; if missing, compile will fail. Implementation details (timeout, retry strategy) hidden.",
+        "mitigation": "Cross-reference implementation file; ensure timeout is reasonable for dispatcher critical path"
+      },
+      {
+        "gotcha": "Async/await in synchronous-looking dispatcher loop",
+        "impact": "provider_reachable() is awaited, so if it hangs, entire dispatcher stalls. No explicit timeout shown.",
+        "mitigation": "Add timeout wrapper around provider_reachable() call (e.g., tokio::time::timeout)"
+      },
+      {
+        "gotcha": "Requeueing without cooldown",
+        "impact": "Card immediately eligible for retry; rapid requeue spam possible if provider remains unreachable, causing high CPU",
+        "mitigation": "Consider jittered backoff or cooldown period before allowing re-entry to running state"
+      }
+    ],
+    "approach_outcome": "SUCCESS - Connectivity probe seamlessly integrated into pre-adapter-spawn gate. Two prior attempts also successful, indicating stable implementation. Resource waste from spawning adapters for unreachable providers is now prevented.",
+    "recommendations": [
+      {
+        "area": "observability",
+        "action": "Add counter metric for provider_reachable() failures, track by provider_name. Enable SLO monitoring on connectivity success rate."
+      },
+      {
+        "area": "reliability",
+        "action": "Wrap provider_reachable() in tokio::time::timeout() with sensible default (e.g., 5s). Log timeout as separate error path."
+      },
+      {
+        "area": "backoff strategy",
+        "action": "Consider optional exponential backoff or cooldown period before requeue. Prevents rapid retry storms during provider outages."
+      },
+      {
+        "area": "testing",
+        "action": "Add integration test: mock unreachable provider, verify card transitions running \u2192 pending and event log records correctly."
+      },
+      {
+        "area": "documentation",
+        "action": "Document connectivity check behavior in dispatcher comments and CONTRIBUTING guide. Clarify when connectivity failure triggers requeue vs. permanent failure."
+      }
+    ],
+    "subtask_id": "subtask-4-3",
+    "session_num": 11,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/dispatcher.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-4-3"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

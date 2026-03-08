@@ -1,0 +1,6 @@
+---
+source: crates/bop-cli/src/ui/mod.rs
+assertion_line: 732
+expression: content
+---
+bop · P:1 R:1 D:2 F:0 M:0 · normal

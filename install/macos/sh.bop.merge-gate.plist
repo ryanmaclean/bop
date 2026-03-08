@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>sh.bop.merge-gate</string>
+
+  <key>WatchPaths</key>
+  <array>
+    <string>REPLACE_WITH_REPO_ROOT/.cards/done</string>
+    <!-- Add entries for each team-* directory's done folder, e.g.: -->
+    <!-- <string>REPLACE_WITH_REPO_ROOT/.cards/team-arch/done</string> -->
+    <!-- <string>REPLACE_WITH_REPO_ROOT/.cards/team-cli/done</string> -->
+  </array>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/bop</string>
+    <string>merge-gate</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>REPLACE_WITH_REPO_ROOT</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>CARDS_DIR</key>
+    <string>REPLACE_WITH_REPO_ROOT/.cards</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:REPLACE_WITH_HOME/.cargo/bin</string>
+    <key>RUST_LOG</key>
+    <string>info</string>
+  </dict>
+
+  <key>KeepAlive</key>
+  <false/>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/bop-merge-gate.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/bop-merge-gate.err</string>
+
+  <key>HardResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key>
+    <integer>1024</integer>
+  </dict>
+
+  <key>SoftResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key>
+    <integer>512</integer>
+  </dict>
+</dict>
+</plist>

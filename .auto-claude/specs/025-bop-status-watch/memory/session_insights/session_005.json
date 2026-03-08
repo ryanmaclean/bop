@@ -1,0 +1,168 @@
+{
+  "session_number": 5,
+  "timestamp": "2026-03-07T12:05:48.938146+00:00",
+  "subtasks_completed": [
+    "subtask-1-4"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/list.rs",
+        "changes_summary": "Added cursor positioning and minimal redraw logic with two new utility functions and refactored list_cards_watch() event loop",
+        "functions_added": [
+          {
+            "name": "count_display_lines",
+            "purpose": "Calculate total output lines for cursor positioning",
+            "complexity": "O(n) filesystem traversal across states and team directories"
+          },
+          {
+            "name": "count_state_group_lines",
+            "purpose": "Count lines for single state group (header + cards + blank line)",
+            "complexity": "O(n) where n is card count in state directory"
+          }
+        ],
+        "functions_modified": [
+          {
+            "name": "list_cards_watch",
+            "key_changes": [
+              "Replaced full-screen clear (\\x1b[2J\\x1b[H) with cursor-up repositioning (\\x1b[{}A)",
+              "Added CardStats tracking (prev_stats) for change detection",
+              "Added line count tracking (prev_line_count) for cursor positioning",
+              "Implements stats-based minimal redraw: only redraw if total or by_state changed",
+              "Re-queries terminal width on every redraw (explicitly not cached)"
+            ]
+          }
+        ],
+        "imports_added": [
+          "io self from std::io",
+          "util from crate"
+        ]
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Minimal redraw via change detection",
+        "description": "Compares current CardStats with previous stats; only triggers redraw if total count or per-state counts differ",
+        "code_evidence": "stats_changed = prev_stats.as_ref().map(|prev| prev.total != current_stats.total || prev.by_state != current_stats.by_state).unwrap_or(true)"
+      },
+      {
+        "pattern": "Incremental cursor repositioning",
+        "description": "Uses ANSI escape \\x1b[{}A to move cursor up N lines instead of clearing entire screen, then rewrites output",
+        "code_evidence": "print!(\"\\x1b[{}A\", prev_line_count); io::stdout().flush().ok();"
+      },
+      {
+        "pattern": "Dynamic terminal width on every redraw",
+        "description": "Calls util::term_width() per redraw cycle with explicit comment 'do not cache' to handle terminal resize events",
+        "code_evidence": "let _term_width = util::term_width();"
+      },
+      {
+        "pattern": "Two-level state tracking for rendering",
+        "description": "Maintains both prev_stats (for change detection) and prev_line_count (for next cursor positioning) across loop iterations",
+        "code_evidence": "prev_stats: Option<CardStats>, prev_line_count: usize"
+      },
+      {
+        "pattern": "Recursive directory hierarchy scanning",
+        "description": "count_display_lines() handles root state directories and team-* subdirectories with sorted iteration",
+        "code_evidence": "lines iterate states, within each state scan root + all team-* dirs, sort team_dirs for consistent ordering"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Terminal width must not be cached",
+        "risk": "Previous versions may have cached term_width, causing display corruption on terminal resize during watch loop",
+        "mitigation": "Explicit call with comment 'do not cache' on every redraw; variable bound as _term_width (possible side-effect usage)"
+      },
+      {
+        "gotcha": "Cursor-up assumes no scrollback during partial redraw",
+        "risk": "If list_cards() output is shorter than previous frame, orphaned lines remain visible below output",
+        "mitigation": "Relies on list_cards() overwriting all previous lines; no explicit clearing of extra lines if output shrinks"
+      },
+      {
+        "gotcha": "Stats equality check must handle first render",
+        "risk": "unwrap_or(true) ensures first render always happens, but if prev_stats is None on first event, logic may be subtle",
+        "mitigation": "Pattern .map().unwrap_or(true) correctly forces redraw when prev_stats is None"
+      },
+      {
+        "gotcha": "Terminal width variable unused in code",
+        "risk": "_term_width is queried but not stored or used; may indicate unfinished refactor or future feature",
+        "mitigation": "Named with underscore prefix; verify if side effects are intentional or if variable should be used"
+      },
+      {
+        "gotcha": "No bounds checking on cursor-up",
+        "risk": "If prev_line_count exceeds terminal height, cursor moves past top of visible area into scrollback",
+        "mitigation": "None implemented; assumes prev_line_count <= terminal height in practice"
+      },
+      {
+        "gotcha": "list_cards() errors do not stop watch loop",
+        "risk": "If list_cards() fails, display becomes stale; loop continues silently until next stats change",
+        "mitigation": "Error logged to stderr but watch loop continues; no recovery mechanism"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "goal_achieved": "Cursor positioning and minimal redraw logic implemented in list_cards_watch()",
+      "key_improvements": [
+        "Eliminates full-screen flicker (was \\x1b[2J\\x1b[H, now incremental cursor-up)",
+        "Reduces CPU churn via stats-based change detection (only redraw when cards change)",
+        "Handles terminal resize dynamically (re-query width every cycle)",
+        "Maintains watch loop responsiveness (non-blocking, event-driven)"
+      ],
+      "commit_message": "be2efed auto-claude: subtask-1-4 - Implement cursor positioning and minimal redraw logic"
+    },
+    "recommendations": [
+      {
+        "priority": "MEDIUM",
+        "category": "Performance",
+        "recommendation": "Batch stdout flushes per redraw cycle",
+        "rationale": "Current code has separate flush after cursor-up; could defer to single flush after list_cards() completes",
+        "implementation": "Move all print!() calls before flush, or use BufWriter wrapper"
+      },
+      {
+        "priority": "LOW",
+        "category": "Efficiency",
+        "recommendation": "Cache count_display_lines result when stats unchanged",
+        "rationale": "count_display_lines and count_state_group_lines do full directory scans on every event; if stats are identical, line count will be identical",
+        "implementation": "Cache line count result, invalidate only when stats change"
+      },
+      {
+        "priority": "HIGH",
+        "category": "Robustness",
+        "recommendation": "Implement minimum output height guarantee",
+        "rationale": "Cursor-up logic has no safety check; if prev_line_count > terminal height, cursor goes into scrollback",
+        "implementation": "Clamp prev_line_count to min(term_height - 1, prev_line_count) before cursor-up"
+      },
+      {
+        "priority": "MEDIUM",
+        "category": "Correctness",
+        "recommendation": "Clarify intent of unused _term_width variable",
+        "rationale": "Variable is queried but never used; unclear if this is intentional (side effects) or incomplete refactor",
+        "implementation": "Add doc comment explaining if this is for side effects, or use the value in output logic"
+      },
+      {
+        "priority": "MEDIUM",
+        "category": "Resilience",
+        "recommendation": "Add recovery mechanism for stale display on list_cards() error",
+        "rationale": "If list_cards() fails, display becomes stale; loop continues until next stats change, which may be long",
+        "implementation": "On error, force full redraw (clear + reprint) as fallback, or trigger stats recalc to detect change"
+      },
+      {
+        "priority": "LOW",
+        "category": "Testing",
+        "recommendation": "Test with rapid terminal resizes during watch loop",
+        "rationale": "Term width re-query logic is correct but behavior under rapid resize stress is untested",
+        "implementation": "Add integration test that spawns watch loop and programmatically resizes pty"
+      }
+    ],
+    "subtask_id": "subtask-1-4",
+    "session_num": 5,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/list.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-4"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

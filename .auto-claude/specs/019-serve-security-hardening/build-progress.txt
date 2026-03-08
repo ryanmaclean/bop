@@ -1,0 +1,242 @@
+=== AUTO-BUILD PROGRESS ===
+
+Project: bop serve security hardening
+Workspace: managed by orchestrator
+Started: 2026-03-06
+
+Workflow Type: simple
+Rationale: Single-service security improvements with clear, independent fixes to the bop serve HTTP endpoint. No multi-phase dependencies or complex integration - just straightforward security hardening of existing code in crates/bop-cli/src/serve.rs.
+
+Session 1 (Planner):
+- Created implementation_plan.json
+- Phases: 1
+- Total subtasks: 8
+- Created init.sh
+- Created context.json
+
+Phase Summary:
+- Security Hardening Implementation: 8 subtasks, no dependencies
+  1. Add security dependencies (subtle, tower, tower-governor)
+  2. Constant-time token comparison
+  3. Mandatory authentication with token generation
+  4. 64 KiB body size limit
+  5. Enhanced card ID sanitization (reject .., %, null bytes)
+  6. Security response headers middleware
+  7. Rate limiting (10 req/min per IP)
+  8. Verification (make check + result.md)
+
+Services Involved:
+- bop: Rust CLI tool with HTTP serve functionality
+
+Parallelism Analysis:
+- Max parallel phases: 1
+- Recommended workers: 1
+- Parallel groups: None
+- Reasoning: Security fixes are sequential - dependencies must be added first, then auth fixes build on each other, then middleware can be added. Small enough scope that sequential execution is clearer and safer.
+
+Security Vulnerabilities Being Fixed:
+1. Timing attack vulnerability - auth token comparison reveals token length/content via timing
+2. Unauthenticated server - BOP_SERVE_TOKEN is optional, server runs without auth by default
+3. DoS via huge payloads - no body size limit allows unbounded memory consumption
+4. Path traversal - card ID validation misses encoded separators (%2F, %5C), .., null bytes
+5. Missing security headers - responses lack X-Content-Type-Options, X-Frame-Options, Cache-Control
+6. No rate limiting - endpoint can be flooded by attackers
+
+Risk Level: HIGH
+- Security vulnerabilities are critical (auth bypass, DoS, path traversal)
+- Requires constant-time comparison to prevent timing attacks
+- Must validate all attack vectors with unit tests
+- Changes affect production HTTP server endpoint
+
+Acceptance Criteria:
+✓ Token comparison is constant-time (subtle crate or manual byte loop)
+✓ Server refuses to start without a token (generates random token if BOP_SERVE_TOKEN unset)
+✓ Body > 64 KiB returns 413 Payload Too Large
+✓ Card IDs with '..' or '%2F' or null bytes return 400 Bad Request
+✓ Security headers present on all responses
+✓ Rate limiting: >10 req/min per IP returns 429 Too Many Requests
+✓ make check passes (cargo test + clippy + fmt)
+✓ output/result.md exists documenting all 7 fixes
+
+=== STARTUP COMMAND ===
+
+To continue building this spec, run:
+
+  source auto-claude/.venv/bin/activate && python auto-claude/run.py --spec 019 --direct
+
+Or with explicit path:
+
+  cd /Users/studio/bop
+  source auto-claude/.venv/bin/activate
+  python auto-claude/run.py --spec 019 --direct
+
+=== FILES CREATED IN THIS SESSION ===
+
+Planning artifacts (gitignored, local only):
+- .auto-claude/specs/019-serve-security-hardening/context.json
+- .auto-claude/specs/019-serve-security-hardening/implementation_plan.json
+- .auto-claude/specs/019-serve-security-hardening/init.sh
+- .auto-claude/specs/019-serve-security-hardening/build-progress.txt
+
+These files are NOT committed to git - they are managed locally by the orchestrator.
+
+=== NEXT SESSION: CODER AGENT ===
+
+The coder agent will:
+1. Read implementation_plan.json
+2. Execute subtasks sequentially (subtask-1-1 through subtask-1-8)
+3. Each subtask = one focused change + verification
+4. Commit code changes (NOT spec files) to git
+5. Mark subtasks complete in implementation_plan.json as they finish
+
+=== END SESSION 1 ===
+
+=== SESSION 2: IMPLEMENTATION (2026-03-06) ===
+
+Subtask: subtask-1-1-dependencies - Add security dependencies to Cargo.toml
+Status: ✓ COMPLETED
+
+Changes:
+- Added subtle = "2" to dependencies (for constant-time token comparison)
+- Moved tower from dev-dependencies to dependencies (needed for security headers middleware)
+- Added tower_governor = "0.4" to dependencies (for rate limiting)
+
+Verification:
+- cargo check --package bop: ✓ PASSED (Finished in 11.06s)
+- Downloaded and locked 35 new packages
+- All dependencies resolved successfully
+
+Commit: 45408e7 - "auto-claude: subtask-1-1-dependencies - Add security dependencies to Cargo.toml"
+
+Subtask: subtask-1-2-constant-time-auth - Replace timing-vulnerable token comparison with constant-time comparison
+Status: ✓ COMPLETED
+
+Changes:
+- Added use subtle::ConstantTimeEq import to serve.rs
+- Replaced timing-vulnerable string comparison (auth != bearer) with constant-time byte comparison
+- New implementation: auth.as_bytes().ct_eq(bearer.as_bytes()).unwrap_u8() != 1
+- Prevents timing attacks by ensuring comparison time is independent of token content
+
+Security Impact:
+- FIXED: Timing attack vulnerability CVE-worthy (CWE-208: Observable Timing Discrepancy)
+- Before: String comparison leaked information about where tokens differ via execution time
+- After: Constant-time comparison reveals no information about token content through timing
+
+Verification:
+- cargo test --package bop test_token_auth_required: ✓ PASSED
+- All existing tests pass including auth tests with correct/incorrect/missing tokens
+- Constant-time property verified via subtle crate ct_eq implementation
+
+Commit: 2c6bb71 - auto-claude: subtask-1-2-constant-time-auth - Replace timing-vulnerable token comparison with constant-time comparison
+
+Subtask: subtask-1-3-mandatory-auth - Make authentication mandatory
+Status: ✓ COMPLETED
+
+Changes:
+- Changed AppState.token from Option<String> to String (non-optional)
+- Added rand crate for secure token generation
+- Modified run_serve to generate 32-character alphanumeric token when BOP_SERVE_TOKEN not set
+- Token generation uses rand::thread_rng() with Alphanumeric distribution for cryptographic security
+- Added helpful startup message showing generated token and example curl command
+- Removed optional token check - all requests now require bearer token authentication
+
+Security Impact:
+- FIXED: Unauthenticated server vulnerability (CWE-306: Missing Authentication)
+- Before: Server could run with no authentication if BOP_SERVE_TOKEN not set
+- After: Authentication is mandatory - server generates secure random token if env var missing
+- Random tokens are cryptographically strong (32 alphanumeric chars = ~190 bits entropy)
+
+Verification:
+- cargo test --package bop: ✓ PASSED (367 tests)
+- All serve module tests pass with mandatory auth
+- Integration test serve_smoke updated and passing
+- Verified token generation produces different tokens on each run
+
+Commit: c26abf4 - auto-claude: subtask-1-3-mandatory-auth - Make authentication mandatory
+
+Subtask: subtask-1-4-body-size-limit - Add 64 KiB request body size limit middleware
+Status: ✓ COMPLETED
+
+Changes:
+- Added .layer(axum::extract::DefaultBodyLimit::max(65536)) to Router in run_serve()
+- Also added same layer to test helper make_app() for consistency
+- Middleware placed between .route() and .with_state() calls
+- 64 KiB = 65536 bytes enforced on all incoming request bodies
+
+Security Impact:
+- FIXED: DoS via unbounded request payload (CWE-400: Uncontrolled Resource Consumption)
+- Before: No size limit - attackers could send multi-GB payloads to consume memory/disk
+- After: Requests >64 KiB automatically rejected with 413 Payload Too Large
+- Protects against memory exhaustion and disk space DoS attacks
+
+Verification:
+- cargo check: ✓ PASSED
+- cargo test serve: ✓ PASSED (8 tests passed, 1 ignored)
+- Integration test serve_smoke: ✓ PASSED
+- DefaultBodyLimit middleware correctly applied to both production and test routers
+
+Commit: ab7580a - auto-claude: subtask-1-4-body-size-limit - Add 64 KiB request body size limit middleware
+
+Subtask: subtask-1-5-card-id-sanitization - Enhance card ID validation to reject .., %, null bytes, and non-alphanumeric chars
+Status: ✓ COMPLETED
+
+Changes:
+- Added validation to reject '..' sequences (path traversal attempts like 'test..card')
+- Added validation to reject '%' character (URL encoding exploits like 'test%2Fcard')
+- Added validation to reject null bytes ('\0')
+- Restricted card IDs to alphanumeric characters, dash, underscore, and dot only
+- Each validation returns HTTP 400 with descriptive error message
+
+Security Impact:
+- FIXED: Path traversal vulnerability (CWE-22: Improper Limitation of a Pathname to a Restricted Directory)
+- FIXED: URL encoding attacks (CWE-173: Improper Handling of Alternate Encoding)
+- FIXED: Null byte injection (CWE-158: Improper Neutralization of Null Byte or NUL Character)
+- Before: Card IDs only validated for '/' and '\' - could contain encoded separators, .., %, null bytes
+- After: Comprehensive validation prevents path traversal, encoding attacks, and non-printable characters
+- Protects filesystem from unauthorized access via crafted card IDs
+
+Test Coverage:
+- Added test_serve_rejects_path_traversal: verifies 'test..card' is rejected with 400 and error message contains '..'
+- Added test_serve_rejects_url_encoding: verifies 'test%2F%2Fmalicious' is rejected with 400 and error mentions '%'
+- Added test_serve_rejects_invalid_chars: verifies 'test@card#123' with special chars is rejected
+- Added test_serve_accepts_valid_chars: verifies 'test-card_123.v2' with valid chars is accepted
+- All 5 serve_smoke tests pass
+
+Verification:
+- cargo test --package bop: ✓ PASSED (371 tests total, 5/5 serve_smoke tests)
+- All security validation rules working correctly
+- No regressions in existing functionality
+
+Commit: 7dcd152 - auto-claude: subtask-1-5-card-id-sanitization - Enhance card ID validation to reject .., %, null bytes, and non-alphanumeric chars
+
+Subtask: subtask-1-6-security-headers - Add security response headers middleware
+Status: ✓ COMPLETED
+
+Changes:
+- Added imports for middleware and header types from axum
+- Created add_security_headers() middleware function that sets three security headers on all responses
+- Added X-Content-Type-Options: nosniff (prevents MIME type sniffing attacks)
+- Added X-Frame-Options: DENY (prevents clickjacking attacks)  
+- Added Cache-Control: no-store (prevents caching of sensitive responses)
+- Applied middleware via .layer(middleware::from_fn(add_security_headers)) to Router
+- Added middleware to both production Router in run_serve() and test make_app()
+
+Security Impact:
+- FIXED: Missing security headers vulnerability (OWASP A05:2021 Security Misconfiguration)
+- X-Content-Type-Options: nosniff - Prevents browsers from MIME-sniffing responses (CWE-430)
+- X-Frame-Options: DENY - Prevents clickjacking attacks by disallowing iframe embedding (CWE-1021)
+- Cache-Control: no-store - Prevents caching of authentication tokens and sensitive data (CWE-524)
+- All three headers now present on every response from the server
+
+Test Coverage:
+- Added test_security_headers() test that verifies all three headers are present in responses
+- Test makes a POST request and validates header values: nosniff, DENY, no-store
+- All 7 serve module tests pass (6 passed, 1 ignored flaky smoke test)
+
+Verification:
+- cargo build --package bop: ✓ PASSED
+- cargo test --package bop serve::tests: ✓ PASSED (7 tests: 6 passed, 1 ignored)
+- test_security_headers validates all three security headers are present with correct values
+
+Commit: 7c2518e - auto-claude: subtask-1-6-security-headers - Add security response headers middleware
+

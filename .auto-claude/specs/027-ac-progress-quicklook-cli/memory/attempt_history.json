@@ -1,0 +1,177 @@
+{
+  "subtasks": {
+    "subtask-1-1": {
+      "attempts": [
+        {
+          "session": 2,
+          "timestamp": "2026-03-07T23:37:10.189274+00:00",
+          "approach": "Implemented: Add ac_spec_id field to Meta struct with serde annotation, add to Default impl, write round-trip tes",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-2-1": {
+      "attempts": [
+        {
+          "session": 3,
+          "timestamp": "2026-03-07T23:41:38.914734+00:00",
+          "approach": "Implemented: Create crates/bop-cli/src/acplan.rs with AcPlan/AcPhase/AcSubtask structs (serde Deserialize), parse",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-2-2": {
+      "attempts": [
+        {
+          "session": 4,
+          "timestamp": "2026-03-07T23:43:44.844041+00:00",
+          "approach": "Implemented: Add find_git_root(start_dir) and resolve_spec_dir(git_root, ac_spec_id) functions to acplan.rs. find",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-2-3": {
+      "attempts": [
+        {
+          "session": 1,
+          "timestamp": "2026-03-08T00:16:17.534991+00:00",
+          "approach": "Implemented: Add plan_summary(plan) function returning (completed, total, current_phase_name, current_phase_frac)",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-1": {
+      "attempts": [
+        {
+          "session": 2,
+          "timestamp": "2026-03-08T00:20:21.940432+00:00",
+          "approach": "Implemented: Add ac_subtasks_done: Option<usize> and ac_subtasks_total: Option<usize> fields to CardView in rende",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-2": {
+      "attempts": [
+        {
+          "session": 3,
+          "timestamp": "2026-03-08T00:33:06.382101+00:00",
+          "approach": "Implemented: Update render_progress() in full.rs (and other renderers that support it) to show 'N/T' count when a",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-3": {
+      "attempts": [
+        {
+          "session": 4,
+          "timestamp": "2026-03-08T00:35:46.650302+00:00",
+          "approach": "Implemented: Wire plan enrichment into collect_card_views() in list.rs: after from_meta(), if meta has ac_spec_id",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-4": {
+      "attempts": [
+        {
+          "session": 5,
+          "timestamp": "2026-03-08T00:39:32.495331+00:00",
+          "approach": "Implemented: Update list_cards_watch() to also reload implementation_plan.json on change events. The fs watcher a",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-4-1": {
+      "attempts": [
+        {
+          "session": 6,
+          "timestamp": "2026-03-08T00:42:06.065421+00:00",
+          "approach": "Implemented: Add acSpecId: String? to BopCardMeta with CodingKey 'ac_spec_id'. Add AcPlan, AcPhase, AcSubtask pri",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-4-2": {
+      "attempts": [
+        {
+          "session": 7,
+          "timestamp": "2026-03-08T00:44:25.630234+00:00",
+          "approach": "Implemented: Implement git root discovery: walk parent dirs from cardURL max 6 levels looking for .auto-claude di",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-4-3": {
+      "attempts": [
+        {
+          "session": 8,
+          "timestamp": "2026-03-08T00:48:25.245083+00:00",
+          "approach": "Implemented: Implement planTab(@ViewBuilder) method in BopCardPreview: overall progress bar (same style as subtas",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-5-1": {
+      "attempts": [
+        {
+          "session": 9,
+          "timestamp": "2026-03-08T00:51:58.733338+00:00",
+          "approach": "Implemented: In dispatch.nu run_spec function (after write_approval), add logic to search .cards/ state dirs for ",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-6-1": {
+      "attempts": [
+        {
+          "session": 10,
+          "timestamp": "2026-03-08T00:54:41.813111+00:00",
+          "approach": "Implemented: Run make check (cargo test + clippy + fmt --check). Fix any warnings or failures.",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-6-2": {
+      "attempts": [
+        {
+          "session": 11,
+          "timestamp": "2026-03-08T00:57:21.642463+00:00",
+          "approach": "Implemented: Create output/result.md with: (1) ASCII screenshot showing bop list output with the new AC progress ",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    }
+  },
+  "stuck_subtasks": [],
+  "metadata": {
+    "created_at": "2026-03-07T23:28:15.851893+00:00",
+    "last_updated": "2026-03-08T00:57:21.642493+00:00"
+  }
+}

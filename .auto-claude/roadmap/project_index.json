@@ -1,0 +1,153 @@
+{
+  "project_root": "/Users/studio/bop",
+  "project_type": "single",
+  "services": {
+    "main": {
+      "name": "main",
+      "path": "/Users/studio/bop",
+      "language": "Rust",
+      "framework": null,
+      "type": "unknown",
+      "package_manager": "cargo",
+      "dependency_locations": [
+        {
+          "type": "cargo_target",
+          "path": "target",
+          "exists": true
+        }
+      ],
+      "environment": {
+        "variables": {
+          "LINEAR_API_KEY": {
+            "value": "<REDACTED>",
+            "source": "../.env",
+            "type": "string",
+            "sensitive": true,
+            "required": false
+          }
+        },
+        "required_count": 0,
+        "optional_count": 0,
+        "detected_count": 1
+      },
+      "api": {
+        "routes": [
+          {
+            "path": "/",
+            "methods": [
+              "GET"
+            ],
+            "file": "research/vendor/bolt.diy/app/lib/runtime/message-parser.spec.ts",
+            "framework": "Express",
+            "requires_auth": false
+          },
+          {
+            "path": "/cards/new",
+            "methods": [
+              "POST"
+            ],
+            "file": "crates/bop-cli/src/serve.rs",
+            "framework": "Rust",
+            "requires_auth": false
+          },
+          {
+            "path": "/cards/new",
+            "methods": [
+              "POST"
+            ],
+            "file": "crates/bop-cli/src/serve.rs",
+            "framework": "Rust",
+            "requires_auth": false
+          },
+          {
+            "path": "/cards/new",
+            "methods": [
+              "POST"
+            ],
+            "file": "crates/bop-cli/src/serve.rs",
+            "framework": "Rust",
+            "requires_auth": false
+          },
+          {
+            "path": "/cards/new",
+            "methods": [
+              "POST"
+            ],
+            "file": ".worktrees/job-bop-serve/crates/bop-cli/src/serve.rs",
+            "framework": "Rust",
+            "requires_auth": false
+          },
+          {
+            "path": "/cards/new",
+            "methods": [
+              "POST"
+            ],
+            "file": ".worktrees/job-bop-serve/crates/bop-cli/src/serve.rs",
+            "framework": "Rust",
+            "requires_auth": false
+          },
+          {
+            "path": "/cards/new",
+            "methods": [
+              "POST"
+            ],
+            "file": ".worktrees/job-bop-serve/crates/bop-cli/src/serve.rs",
+            "framework": "Rust",
+            "requires_auth": false
+          },
+          {
+            "path": "/cards/new",
+            "methods": [
+              "POST"
+            ],
+            "file": ".worktrees/job-bop-serve-qa/crates/bop-cli/src/serve.rs",
+            "framework": "Rust",
+            "requires_auth": false
+          },
+          {
+            "path": "/cards/new",
+            "methods": [
+              "POST"
+            ],
+            "file": ".worktrees/job-bop-serve-qa/crates/bop-cli/src/serve.rs",
+            "framework": "Rust",
+            "requires_auth": false
+          },
+          {
+            "path": "/cards/new",
+            "methods": [
+              "POST"
+            ],
+            "file": ".worktrees/job-bop-serve-qa/crates/bop-cli/src/serve.rs",
+            "framework": "Rust",
+            "requires_auth": false
+          }
+        ],
+        "total_routes": 10,
+        "methods": [
+          "POST",
+          "GET"
+        ],
+        "protected_routes": []
+      }
+    }
+  },
+  "infrastructure": {
+    "ci": "GitHub Actions",
+    "ci_workflows": [
+      "release.yml",
+      "repo-health.yml",
+      "ci.yml"
+    ]
+  },
+  "conventions": {},
+  "dependency_locations": [
+    {
+      "type": "cargo_target",
+      "path": "target",
+      "exists": true,
+      "service": "main",
+      "package_manager": "cargo"
+    }
+  ]
+}

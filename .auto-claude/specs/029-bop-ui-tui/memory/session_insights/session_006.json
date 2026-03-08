@@ -1,0 +1,207 @@
+{
+  "session_number": 6,
+  "timestamp": "2026-03-07T19:26:53.492159+00:00",
+  "subtasks_completed": [
+    "subtask-2-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "path": "crates/bop-cli/src/ui/widgets/kanban.rs",
+        "purpose": "Primary widget implementation for horizontal kanban layout",
+        "key_components": [
+          "KanbanWidget struct",
+          "render with Layout::horizontal",
+          "collapse logic for 0-card columns",
+          "WIP limit tracking",
+          "card row rendering with glyph/id/provider/elapsed"
+        ],
+        "patterns": "ratatui widget trait, Layout-based column division, ListState for focus management"
+      },
+      {
+        "path": "crates/bop-cli/src/ui/widgets/mod.rs",
+        "purpose": "Widget module re-exports",
+        "key_components": [
+          "Re-export kanban module"
+        ],
+        "patterns": "Standard Rust module organization"
+      },
+      {
+        "path": "crates/bop-cli/src/ui/app.rs",
+        "purpose": "Application state and data structures",
+        "key_components": [
+          "App struct",
+          "KanbanColumn struct",
+          "AppEvent enum",
+          "Mode enum",
+          "WIP limit config reading"
+        ],
+        "patterns": "State machine with mode tracking, filesystem card reading integration"
+      },
+      {
+        "path": ".auto-claude/specs/029-bop-ui-tui/implementation_plan.json",
+        "purpose": "Comprehensive specification document for full TUI implementation",
+        "key_components": [
+          "Phase 1-4 breakdown",
+          "14 subtasks with dependencies",
+          "verification commands",
+          "patterns_from references"
+        ],
+        "patterns": "Detailed specification with status tracking, dependency graph across phases"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "name": "Ratatui Layout Strategy",
+        "description": "Use Layout::horizontal to divide body width equally among non-collapsed columns; collapsed columns render as 3-char dividers with state glyph only",
+        "usage": "KanbanWidget renders kanban board columns with dynamic width allocation"
+      },
+      {
+        "name": "RAII Terminal Guard",
+        "description": "TerminalGuard struct manages alternate screen, raw mode, and panic hook restoration via Drop trait",
+        "usage": "Ensures terminal cleanup on panic or normal exit; decouples setup/cleanup logic"
+      },
+      {
+        "name": "Event-Driven Architecture",
+        "description": "Three concurrent background tasks (crossterm reader, tick timer, filesystem watcher) send events through tokio::sync::mpsc unbounded channel",
+        "usage": "Enables responsive async TUI with filesystem change detection"
+      },
+      {
+        "name": "Mode-Based State Machine",
+        "description": "App::mode field (Normal, Filter, ActionPopup, Detail, LogTail, NewCard, Subshell) controls rendering and input handling",
+        "usage": "Context-sensitive keybinding hints, overlay rendering, input filtering per mode"
+      },
+      {
+        "name": "Three-Zone Vertical Layout",
+        "description": "Header (2 rows) + Body (fill) + Footer (1 row) via Layout::vertical",
+        "usage": "Separates concerns: status/provider info, main kanban view, keybinding hints"
+      },
+      {
+        "name": "Collapsed Column Glyph Logic",
+        "description": "Empty columns (0 cards) render as narrow 3-char dividers with state glyph (\u00b7, \u2699, \u2713, \u2717, ~)",
+        "usage": "Reduces visual clutter while maintaining state visibility; columns expand on new card arrival"
+      },
+      {
+        "name": "WIP Limit Color Coding",
+        "description": "Running column shows count ratio (N/M); amber at >=75%, red at 100%",
+        "usage": "Visual feedback for workflow bottleneck; yellow-bordered focused column"
+      },
+      {
+        "name": "Card Row Format Strategy",
+        "description": "Single-line format: glyph + id/title + provider + elapsed; Running cards use two-line format with progress bar + phase",
+        "usage": "Density-efficient display; distinguishes running work from queued/completed"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "Terminal requires real TTY for crossterm",
+        "context": "Pipe-based verification returns 'Device not configured' in non-interactive context",
+        "mitigation": "Accept TTY-only verification; cannot test rendering via pipes"
+      },
+      {
+        "issue": "Running cards require two-line rendering with progress bar",
+        "context": "Adds layout complexity compared to single-line queued/completed cards",
+        "mitigation": "Separate render logic for running vs non-running cards in KanbanWidget"
+      },
+      {
+        "issue": "WIP limits read from providers.json config; must be consistent with dispatcher",
+        "context": "Mismatch between TUI display and actual limits causes confusion",
+        "mitigation": "Ensure providers.json is canonical; read once per refresh event"
+      },
+      {
+        "issue": "Column width allocation must handle integer rounding with odd widths",
+        "context": "Layout::horizontal divide may not distribute exactly with odd terminal widths",
+        "mitigation": "Assign extra space to leftmost columns; handle 4-column case with widths like [40,40,40,41]"
+      },
+      {
+        "issue": "ListState focus tracking requires coordination with column navigation",
+        "context": "Switching columns (h/l) must preserve per-column ListState, not reset selection",
+        "mitigation": "Store ListState per KanbanColumn; restore on col_focus change"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "implementation_status": {
+      "phase_1_completed": true,
+      "phase_1_subtasks": [
+        "subtask-1-1 completed",
+        "subtask-1-2 completed",
+        "subtask-1-3 completed",
+        "subtask-1-4 completed"
+      ],
+      "phase_2_subtask_2_1_status": "in_progress",
+      "total_tests_passing": 692
+    },
+    "recommendations": [
+      {
+        "priority": "HIGH",
+        "task": "Complete subtask-2-2 (input.rs key handling)",
+        "rationale": "h/l/j/k navigation is core UX; must wire before overlays",
+        "depends_on": "subtask-2-1 (KanbanWidget)"
+      },
+      {
+        "priority": "HIGH",
+        "task": "Implement card refresh on AppEvent::Cards",
+        "rationale": "TUI must reflect dispatcher filesystem changes in real-time",
+        "depends_on": "Event loop watcher task completion"
+      },
+      {
+        "priority": "MEDIUM",
+        "task": "Add snapshot tests for KanbanWidget rendering",
+        "rationale": "Ratatui widgets render to Frame; use insta for visual regression testing",
+        "patterns": [
+          "insta::assert_snapshot!",
+          "test with mock Terminal",
+          "frame buffer capture"
+        ]
+      },
+      {
+        "priority": "MEDIUM",
+        "task": "Profile column width calculation for large terminal (>200 cols)",
+        "rationale": "5+ columns with equal width may waste space; consider responsive breakpoints",
+        "approach": "If width > 200 and columns <= 3, allocate wider; if >= 4, narrow dividers"
+      },
+      {
+        "priority": "MEDIUM",
+        "task": "Add integration test: kanban renders all 5 states with varying card counts",
+        "rationale": "Verify collapse logic, WIP display, focused border, elapsed time formatting",
+        "test_cases": [
+          "empty columns",
+          "full running column",
+          "mixed states",
+          "narrow terminal <80 cols"
+        ]
+      },
+      {
+        "priority": "LOW",
+        "task": "Optimize ListState updates to avoid full re-renders",
+        "rationale": "Reduce flicker on j/k within large columns (100+ cards)",
+        "approach": "Lazy ListState::scroll_down/up instead of recreating selection"
+      }
+    ],
+    "metrics": {
+      "files_created": 5,
+      "files_modified": 2,
+      "commit_hash": "64f3b2c",
+      "test_coverage": 692,
+      "phases_complete": 1,
+      "phases_total": 4,
+      "subtasks_complete": 4,
+      "subtasks_total_in_spec": 14
+    },
+    "subtask_id": "subtask-2-1",
+    "session_num": 6,
+    "success": true,
+    "changed_files": [
+      ".auto-claude/specs/029-bop-ui-tui/implementation_plan.json",
+      "crates/bop-cli/src/ui/app.rs",
+      "crates/bop-cli/src/ui/mod.rs",
+      "crates/bop-cli/src/ui/widgets/kanban.rs",
+      "crates/bop-cli/src/ui/widgets/mod.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-2-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

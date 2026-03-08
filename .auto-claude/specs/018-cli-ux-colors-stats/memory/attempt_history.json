@@ -1,0 +1,189 @@
+{
+  "subtasks": {
+    "subtask-1-1": {
+      "attempts": [
+        {
+          "session": 2,
+          "timestamp": "2026-03-07T04:42:58.336688+00:00",
+          "approach": "Implemented: Extract color constants from gantt.rs to a shared module or reuse directly",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-2": {
+      "attempts": [
+        {
+          "session": 3,
+          "timestamp": "2026-03-07T04:46:53.527370+00:00",
+          "approach": "Implemented: Apply color to state group headers in print_state_group() function",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-3": {
+      "attempts": [
+        {
+          "session": 4,
+          "timestamp": "2026-03-07T04:48:31.414772+00:00",
+          "approach": "Implemented: Add visual separators (thin lines) between state groups",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-4": {
+      "attempts": [
+        {
+          "session": 5,
+          "timestamp": "2026-03-07T04:50:16.801291+00:00",
+          "approach": "Implemented: Update state group headers to show count with bullet: '\u25cf running (2)'",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-2-1": {
+      "attempts": [
+        {
+          "session": 6,
+          "timestamp": "2026-03-07T04:54:18.622401+00:00",
+          "approach": "Implemented: Add stats calculation function: count cards by state, compute avg duration",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-2-2": {
+      "attempts": [
+        {
+          "session": 7,
+          "timestamp": "2026-03-07T04:56:41.648847+00:00",
+          "approach": "Implemented: Display summary line at end of bop list: '14 total \u00b7 2 running \u00b7 8 done \u00b7 1 failed \u00b7 avg 4m32s'",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-2-3": {
+      "attempts": [
+        {
+          "session": 8,
+          "timestamp": "2026-03-07T04:59:26.501938+00:00",
+          "approach": "Implemented: Add success rate calculation and display: 'success rate 93%'",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-1": {
+      "attempts": [
+        {
+          "session": 9,
+          "timestamp": "2026-03-07T05:03:39.806311+00:00",
+          "approach": "Implemented: Add success message to bop new: '\u2713 Card created \u2192 bop dispatch <id> to run it'",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-2": {
+      "attempts": [
+        {
+          "session": 10,
+          "timestamp": "2026-03-07T05:06:40.071214+00:00",
+          "approach": "Implemented: Add success message to bop clean: '\u2713 Cleaned N cards \u2192 bop list to verify'",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-3": {
+      "attempts": [
+        {
+          "session": 11,
+          "timestamp": "2026-03-07T05:09:16.573296+00:00",
+          "approach": "Implemented: Update bop kill success message: '\u2713 Killed <id> \u2192 it's back in pending/'",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-4-1": {
+      "attempts": [
+        {
+          "session": 12,
+          "timestamp": "2026-03-07T05:11:04.233705+00:00",
+          "approach": "Implemented: Update 'card not found' error in paths.rs to suggest 'bop list'",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-4-2": {
+      "attempts": [
+        {
+          "session": 13,
+          "timestamp": "2026-03-07T05:13:16.294430+00:00",
+          "approach": "Implemented: Add 'nothing pending' hint in dispatcher: 'Try: bop new <template> <id>'",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-4-3": {
+      "attempts": [
+        {
+          "session": 14,
+          "timestamp": "2026-03-07T05:15:29.521711+00:00",
+          "approach": "Implemented: Add 'adapter not found' error with list-adapters hint",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-5-1": {
+      "attempts": [
+        {
+          "session": 15,
+          "timestamp": "2026-03-07T05:17:57.531047+00:00",
+          "approach": "Implemented: Run make check (test + clippy + fmt) and fix any issues",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-5-2": {
+      "attempts": [
+        {
+          "session": 16,
+          "timestamp": "2026-03-07T05:21:13.904986+00:00",
+          "approach": "Implemented: Create output/result.md with before/after screenshots and examples",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    }
+  },
+  "stuck_subtasks": [],
+  "metadata": {
+    "created_at": "2026-03-07T04:36:00.550375+00:00",
+    "last_updated": "2026-03-07T05:21:13.905000+00:00"
+  }
+}

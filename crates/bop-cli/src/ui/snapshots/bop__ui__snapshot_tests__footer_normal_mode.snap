@@ -1,0 +1,6 @@
+---
+source: crates/bop-cli/src/ui/mod.rs
+assertion_line: 534
+expression: content
+---
+[h/l]col [j/k]card [↵]actions [Shift+H/L]move [/]filter [n]new [q]quit

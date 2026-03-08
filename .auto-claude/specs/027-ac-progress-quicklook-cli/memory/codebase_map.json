@@ -1,0 +1,20 @@
+{
+  "discovered_files": {
+    "crates/bop-cli/src/render/mod.rs": {
+      "description": "CardView already has phase_name: Option<String> and phase_frac: f32 fields \u2014 these are set to None/0.0 by from_meta() and intended to be enriched by the caller with AC plan data. All renderers (full, extended, truecolor) and the kanban widget already render these when present.",
+      "category": "architecture",
+      "discovered_at": "2026-03-07T23:35:21.496380+00:00"
+    },
+    "crates/bop-cli/src/render/full.rs": {
+      "description": "moon_glyph(frac) uses \u25d4\u25d1\u25d5\u25cf at 25/50/75% thresholds. Spec 027 wants DIFFERENT half_circle_glyph with \u25cb\u25d4\u25d1\u25d5\u25cf at 0/33/66/100% thresholds. New function needed in acplan.rs, not a modification of moon_glyph.",
+      "category": "pattern",
+      "discovered_at": "2026-03-07T23:35:24.939441+00:00"
+    },
+    "macos/bop/PreviewViewController.swift": {
+      "description": "CardTab is CaseIterable enum (overview/subtasks/logs/files). To conditionally show a Plan tab only when acSpecId is set, must change from ForEach(CardTab.allCases) to a computed filtered array. BopCardMeta uses CodingKeys enum for snake_case mapping.",
+      "category": "architecture",
+      "discovered_at": "2026-03-07T23:35:28.333197+00:00"
+    }
+  },
+  "last_updated": "2026-03-07T23:35:28.333203+00:00"
+}

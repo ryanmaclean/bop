@@ -1,0 +1,28 @@
+{
+  "files_to_modify": {
+    "bop-cli": [
+      "crates/bop-cli/src/list.rs",
+      "crates/bop-cli/src/main.rs",
+      "crates/bop-cli/src/cards.rs",
+      "crates/bop-cli/src/doctor.rs"
+    ]
+  },
+  "files_to_reference": [
+    "crates/bop-cli/src/gantt.rs"
+  ],
+  "patterns": {
+    "color_constants": "gantt.rs defines state_ansi(), state_ansi_bg(), RESET, DIM, BOLD constants for ANSI terminal colors",
+    "state_colors": "pending=steel blue, running=amber, done=green, failed=red, merged=violet",
+    "stats_calculation": "gantt.rs shows pattern for computing duration stats from Meta.runs[].duration_s",
+    "command_structure": "Commands in main.rs match to functions in submodules (cards::, list::, doctor::)",
+    "success_messages": "Currently most commands just return Ok(()), no user feedback",
+    "error_handling": "Use anyhow::bail!() with context messages"
+  },
+  "existing_implementations": {
+    "description": "gantt.rs already has comprehensive ANSI color system and stats calculation for timeline view",
+    "relevant_files": [
+      "crates/bop-cli/src/gantt.rs (lines 149-174 for colors, lines 313-323 for stats)"
+    ],
+    "duration_source": "Meta.runs[] array contains RunRecord structs with duration_s: Option<u64> field"
+  }
+}

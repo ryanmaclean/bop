@@ -1,0 +1,183 @@
+{
+  "session_number": 6,
+  "timestamp": "2026-03-08T00:42:34.560559+00:00",
+  "subtasks_completed": [
+    "subtask-4-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "macos/bop/PreviewViewController.swift",
+        "role": "core_feature",
+        "key_changes": [
+          "Added acSpecId: String? field to BopCardMeta with CodingKey 'ac_spec_id'",
+          "Added three private Codable structs: AcPlan (top-level), AcPhase (phases array), AcSubtask (id/description/status)",
+          "Added .plan case to CardTab enum",
+          "Implemented availableTabs computed property with conditional filter: .plan visible only when meta?.acSpecId != nil && acPlan != nil",
+          "Added @State var acPlan: AcPlan? = nil to BopCardPreview",
+          "Modified tabName() to show plan progress as 'Plan (done/total)'",
+          "Added planTab() @ViewBuilder stub (truncated in diff)"
+        ],
+        "patterns": "Conditional tab visibility, nested Codable structs, computed property filtering"
+      },
+      {
+        "file": "crates/bop-cli/src/providers/mod.rs",
+        "role": "feature_expansion",
+        "key_changes": [
+          "Implemented pct_bar() with ANSI color gradients (red >=90%, amber >=70%, green <70%)",
+          "Implemented format_reset() for relative time display (e.g., 'in 2h 15m')",
+          "Implemented print_providers_table() with aligned ANSI table formatting",
+          "Implemented cmd_providers() handler with watch loop, JSON output, history append",
+          "Added error snapshot creation when provider.fetch() fails (non-fatal)"
+        ],
+        "patterns": "Provider detection via trait, ANSI bar charts, polling/watch mode with tokio::time::sleep, best-effort history logging"
+      },
+      {
+        "file": "crates/bop-cli/src/main.rs",
+        "role": "command_routing",
+        "key_changes": [
+          "Added Providers subcommand with --watch, --json, --interval flags",
+          "Wired cmd_providers() call in main match statement"
+        ],
+        "patterns": "Standard clap subcommand pattern"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "name": "Conditional UI Tab Visibility",
+        "description": "availableTabs computed property filters CardTab.allCases based on data availability (tab == .plan requires both acSpecId and acPlan)",
+        "locations": [
+          "PreviewViewController.swift: availableTabs, ForEach(availableTabs, ...)"
+        ],
+        "benefit": "Clean separation of data-driven UI state"
+      },
+      {
+        "name": "Non-Fatal Error Snapshots",
+        "description": "When provider.fetch() fails, create a ProviderSnapshot with error: Some(...) instead of propagating error",
+        "locations": [
+          "providers/mod.rs: cmd_providers() Err branch"
+        ],
+        "benefit": "Allows partial success display even when some providers fail"
+      },
+      {
+        "name": "ANSI Color Gradients",
+        "description": "pct_bar() function selects color based on threshold: red (160) >=90%, amber (172) >=70%, green (71) <70%",
+        "locations": [
+          "providers/mod.rs: pct_bar()"
+        ],
+        "benefit": "Visual urgency cues without custom rendering"
+      },
+      {
+        "name": "Polling/Watch Mode Pattern",
+        "description": "Loop with conditional break, clear screen on each iteration, tokio::time::sleep between polls",
+        "locations": [
+          "providers/mod.rs: cmd_providers() watch loop"
+        ],
+        "benefit": "Live monitoring with minimal CPU (sleep-based, not spinning)"
+      },
+      {
+        "name": "Nested Codable Hierarchy",
+        "description": "AcPlan \u2192 AcPhase \u2192 AcSubtask structure mirrors Auto-Claude spec nesting",
+        "locations": [
+          "PreviewViewController.swift: AcPlan, AcPhase, AcSubtask"
+        ],
+        "benefit": "Type-safe plan structure, single decode operation"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "acPlan loading decoupled from acSpecId detection",
+        "risk": "Plan tab may not render if acPlan fails to load but acSpecId is set; state becomes inconsistent",
+        "mitigation": "availableTabs filter requires both conditions, but no explicit error state for failed loads"
+      },
+      {
+        "issue": "Provider fetch error handling is fire-and-forget for history append",
+        "risk": "History file missing or permission denied silently ignored; may cause data loss or inconsistent state",
+        "location": "providers/mod.rs: if let Some(hp) = history::history_path() { let _ = history::append_history(...) }",
+        "mitigation": "Best-effort comment acknowledges this, but error log could be helpful"
+      },
+      {
+        "issue": "Watch mode uses hardcoded ANSI escape sequences for screen clear",
+        "risk": "\\x1b[2J\\x1b[H may not work in all terminals (e.g., dumb, limited), or may interfere with Zellij panes",
+        "location": "providers/mod.rs: if watch { print!(\"\\x1b[2J\\x1b[H\"); }",
+        "mitigation": "Consider terminal capability detection or use termios crate"
+      },
+      {
+        "issue": "Plan struct assumes all subtasks have 'status' field with known values",
+        "risk": "Malformed plan JSON (missing status, unknown enum value) will fail decode silently",
+        "location": "PreviewViewController.swift: AcSubtask.status: String",
+        "mitigation": "Consider status enum instead of String, or fallback parsing"
+      },
+      {
+        "issue": "No timeout on provider.fetch() calls",
+        "risk": "Slow/hanging provider can block watch loop indefinitely",
+        "location": "providers/mod.rs: cmd_providers() fetch loop",
+        "mitigation": "Add tokio::time::timeout wrapper"
+      }
+    ],
+    "approach_outcome": {
+      "status": "SUCCESS",
+      "summary": "Subtask-4-1 fully implemented across Swift and Rust with two commits. Core features (acSpecId field, AcPlan/AcPhase/AcSubtask structs, plan tab with conditional visibility) integrated into PreviewViewController. Bonus: providers CLI command added with ANSI table rendering, watch mode, and JSON output.",
+      "commits": [
+        "15e959c auto-claude: subtask-4-1 - Add acSpecId, AcPlan structs, plan tab to Quick Look",
+        "36b097c auto-claude: subtask-4-1 - Add bop providers CLI command with ANSI table and JSON output"
+      ],
+      "completeness": "All requested features present; plan tab rendering stub present but truncated in diff",
+      "code_quality": "Follows existing patterns (enum-based tabs, computed properties, Codable nesting, ANSI formatting). Minor formatting cleanup applied alongside feature work."
+    },
+    "recommendations": [
+      {
+        "priority": "high",
+        "category": "error_handling",
+        "recommendation": "Add explicit loading state for acPlan: defer plan tab rendering until acPlan is loaded and verified non-nil",
+        "rationale": "Prevents race condition where tab is visible but data is not ready"
+      },
+      {
+        "priority": "high",
+        "category": "robustness",
+        "recommendation": "Add timeout to provider.fetch() calls (suggest 5-10s)",
+        "rationale": "Prevents watch loop from hanging on unresponsive provider"
+      },
+      {
+        "priority": "medium",
+        "category": "data_validation",
+        "recommendation": "Use Swift enum for AcSubtask.status instead of String; e.g., enum Status: String { case pending, in_progress, completed }",
+        "rationale": "Compile-time safety, prevents unknown status values from causing runtime errors"
+      },
+      {
+        "priority": "medium",
+        "category": "terminal_compatibility",
+        "recommendation": "Replace hardcoded ANSI escape sequences in watch mode with crossterm or termion crate calls",
+        "rationale": "Ensures screen clearing works reliably across terminal types and Zellij panes"
+      },
+      {
+        "priority": "low",
+        "category": "monitoring",
+        "recommendation": "Log history append failures (even at debug level) instead of silent error suppression",
+        "rationale": "Aids debugging of quota/usage data gaps"
+      },
+      {
+        "priority": "low",
+        "category": "performance",
+        "recommendation": "Consider caching provider snapshots between polls to reduce API calls if multiple commands access provider data",
+        "rationale": "Reduces rate-limit risk for high-frequency polling"
+      }
+    ],
+    "subtask_id": "subtask-4-1",
+    "session_num": 6,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/main.rs",
+      "crates/bop-cli/src/providers/claude.rs",
+      "crates/bop-cli/src/providers/history.rs",
+      "crates/bop-cli/src/providers/mod.rs",
+      "crates/bop-cli/src/ui/widgets/kanban.rs",
+      "macos/bop/PreviewViewController.swift"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-4-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

@@ -1,0 +1,129 @@
+{
+  "subtasks": {
+    "subtask-1-1": {
+      "attempts": [
+        {
+          "session": 2,
+          "timestamp": "2026-03-07T18:00:27.468876+00:00",
+          "approach": "Implemented: Add terminal_size crate dependency to bop-cli/Cargo.toml. Create crates/bop-cli/src/termcaps.rs with",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-2": {
+      "attempts": [
+        {
+          "session": 3,
+          "timestamp": "2026-03-07T18:03:59.537470+00:00",
+          "approach": "Implemented: Create crates/bop-cli/src/render/mod.rs with: (1) CardView flat view struct with fields: id, state, ",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-2-1": {
+      "attempts": [
+        {
+          "session": 4,
+          "timestamp": "2026-03-07T18:07:13.297749+00:00",
+          "approach": "Implemented: Implement DumbRenderer in render/dumb.rs (Level 0). No color, no unicode \u2014 pure ASCII. Format: '=== ",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-2-2": {
+      "attempts": [
+        {
+          "session": 6,
+          "timestamp": "2026-03-07T18:13:09.975688+00:00",
+          "approach": "Implemented: Implement BasicRenderer in render/basic.rs (Level 1). 8-color ANSI with ASCII box borders (+--+, |  ",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-1": {
+      "attempts": [
+        {
+          "session": 8,
+          "timestamp": "2026-03-07T18:20:11.412849+00:00",
+          "approach": "Implemented: Implement ExtendedRenderer in render/extended.rs (Level 2). 16-color ANSI, single-line box drawing (",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-2": {
+      "attempts": [
+        {
+          "session": 9,
+          "timestamp": "2026-03-07T18:23:41.438325+00:00",
+          "approach": "Implemented: Implement FullRenderer in render/full.rs (Level 3 \u2014 demoscene mode). 256-color ANSI. Section headers",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-3-3": {
+      "attempts": [
+        {
+          "session": 10,
+          "timestamp": "2026-03-07T18:33:47.337188+00:00",
+          "approach": "Implemented: Implement TrueColorRenderer in render/truecolor.rs (Level 4). 24-bit RGB color via \\x1b[38;2;R;G;Bm.",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-4-1": {
+      "attempts": [
+        {
+          "session": 11,
+          "timestamp": "2026-03-07T18:41:06.843500+00:00",
+          "approach": "Implemented: Update list.rs to use the new render system. Modify list_cards() to: (1) call TermCaps::detect() to ",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-4-2": {
+      "attempts": [
+        {
+          "session": 12,
+          "timestamp": "2026-03-07T18:42:47.086800+00:00",
+          "approach": "Implemented: Update vibekanban/_bop_provider_impl.py to pass additional fields in each task object: priority (fro",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-4-3": {
+      "attempts": [
+        {
+          "session": 13,
+          "timestamp": "2026-03-07T18:47:54.216415+00:00",
+          "approach": "Implemented: Run `make check` (cargo test + clippy + fmt) to verify everything passes. Fix any clippy warnings or",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    }
+  },
+  "stuck_subtasks": [],
+  "metadata": {
+    "created_at": "2026-03-07T17:48:25.593584+00:00",
+    "last_updated": "2026-03-07T18:47:54.216428+00:00"
+  }
+}

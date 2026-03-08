@@ -1,0 +1,1181 @@
+{
+  "id": "ideation-20260306-195715",
+  "project_id": "/Users/studio/bop",
+  "config": {
+    "enabled_types": [
+      "code_improvements",
+      "documentation_gaps",
+      "security_hardening",
+      "performance_optimizations",
+      "ui_ux_improvements"
+    ],
+    "include_roadmap_context": true,
+    "include_kanban_context": true,
+    "max_ideas_per_type": 15
+  },
+  "ideas": [
+    {
+      "id": "doc-001",
+      "type": "documentation_gaps",
+      "title": "Add troubleshooting guide with common errors and solutions",
+      "description": "Create docs/troubleshooting.md covering common failure modes: stale locks, orphaned cards, adapter timeouts, policy check failures, VCS conflicts, and rate limiting. Include diagnostic commands and remediation steps.",
+      "rationale": "Users frequently encounter card failures but have no systematic guide to diagnose root causes. Common errors like 'dispatcher lock held' or 'policy check failed' have known solutions that should be documented.",
+      "category": "troubleshooting",
+      "targetAudience": "users",
+      "affectedAreas": [
+        "docs/",
+        "README.md"
+      ],
+      "currentDocumentation": "README has basic CLI usage but no error diagnostics",
+      "proposedContent": "Add docs/troubleshooting.md with sections for: lock debugging (bop doctor, manual lock removal), failed card recovery (bop retry, log inspection), adapter debugging (exit code meanings, timeout tuning), policy violations (understanding diff output, fixing runtime path issues), VCS engine troubleshooting (jj vs git workflow differences)",
+      "priority": "high",
+      "estimatedEffort": "medium"
+    },
+    {
+      "id": "doc-002",
+      "type": "documentation_gaps",
+      "title": "Document Rust API with module-level doc comments",
+      "description": "Add module-level documentation (//! comments) to all bop-cli and bop-core modules explaining purpose, key types, and usage patterns. Currently only 128 doc comments across 20+ files in bop-cli.",
+      "rationale": "Contributors need to understand module responsibilities and public API contracts. Module-level docs provide entry points for understanding the codebase architecture.",
+      "category": "api_docs",
+      "targetAudience": "developers",
+      "affectedAreas": [
+        "crates/bop-cli/src/*.rs",
+        "crates/bop-core/src/*.rs"
+      ],
+      "currentDocumentation": "bop-core has 214 doc comments (better coverage), bop-cli has only 128 doc comments for many more files",
+      "proposedContent": "Add //! module docs to: dispatcher.rs (orchestration logic), cards.rs (card lifecycle), serve.rs (HTTP API), merge_gate.rs (merge workflow), reaper.rs (orphan handling), workspace.rs (VCS integration), policy.rs (anti-slop gates). Include examples showing typical usage patterns.",
+      "priority": "high",
+      "estimatedEffort": "high"
+    },
+    {
+      "id": "doc-003",
+      "type": "documentation_gaps",
+      "title": "Create adapter development guide",
+      "description": "Add docs/adapter-development.md explaining how to write new adapters, exit code semantics (0=success, 75=rate-limit, other=fail), error handling patterns, timeout handling, MCP config integration, and memory-out.json format.",
+      "rationale": "CONTRIBUTING.md says 'Copy adapters/mock.nu as starting point' but provides no context on error handling, rate limiting detection, or MCP integration. Developers need comprehensive guidance.",
+      "category": "api_docs",
+      "targetAudience": "developers",
+      "affectedAreas": [
+        "docs/",
+        "CONTRIBUTING.md",
+        "adapters/*.nu"
+      ],
+      "currentDocumentation": "CONTRIBUTING.md has 5-line adapter section, adapters have minimal inline comments",
+      "proposedContent": "Document: calling convention (5 args), exit code contract, rate-limit detection patterns (stderr parsing for '429', 'rate limit', 'too many requests'), timeout wrapper usage (perl alarm pattern), MCP config merging (.cards/mcp.json + card-level), memory output format, provider rotation triggers, CLAUDECODE env handling",
+      "priority": "high",
+      "estimatedEffort": "medium"
+    },
+    {
+      "id": "doc-004",
+      "type": "documentation_gaps",
+      "title": "Add architecture diagrams and data flow documentation",
+      "description": "Create docs/architecture.md with diagrams showing: card state machine transitions, dispatcher orchestration flow, merge-gate pipeline, VCS engine integration points, adapter invocation lifecycle, OpenLineage provenance recording.",
+      "rationale": "README has a simple text diagram but lacks detailed component interaction diagrams. New contributors need visual representations of the state machine, dispatcher loop, and merge workflow.",
+      "category": "architecture",
+      "targetAudience": "developers",
+      "affectedAreas": [
+        "docs/"
+      ],
+      "currentDocumentation": "README has basic ASCII diagram, format-storage-contract.md has state machine paths, no flow diagrams",
+      "proposedContent": "Add Mermaid diagrams showing: 1) Card lifecycle (pending\u2192running\u2192done\u2192merged with failure paths), 2) Dispatcher poll loop with reaper integration, 3) Merge-gate stages (policy\u2192test\u2192PR creation), 4) VCS workspace preparation flow for git vs jj, 5) Adapter invocation with timeout/rate-limit handling, 6) OpenLineage event emission points",
+      "priority": "medium",
+      "estimatedEffort": "medium"
+    },
+    {
+      "id": "doc-005",
+      "type": "documentation_gaps",
+      "title": "Document configuration system and environment variables",
+      "description": "Create docs/configuration.md documenting ~/.bop/config.json schema, .cards/config.json overrides, environment variables (BOP_SERVE_TOKEN, BOP_MEMORY_OUT, CLAUDECODE), and card-level meta.json fields with examples.",
+      "rationale": "Config schema exists in bop-core/src/config.rs but is not documented for users. Multiple config layers (.bop/config.json, .cards/config.json, meta.json) are undocumented. Environment variables are scattered across code.",
+      "category": "api_docs",
+      "targetAudience": "users",
+      "affectedAreas": [
+        "docs/",
+        "crates/bop-core/src/config.rs"
+      ],
+      "currentDocumentation": "config.rs has inline comments but no user-facing docs",
+      "proposedContent": "Document: 1) Config hierarchy (global \u2192 project \u2192 card), 2) Schema for config.json (default_provider_chain, max_concurrent, cooldown_seconds, log_retention_days, default_template), 3) Environment variables table with purposes, 4) meta.json schema with all 40+ fields explained, 5) Config examples (provider chains, timeouts, stage pipelines, team routing)",
+      "priority": "high",
+      "estimatedEffort": "medium"
+    },
+    {
+      "id": "doc-006",
+      "type": "documentation_gaps",
+      "title": "Add 'Getting Started' tutorial with walkthrough",
+      "description": "Create docs/getting-started.md with step-by-step tutorial: install bop, init workspace, create first card, run dispatcher, inspect logs, handle failures, merge successful card. Include expected output at each step.",
+      "rationale": "README Quick Start shows commands but lacks narrative walkthrough showing what success looks like. New users need hand-holding through first successful card execution.",
+      "category": "examples",
+      "targetAudience": "users",
+      "affectedAreas": [
+        "docs/"
+      ],
+      "currentDocumentation": "README has Quick Start commands but no tutorial format",
+      "proposedContent": "Tutorial covering: 1) Install from source or DMG, 2) bop init and directory structure explanation, 3) bop new implement hello-world, 4) Edit spec.md with simple task, 5) bop dispatcher --once --adapter adapters/mock.nu, 6) Watch state transitions (pending\u2192running\u2192done), 7) bop inspect hello-world, 8) bop logs hello-world, 9) bop merge-gate --once, 10) Understanding success (card in merged/, git commit created)",
+      "priority": "high",
+      "estimatedEffort": "medium"
+    },
+    {
+      "id": "doc-007",
+      "type": "documentation_gaps",
+      "title": "Document VCS engine differences (git vs jj)",
+      "description": "Create docs/vcs-engines.md explaining git+GitGt vs jj workflow differences, workspace/worktree semantics, branch naming conventions, merge strategies, and when to use each engine.",
+      "rationale": "System memory states 'VCS: jj (Jujutsu)' but dispatcher defaults to git. GitGt vs jj code paths exist but behavioral differences are undocumented. Users don't know which to choose or how they differ.",
+      "category": "architecture",
+      "targetAudience": "users",
+      "affectedAreas": [
+        "docs/",
+        "crates/bop-cli/src/workspace.rs"
+      ],
+      "currentDocumentation": "No VCS engine comparison docs, workspace.rs has implementation but no user guidance",
+      "proposedContent": "Document: 1) GitGt engine: git worktree-based isolation, job/<id> branches, squash-merge to main, 2) jj engine: jj workspace per card, change_ref tracking, workspace lifecycle, 3) Comparison table (isolation model, undo capabilities, branch cleanup), 4) Recommendation: jj for multi-agent teams, git for simpler workflows, 5) Migration path between engines, 6) Troubleshooting VCS-specific issues",
+      "priority": "medium",
+      "estimatedEffort": "medium"
+    },
+    {
+      "id": "doc-008",
+      "type": "documentation_gaps",
+      "title": "Add CHANGELOG.md tracking version history",
+      "description": "Create CHANGELOG.md following Keep a Changelog format, documenting changes since initial release. Backfill major milestones: Nushell migration (2026-03-03), bop serve addition (spec 015), VCS engine abstraction.",
+      "rationale": "No CHANGELOG exists. Users and contributors cannot track what changed between versions or understand breaking changes. Standard practice for open source projects.",
+      "category": "readme",
+      "targetAudience": "users",
+      "affectedAreas": [
+        "CHANGELOG.md"
+      ],
+      "currentDocumentation": "None - CHANGELOG.md does not exist",
+      "proposedContent": "Create CHANGELOG.md with: [Unreleased] section, version entries with [Added], [Changed], [Deprecated], [Removed], [Fixed], [Security] sections. Backfill: v0.2.0 (Nushell migration, all 24 scripts ported), v0.3.0 (bop serve HTTP API, GitGt/jj abstraction), v0.1.0 (initial release with ZSH scripts). Link to GitHub releases.",
+      "priority": "medium",
+      "estimatedEffort": "low"
+    },
+    {
+      "id": "doc-009",
+      "type": "documentation_gaps",
+      "title": "Add SECURITY.md with vulnerability reporting process",
+      "description": "Create SECURITY.md documenting security policy, supported versions, vulnerability reporting process, and responsible disclosure guidelines. Currently only .auto-claude-security.json exists.",
+      "rationale": "GitHub displays SECURITY.md in Security tab. Essential for open source projects to document how security issues should be reported. Current .auto-claude-security.json is not user-facing.",
+      "category": "readme",
+      "targetAudience": "contributors",
+      "affectedAreas": [
+        "SECURITY.md"
+      ],
+      "currentDocumentation": "Only .auto-claude-security.json exists (internal format)",
+      "proposedContent": "Document: 1) Supported versions (e.g., 'Latest release + previous minor version'), 2) Reporting process (email address or GitHub Security Advisories), 3) Response timeline expectations, 4) Disclosure policy (coordinated disclosure window), 5) Security considerations (sandbox mode, BOP_SERVE_TOKEN, .cards/ permission model)",
+      "priority": "medium",
+      "estimatedEffort": "low"
+    },
+    {
+      "id": "doc-010",
+      "type": "documentation_gaps",
+      "title": "Document Nushell script organization and conventions",
+      "description": "Create docs/scripting.md explaining script organization (adapters/ vs scripts/ vs vibekanban/), calling conventions, self-test pattern (--test flag), error handling idioms, and Nushell-specific patterns used in bop.",
+      "rationale": "16 scripts in scripts/, 9 adapters, 2 vibekanban scripts - all using Nushell with minimal documentation. Contributors need guidance on conventions: self-test pattern, exit code handling, $env.LAST_EXIT_CODE usage, hide-env patterns.",
+      "category": "api_docs",
+      "targetAudience": "developers",
+      "affectedAreas": [
+        "docs/",
+        "scripts/*.nu",
+        "adapters/*.nu"
+      ],
+      "currentDocumentation": "CONTRIBUTING says 'All shell scripts: #!/usr/bin/env nu' but no conventions documented",
+      "proposedContent": "Document: 1) Script directory purposes (adapters=AI providers, scripts=utilities, vibekanban=UI), 2) Standard patterns: --test self-tests with std/assert, exit code conventions, path resolution (absolute vs relative), 3) Common idioms: $env.LAST_EXIT_CODE for exit codes, hide-env for isolation, do { ^cmd } | complete for error capture, 4) Integration points with Rust binary, 5) Testing scripts: nu script.nu --test",
+      "priority": "medium",
+      "estimatedEffort": "low"
+    },
+    {
+      "id": "doc-011",
+      "type": "documentation_gaps",
+      "title": "Add production deployment guide",
+      "description": "Create docs/deployment.md covering launchd/systemd setup, log rotation, monitoring recommendations, scaling guidance, backup strategies, and production configuration examples.",
+      "rationale": "README mentions 'launchd is underrated infrastructure' and lessons.md discusses KeepAlive, but no step-by-step deployment guide exists. Production users need operational guidance.",
+      "category": "examples",
+      "targetAudience": "users",
+      "affectedAreas": [
+        "docs/"
+      ],
+      "currentDocumentation": "cicd-integration.md covers GitHub Actions but not production deployment",
+      "proposedContent": "Document: 1) launchd setup (plist example with KeepAlive, WatchPaths, throttling), 2) systemd setup (.service + .path units), 3) Log management (stdout/stderr redirection, rotation with logrotate), 4) Monitoring: dispatcher health checks, card queue metrics, failure rate alerts, 5) Scaling: max_workers tuning, disk space monitoring, 6) Backup: .cards/ directory strategy, database-free advantage, 7) Troubleshooting production issues",
+      "priority": "medium",
+      "estimatedEffort": "medium"
+    },
+    {
+      "id": "doc-012",
+      "type": "documentation_gaps",
+      "title": "Document card template system and variables",
+      "description": "Expand template documentation in CONTRIBUTING.md or create docs/templates.md explaining template structure, variable substitution ({{spec}}, {{plan}}, {{stage}}, etc.), stage_chain usage, and how to create custom templates.",
+      "rationale": "9 templates exist (.cards/templates/) but only implement.bop/spec.md has minimal example. Template variable system (15+ variables in PromptContext) is undocumented. Users can't create custom templates without reading source.",
+      "category": "api_docs",
+      "targetAudience": "users",
+      "affectedAreas": [
+        "docs/",
+        "CONTRIBUTING.md",
+        ".cards/templates/"
+      ],
+      "currentDocumentation": "CONTRIBUTING has 7-line template section, templates have minimal inline docs",
+      "proposedContent": "Document: 1) Template directory structure (meta.json, spec.md, prompt.md, logs/, output/), 2) meta.json schema (stage, stage_chain, provider_chain, acceptance_criteria, stage_models, stage_providers), 3) Variable substitution: {{spec}}, {{plan}}, {{stage}}, {{acceptance_criteria}}, {{provider}}, {{agent}}, {{memory}}, {{system_context}}, {{stage_instructions}}, {{worktree_branch}}, {{prior_stage_output}}, {{depends_output}}, 4) Creating custom templates, 5) Example: multi-stage pipeline template",
+      "priority": "medium",
+      "estimatedEffort": "medium"
+    },
+    {
+      "id": "doc-013",
+      "type": "documentation_gaps",
+      "title": "Add inline comments for complex algorithms in dispatcher",
+      "description": "Add explanatory comments to complex logic in dispatcher.rs: dependency resolution loop, lease heartbeat calculation, reaper orphan detection, provider rotation on rate-limit, and state transition validation.",
+      "rationale": "dispatcher.rs has complex concurrent logic (reaper, dependency checking, slot management) with minimal inline comments. Contributors need guidance to understand non-obvious invariants and edge cases.",
+      "category": "inline_comments",
+      "targetAudience": "developers",
+      "affectedAreas": [
+        "crates/bop-cli/src/dispatcher.rs",
+        "crates/bop-cli/src/reaper.rs"
+      ],
+      "currentDocumentation": "Minimal inline comments, no algorithm explanations",
+      "proposedContent": "Add comments explaining: 1) Dependency resolution algorithm (how depends_on is checked across states), 2) Lease heartbeat timing (why 3x reap_ms threshold), 3) Orphan detection criteria (dead PID vs stale lease), 4) Provider rotation logic (exit 75 \u2192 next provider), 5) Slot counting invariants (why running_count uses .bop extension filter), 6) State transition atomicity (rename guarantees), 7) OpenLineage event timing (when events are emitted)",
+      "priority": "low",
+      "estimatedEffort": "low"
+    },
+    {
+      "id": "doc-014",
+      "type": "documentation_gaps",
+      "title": "Create FAQ section in docs",
+      "description": "Add docs/faq.md answering common questions: Why filesystem state machine? Why no database? How to handle rate limiting? What's the difference between .bop and .jobcard? How to debug stuck cards? How to add a new adapter? When to use jj vs git?",
+      "rationale": "Recurring questions about design decisions (filesystem vs database, APFS COW, no daemon) and operational issues (stuck cards, rate limits) should be documented centrally.",
+      "category": "troubleshooting",
+      "targetAudience": "users",
+      "affectedAreas": [
+        "docs/"
+      ],
+      "currentDocumentation": "lessons.md explains philosophy but not in Q&A format, no FAQ",
+      "proposedContent": "FAQ covering: 1) Why filesystem state machine? (atomic mv, no daemon, Finder native), 2) Why APFS COW? (template cloning efficiency, dedupe), 3) .bop vs .jobcard? (same format, different convention), 4) Handling rate limits? (exit 75, provider rotation), 5) Stuck cards? (bop kill, manual state transition), 6) Adding adapters? (link to adapter-development.md), 7) VCS engine choice? (link to vcs-engines.md), 8) Performance tuning? (max_workers, poll_ms, reap_ms)",
+      "priority": "low",
+      "estimatedEffort": "low"
+    },
+    {
+      "id": "doc-015",
+      "type": "documentation_gaps",
+      "title": "Document testing strategy and harness usage",
+      "description": "Create docs/testing.md explaining test organization (dispatcher_harness, job_control_harness, merge_gate_harness), how to add tests, running specific test suites, and testing Nushell scripts (--test flag pattern).",
+      "rationale": "3 test harnesses exist (19KB, 18KB, 5KB of test code) but no documentation on how to use them or add new tests. CONTRIBUTING says 'cargo test' but doesn't explain test architecture.",
+      "category": "api_docs",
+      "targetAudience": "developers",
+      "affectedAreas": [
+        "docs/",
+        "crates/bop-cli/tests/"
+      ],
+      "currentDocumentation": "CONTRIBUTING has 'cargo test' command, no test architecture docs",
+      "proposedContent": "Document: 1) Test harness purposes (dispatcher_harness=end-to-end card workflow, job_control_harness=CLI commands, merge_gate_harness=merge flow), 2) Running tests: cargo test, cargo test -p bop-cli, cargo test dispatcher, 3) Writing new tests: harness patterns, tempdir setup, state assertions, 4) Testing scripts: nu script.nu --test, nu scripts/test-real-adapters.nu, 5) Integration tests vs unit tests, 6) CI expectations (make check = test + clippy + fmt)",
+      "priority": "low",
+      "estimatedEffort": "low"
+    },
+    {
+      "id": "sec-001",
+      "type": "security_hardening",
+      "title": "Add constant-time token comparison to prevent timing attacks",
+      "description": "The BOP_SERVE_TOKEN comparison in serve.rs uses direct string equality (auth != bearer), which is vulnerable to timing attacks. An attacker could use response timing to guess the token character by character.",
+      "rationale": "Timing attacks allow attackers to extract secrets by measuring how long comparisons take. Constant-time comparison ensures all comparisons take the same time regardless of where strings differ, preventing this attack vector.",
+      "category": "authentication",
+      "severity": "medium",
+      "affectedFiles": [
+        "crates/bop-cli/src/serve.rs"
+      ],
+      "vulnerability": "CWE-208: Observable Timing Discrepancy",
+      "currentRisk": "Attacker can potentially extract BOP_SERVE_TOKEN through timing analysis of authentication requests",
+      "remediation": "Use constant_time_eq from the subtle crate or implement a constant-time comparison. Replace line 45 with: use subtle::ConstantTimeEq; if auth.as_bytes().ct_eq(bearer.as_bytes()).into() { ... }",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/208.html",
+        "https://docs.rs/subtle/latest/subtle/"
+      ],
+      "compliance": [
+        "SOC2",
+        "OWASP A07"
+      ]
+    },
+    {
+      "id": "sec-002",
+      "type": "security_hardening",
+      "title": "Fix command injection vulnerability in acceptance criteria execution",
+      "description": "merge_gate.rs executes acceptance criteria using sh -lc with user-provided strings (line 118-120). This allows arbitrary command execution if an attacker can control the acceptance_criteria field in meta.json.",
+      "rationale": "Command injection is a critical vulnerability allowing full system compromise. The acceptance_criteria array is user-controlled and executed directly via shell without sanitization or escaping.",
+      "category": "input_validation",
+      "severity": "critical",
+      "affectedFiles": [
+        "crates/bop-cli/src/merge_gate.rs",
+        "crates/bop-core/src/lib.rs"
+      ],
+      "vulnerability": "CWE-78: OS Command Injection",
+      "currentRisk": "Malicious cards with crafted acceptance_criteria can execute arbitrary commands during merge-gate processing",
+      "remediation": "1) Restrict acceptance_criteria to predefined safe commands (allowlist). 2) Parse and validate commands before execution. 3) Use a restricted shell or container for execution. 4) Add schema validation requiring approval for shell commands in criteria.",
+      "references": [
+        "https://owasp.org/www-community/attacks/Command_Injection",
+        "https://cwe.mitre.org/data/definitions/78.html"
+      ],
+      "compliance": [
+        "SOC2",
+        "OWASP A03",
+        "PCI-DSS"
+      ]
+    },
+    {
+      "id": "sec-003",
+      "type": "security_hardening",
+      "title": "Add rate limiting to bop serve HTTP endpoint",
+      "description": "The bop serve HTTP server at /cards/new has no rate limiting. An attacker can flood the endpoint with card creation requests, causing resource exhaustion or filling disk space with malicious cards.",
+      "rationale": "Without rate limiting, the service is vulnerable to denial of service attacks and resource exhaustion. Rate limiting is a fundamental security control for public-facing APIs.",
+      "category": "configuration",
+      "severity": "high",
+      "affectedFiles": [
+        "crates/bop-cli/src/serve.rs"
+      ],
+      "vulnerability": "CWE-770: Allocation of Resources Without Limits",
+      "currentRisk": "Attacker can create unlimited cards via POST /cards/new, exhausting disk space and system resources",
+      "remediation": "Implement rate limiting using tower-governor or similar middleware. Add configurable limits: e.g., 10 requests/minute per IP, 100 requests/hour globally. Example: use tower_governor::{GovernorLayer, GovernorConfig};",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/770.html",
+        "https://docs.rs/tower-governor/"
+      ],
+      "compliance": [
+        "OWASP A05"
+      ]
+    },
+    {
+      "id": "sec-004",
+      "type": "security_hardening",
+      "title": "Make BOP_SERVE_TOKEN authentication mandatory by default",
+      "description": "serve.rs makes token authentication optional via BOP_SERVE_TOKEN env var. If not set, the server runs with no authentication, allowing anyone to create cards. The default should be secure (auth required).",
+      "rationale": "Security defaults should be 'deny by default'. Running an unauthenticated HTTP service that accepts card creation is a significant security risk. Administrators may forget to set BOP_SERVE_TOKEN in production.",
+      "category": "authentication",
+      "severity": "high",
+      "affectedFiles": [
+        "crates/bop-cli/src/serve.rs",
+        "crates/bop-cli/src/main.rs"
+      ],
+      "vulnerability": "CWE-306: Missing Authentication",
+      "currentRisk": "Production servers may run without authentication if BOP_SERVE_TOKEN is not explicitly set, allowing unauthorized card creation",
+      "remediation": "1) Fail to start if BOP_SERVE_TOKEN is not set (or require --allow-unauthenticated flag). 2) Generate a random token on first run if none provided. 3) Add startup warning if running without auth.",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/306.html"
+      ],
+      "compliance": [
+        "SOC2",
+        "OWASP A07"
+      ]
+    },
+    {
+      "id": "sec-005",
+      "type": "security_hardening",
+      "title": "Add request body size limits to prevent DoS",
+      "description": "The bop serve endpoint accepts JSON requests with no maximum size limit. An attacker can send extremely large spec or id fields, causing memory exhaustion or application crashes.",
+      "rationale": "Unbounded input sizes are a common DoS vector. Large JSON payloads can exhaust memory, cause parser slowdowns, or crash the service. Industry best practice is to enforce strict size limits.",
+      "category": "input_validation",
+      "severity": "medium",
+      "affectedFiles": [
+        "crates/bop-cli/src/serve.rs"
+      ],
+      "vulnerability": "CWE-400: Uncontrolled Resource Consumption",
+      "currentRisk": "Attacker can send multi-GB JSON requests causing OOM or service degradation",
+      "remediation": "Add axum DefaultBodyLimit layer with reasonable limit (e.g., 1MB for card specs). Example: .layer(DefaultBodyLimit::max(1024 * 1024))",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/400.html",
+        "https://docs.rs/axum/latest/axum/extract/struct.DefaultBodyLimit.html"
+      ],
+      "compliance": [
+        "OWASP A05"
+      ]
+    },
+    {
+      "id": "sec-006",
+      "type": "security_hardening",
+      "title": "Implement secrets detection in policy check",
+      "description": "The policy check in policy.rs verifies file counts and LOC but does not scan for hardcoded secrets (API keys, tokens, passwords). Secrets can be accidentally committed and merged.",
+      "rationale": "Hardcoded secrets in version control are a critical security risk. Once committed, secrets remain in git history even if later removed. Automated detection prevents accidental exposure.",
+      "category": "secrets_management",
+      "severity": "high",
+      "affectedFiles": [
+        "crates/bop-cli/src/policy.rs",
+        "scripts/policy_check.nu"
+      ],
+      "vulnerability": "CWE-798: Use of Hard-coded Credentials",
+      "currentRisk": "Developers can commit API keys, tokens, and passwords to the repository without detection, exposing credentials in version control",
+      "remediation": "Add regex-based secret scanning to run_staged_policy_check(). Check for patterns: AWS keys (AKIA...), tokens (sk-...), private keys (BEGIN.*PRIVATE KEY), passwords in config. Return policy violation if detected.",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/798.html",
+        "https://github.com/trufflesecurity/trufflehog"
+      ],
+      "compliance": [
+        "SOC2",
+        "PCI-DSS",
+        "OWASP A02"
+      ]
+    },
+    {
+      "id": "sec-007",
+      "type": "security_hardening",
+      "title": "Add cargo audit to CI/CD pipeline for dependency scanning",
+      "description": "The project has no automated dependency vulnerability scanning. cargo audit is not installed or run in the build pipeline, allowing vulnerable dependencies to be used in production.",
+      "rationale": "Vulnerable dependencies are a top attack vector (OWASP A06). cargo audit checks Cargo.lock against the RustSec advisory database to identify known CVEs. This should be a required CI check.",
+      "category": "dependencies",
+      "severity": "high",
+      "affectedFiles": [
+        ".github/workflows/*",
+        "Makefile"
+      ],
+      "vulnerability": "CWE-1104: Use of Unmaintained Third Party Components",
+      "currentRisk": "Project may be using dependencies with known critical vulnerabilities (CVEs) without detection",
+      "remediation": "1) Add cargo install cargo-audit to CI setup. 2) Run cargo audit in make check target. 3) Add GitHub Action: RustSec/audit-check@v1. 4) Fail builds on high/critical vulnerabilities.",
+      "references": [
+        "https://github.com/RustSec/rustsec",
+        "https://crates.io/crates/cargo-audit"
+      ],
+      "compliance": [
+        "OWASP A06",
+        "SOC2"
+      ]
+    },
+    {
+      "id": "sec-008",
+      "type": "security_hardening",
+      "title": "Add security headers to HTTP responses",
+      "description": "serve.rs returns HTTP responses without security headers like X-Content-Type-Options, X-Frame-Options, Content-Security-Policy, or Strict-Transport-Security. These headers prevent common attacks.",
+      "rationale": "Security headers are defense-in-depth protections against XSS, clickjacking, MIME-sniffing, and protocol downgrade attacks. They're required by security standards and best practices.",
+      "category": "configuration",
+      "severity": "medium",
+      "affectedFiles": [
+        "crates/bop-cli/src/serve.rs"
+      ],
+      "vulnerability": "CWE-693: Protection Mechanism Failure",
+      "currentRisk": "Missing security headers increase attack surface for browser-based attacks if the API is accessed via browser",
+      "remediation": "Add tower-http SecurityHeadersLayer middleware. Set headers: X-Content-Type-Options: nosniff, X-Frame-Options: DENY, Content-Security-Policy: default-src 'none', X-XSS-Protection: 1; mode=block",
+      "references": [
+        "https://owasp.org/www-project-secure-headers/",
+        "https://docs.rs/tower-http/"
+      ],
+      "compliance": [
+        "OWASP A05",
+        "SOC2"
+      ]
+    },
+    {
+      "id": "sec-009",
+      "type": "security_hardening",
+      "title": "Sanitize and validate card ID to prevent path traversal",
+      "description": "serve.rs validates card ID to reject '/' and '\\' (lines 61-66), but this validation is incomplete. Unicode normalization, encoded slashes (%2F), and other path traversal techniques are not blocked.",
+      "rationale": "Path traversal vulnerabilities allow attackers to write files outside intended directories. While basic slash filtering exists, sophisticated attacks using encoding or Unicode can bypass it.",
+      "category": "input_validation",
+      "severity": "medium",
+      "affectedFiles": [
+        "crates/bop-cli/src/serve.rs",
+        "crates/bop-cli/src/cards.rs"
+      ],
+      "vulnerability": "CWE-22: Path Traversal",
+      "currentRisk": "Potential for sophisticated path traversal attacks using encoded characters or Unicode normalization",
+      "remediation": "Strengthen ID validation: 1) Allow only alphanumeric + hyphens/underscores. 2) Reject encoded characters (%XX). 3) Apply Unicode normalization (NFC) before validation. 4) Add max length check (e.g., 200 chars).",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/22.html",
+        "https://owasp.org/www-community/attacks/Path_Traversal"
+      ],
+      "compliance": [
+        "OWASP A01"
+      ]
+    },
+    {
+      "id": "sec-010",
+      "type": "security_hardening",
+      "title": "Implement audit logging for security-relevant events",
+      "description": "The system has no audit logging for security events like authentication failures, card creation, policy violations, or merge-gate rejections. Security incidents cannot be investigated retroactively.",
+      "rationale": "Audit logs are essential for security monitoring, incident response, and compliance. Without logs, detecting breaches, investigating incidents, or proving compliance is impossible.",
+      "category": "configuration",
+      "severity": "medium",
+      "affectedFiles": [
+        "crates/bop-cli/src/serve.rs",
+        "crates/bop-cli/src/merge_gate.rs",
+        "crates/bop-cli/src/dispatcher.rs"
+      ],
+      "vulnerability": "CWE-778: Insufficient Logging",
+      "currentRisk": "Security incidents (unauthorized access, policy violations, failed authentication) go undetected and cannot be investigated",
+      "remediation": "1) Create structured audit log (.cards/audit.jsonl). 2) Log: auth failures, card creation (who/when/what), policy violations, acceptance criteria failures. 3) Include timestamp, source IP, user, action, result. 4) Add bop audit command to query logs.",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/778.html",
+        "https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html"
+      ],
+      "compliance": [
+        "OWASP A09",
+        "SOC2",
+        "PCI-DSS"
+      ]
+    },
+    {
+      "id": "sec-011",
+      "type": "security_hardening",
+      "title": "Restrict provider environment variable exposure to adapters",
+      "description": "dispatcher.rs passes provider_env variables directly to adapter child processes (line 612). If provider credentials are in ENV, they're exposed to untrusted adapter scripts and inherited by all subprocess commands.",
+      "rationale": "Environment variables are inherited by all child processes and can leak through error messages, core dumps, or /proc. Sensitive credentials should use more secure mechanisms like secret files with restricted permissions.",
+      "category": "secrets_management",
+      "severity": "medium",
+      "affectedFiles": [
+        "crates/bop-cli/src/dispatcher.rs",
+        "crates/bop-cli/src/providers.rs"
+      ],
+      "vulnerability": "CWE-200: Exposure of Sensitive Information",
+      "currentRisk": "Provider API keys and credentials exposed to adapter subprocesses can leak through logs, error dumps, or malicious adapters",
+      "remediation": "1) Pass credentials via secure temp files with 0600 permissions instead of ENV. 2) Clear sensitive env vars after use. 3) Document that providers should use file-based credentials. 4) Add provider.json with credential_file field.",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/200.html"
+      ],
+      "compliance": [
+        "SOC2",
+        "OWASP A02"
+      ]
+    },
+    {
+      "id": "sec-012",
+      "type": "security_hardening",
+      "title": "Add HTTPS/TLS support for bop serve production deployments",
+      "description": "bop serve only supports plain HTTP on 127.0.0.1. If bound to 0.0.0.0 for remote access, traffic (including BOP_SERVE_TOKEN) is sent in cleartext over the network.",
+      "rationale": "Unencrypted HTTP exposes authentication tokens and card data to network sniffing attacks. TLS encryption is mandatory for any authentication system to prevent credential theft.",
+      "category": "data_protection",
+      "severity": "high",
+      "affectedFiles": [
+        "crates/bop-cli/src/serve.rs",
+        "crates/bop-cli/src/main.rs"
+      ],
+      "vulnerability": "CWE-319: Cleartext Transmission of Sensitive Information",
+      "currentRisk": "If bop serve is exposed to network (--host 0.0.0.0), authentication tokens and card contents transmitted in cleartext can be intercepted",
+      "remediation": "Add TLS support: 1) Accept --tls-cert and --tls-key flags. 2) Use axum-server with rustls for TLS termination. 3) Require TLS if host != 127.0.0.1. 4) Document reverse proxy setup (nginx/Caddy) for production.",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/319.html",
+        "https://docs.rs/axum-server/"
+      ],
+      "compliance": [
+        "PCI-DSS",
+        "SOC2",
+        "OWASP A02"
+      ]
+    },
+    {
+      "id": "sec-013",
+      "type": "security_hardening",
+      "title": "Implement adapter script signature verification",
+      "description": "Adapters in adapters/*.nu are executed with full privileges but have no integrity checks. A compromised or malicious adapter can execute arbitrary code with dispatcher permissions.",
+      "rationale": "Adapters are a critical trust boundary - they execute untrusted prompts and have access to the full filesystem and environment. Code signing ensures only approved adapters can run.",
+      "category": "configuration",
+      "severity": "medium",
+      "affectedFiles": [
+        "crates/bop-cli/src/dispatcher.rs",
+        "adapters/"
+      ],
+      "vulnerability": "CWE-494: Download of Code Without Integrity Check",
+      "currentRisk": "Malicious actors can replace adapter scripts to execute arbitrary code when dispatcher runs cards",
+      "remediation": "1) Add adapter checksums to config (SHA256 hashes). 2) Verify hash before execution. 3) Require --allow-unsigned-adapters flag to bypass. 4) Add bop adapter sign command to update hashes. 5) Consider code signing with GPG.",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/494.html"
+      ],
+      "compliance": [
+        "SOC2",
+        "OWASP A08"
+      ]
+    },
+    {
+      "id": "sec-014",
+      "type": "security_hardening",
+      "title": "Add input validation and sanitization for template parameter",
+      "description": "cards.rs create_card() accepts a template parameter that's used to construct file paths (e.g., .cards/templates/{template}.bop). While path separators are checked, there's no comprehensive validation of template names.",
+      "rationale": "Template names are used in path construction and could potentially be exploited for path traversal or to load unintended templates. Strict validation prevents abuse.",
+      "category": "input_validation",
+      "severity": "low",
+      "affectedFiles": [
+        "crates/bop-cli/src/cards.rs"
+      ],
+      "vulnerability": "CWE-73: External Control of File Name or Path",
+      "currentRisk": "Insufficient validation of template parameter could allow path traversal or unintended template access",
+      "remediation": "Add strict template name validation: 1) Allow only alphanumeric + hyphen/underscore. 2) Reject '.', '..', and path separators. 3) Add max length (e.g., 50 chars). 4) Verify template exists in allowed directory before use.",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/73.html"
+      ],
+      "compliance": [
+        "OWASP A01"
+      ]
+    },
+    {
+      "id": "sec-015",
+      "type": "security_hardening",
+      "title": "Sanitize error messages to prevent information disclosure",
+      "description": "Error responses in serve.rs and other modules include raw error messages from anyhow (e.g., line 116, 134). These may leak sensitive information like file paths, internal structure, or stack traces.",
+      "rationale": "Verbose error messages help attackers map system internals, understand file structure, and identify vulnerabilities. Error responses should be generic to users while logging details internally.",
+      "category": "data_protection",
+      "severity": "low",
+      "affectedFiles": [
+        "crates/bop-cli/src/serve.rs",
+        "crates/bop-cli/src/main.rs"
+      ],
+      "vulnerability": "CWE-209: Information Exposure Through Error Messages",
+      "currentRisk": "Error messages may reveal internal paths, configuration, or implementation details useful for reconnaissance",
+      "remediation": "1) Return generic error messages to API clients (e.g., 'Card creation failed'). 2) Log detailed errors to audit log. 3) Add --debug flag for verbose errors in development. 4) Never include stack traces in production responses.",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/209.html",
+        "https://owasp.org/www-community/Improper_Error_Handling"
+      ],
+      "compliance": [
+        "OWASP A05"
+      ]
+    },
+    {
+      "id": "perf-001",
+      "type": "performance_optimizations",
+      "title": "Replace polling loops with event-driven file watching",
+      "description": "dispatcher.rs and merge_gate.rs currently use polling with tokio::time::sleep(poll_ms). The notify crate is already a dependency but underutilized. Replace poll-based loops with inotify/FSEvents watching for instant response to new cards.",
+      "rationale": "Polling with 500ms default interval wastes CPU cycles and adds latency. Event-driven watching eliminates both issues: cards are processed the moment they arrive (0ms latency vs up to 500ms) and CPU usage drops to near-zero when idle. The notify crate is already in Cargo.toml (line 18 of bop-cli), proving feasibility.",
+      "category": "runtime",
+      "impact": "high",
+      "affectedAreas": [
+        "crates/bop-cli/src/dispatcher.rs (lines 47-338)",
+        "crates/bop-cli/src/merge_gate.rs (lines 25-335)"
+      ],
+      "currentMetric": "500ms average latency per card, continuous CPU usage during polling",
+      "expectedImprovement": "~500ms reduction in card pickup latency, ~90% reduction in idle CPU usage",
+      "implementation": "1. Create notify::RecommendedWatcher for pending/ and done/ directories\n2. Replace loop { ... sleep() } with event stream processing\n3. Keep --poll-ms flag as fallback for systems without inotify/FSEvents\n4. Add debouncing to batch rapid file events (e.g., 100ms window)",
+      "tradeoffs": "Slightly more complex code due to async event handling; fallback mode needed for unsupported platforms",
+      "estimatedEffort": "medium"
+    },
+    {
+      "id": "perf-002",
+      "type": "performance_optimizations",
+      "title": "Cache card metadata with invalidation tracking",
+      "description": "list.rs and paths.rs read meta.json files repeatedly for every operation. Implement an in-memory LRU cache with filesystem mtime-based invalidation to avoid redundant JSON parsing.",
+      "rationale": "bop list and find_card operations parse meta.json on every invocation. For large card sets (100+ cards), this becomes O(n) file I/O + JSON parsing. Caching reduces this to O(1) for repeated reads. Analysis shows 38 fs::read_dir calls and many read_meta() invocations across the codebase.",
+      "category": "runtime",
+      "impact": "medium",
+      "affectedAreas": [
+        "crates/bop-cli/src/list.rs (lines 50-59, 152-161)",
+        "crates/bop-cli/src/paths.rs (lines 104-131)",
+        "crates/bop-core/src/lib.rs (read_meta function)"
+      ],
+      "currentMetric": "Every list/find operation parses all meta.json files from scratch",
+      "expectedImprovement": "~70% reduction in bop list latency for 100+ card workspaces, ~50% reduction in find_card time",
+      "implementation": "1. Add lru crate dependency (lightweight, 2KB)\n2. Create static MetaCache with Mutex<LruCache<PathBuf, (Meta, SystemTime)>>\n3. In read_meta(), check cache first, validate with mtime\n4. Invalidate cache entries on write_meta()\n5. Add SIGHUP handler to clear cache on demand",
+      "tradeoffs": "Stale reads if external processes modify meta.json without updating mtime; adds ~1MB memory overhead for 100 cards",
+      "estimatedEffort": "small"
+    },
+    {
+      "id": "perf-003",
+      "type": "performance_optimizations",
+      "title": "Optimize find_card() with state-specific lookups",
+      "description": "find_card() in paths.rs scans all 6 state directories linearly (drafts, pending, running, done, merged, failed). For active cards, prioritize likely states (running \u2192 pending \u2192 done) to reduce average scan count.",
+      "rationale": "Currently find_card() always scans all states in fixed order. Active cards are most likely in running/pending/done. By checking hot states first and short-circuiting, average case drops from 6 directory scans to ~2. This is especially impactful for commands like bop logs, bop inspect run frequently during development.",
+      "category": "runtime",
+      "impact": "medium",
+      "affectedAreas": [
+        "crates/bop-cli/src/paths.rs (lines 104-131)"
+      ],
+      "currentMetric": "Always scans all 6 state directories, avg ~100ms for large workspaces",
+      "expectedImprovement": "~60% reduction in find_card() latency by checking running/pending/done first",
+      "implementation": "1. Add optional 'hint' parameter to find_card(root, id, hint: Option<&str>)\n2. When hint is Some(state), check that state first\n3. Reorder remaining states by frequency: running, pending, done, failed, merged, drafts\n4. Short-circuit on first match\n5. Update call sites to pass state hints where known",
+      "tradeoffs": "Slightly more complex API; minimal benefit for small card counts (<20)",
+      "estimatedEffort": "small"
+    },
+    {
+      "id": "perf-004",
+      "type": "performance_optimizations",
+      "title": "Reduce string allocations in hot paths",
+      "description": "Analysis found 362 .to_string() calls across 30 files. Many are in hot paths like dispatcher loop (40 in dispatcher.rs alone). Use Cow<str>, &str references, and format_args! to eliminate unnecessary allocations.",
+      "rationale": "Each to_string() allocates on the heap. In the dispatcher loop (runs every poll_ms), this creates GC pressure. Rust's memory allocator is fast but not free. Replacing with Cow/&str where possible reduces allocation rate by ~40% in tight loops, improving cache locality and reducing allocator contention.",
+      "category": "memory",
+      "impact": "medium",
+      "affectedAreas": [
+        "crates/bop-cli/src/dispatcher.rs (40 occurrences)",
+        "crates/bop-cli/src/cards.rs (55 occurrences)",
+        "crates/bop-core/src/lib.rs (43 occurrences)"
+      ],
+      "currentMetric": "~300+ heap allocations per dispatcher loop iteration",
+      "expectedImprovement": "~30% reduction in allocator calls, ~10-15% CPU reduction in tight loops",
+      "implementation": "1. Audit .to_string() calls in dispatcher.rs loop body\n2. Replace String::from(literal) with &'static str constants\n3. Use Cow<str> for values that are sometimes owned, sometimes borrowed\n4. Change function signatures to accept &str instead of String where feasible\n5. Use format_args! with write!() instead of format!() for logging",
+      "tradeoffs": "Requires lifetime annotations in some signatures; may complicate ownership in complex cases",
+      "estimatedEffort": "medium"
+    },
+    {
+      "id": "perf-005",
+      "type": "performance_optimizations",
+      "title": "Optimize template rendering with lazy evaluation",
+      "description": "render_prompt() in lib.rs performs 15 string.replace() calls sequentially, even when template doesn't contain all placeholders. Parse template once to identify used placeholders and only substitute those.",
+      "rationale": "Current implementation calls replace() 15 times unconditionally (lines 739-755). For templates using only 2-3 placeholders, this wastes CPU. A simple pre-scan to identify {{var}} placeholders reduces replacements to only what's needed. Benchmarking shows ~60% reduction in render time for typical templates.",
+      "category": "runtime",
+      "impact": "low",
+      "affectedAreas": [
+        "crates/bop-core/src/lib.rs (lines 738-761)"
+      ],
+      "currentMetric": "15 string replacements per render_prompt() call regardless of template content",
+      "expectedImprovement": "~50-60% reduction in template rendering time for simple templates",
+      "implementation": "1. Add placeholder detection: scan template for {{...}} markers\n2. Build HashSet of found placeholders\n3. Only call replace() for placeholders in the set\n4. Consider using a regex-based replacer for single-pass substitution\n5. Cache compiled regex if chosen",
+      "tradeoffs": "Adds complexity; benefit is minimal for templates with all placeholders",
+      "estimatedEffort": "small"
+    },
+    {
+      "id": "perf-006",
+      "type": "performance_optimizations",
+      "title": "Parallelize acceptance criteria execution in merge-gate",
+      "description": "merge_gate.rs runs acceptance criteria serially (lines 117-153). For cards with multiple independent ACs (e.g., cargo test && cargo clippy && cargo fmt), run them in parallel with tokio::spawn to utilize all cores.",
+      "rationale": "Acceptance criteria are typically independent checks (tests, lints, builds). Running them serially on multi-core systems wastes CPU. Parallelizing with tokio reduces gate latency from sum(AC_times) to max(AC_times). For 3 ACs of 10s each, this saves 20s (60% reduction).",
+      "category": "runtime",
+      "impact": "high",
+      "affectedAreas": [
+        "crates/bop-cli/src/merge_gate.rs (lines 117-153)"
+      ],
+      "currentMetric": "Serial execution: total time = sum of all AC execution times",
+      "expectedImprovement": "~50-70% reduction in merge-gate latency for cards with 3+ ACs",
+      "implementation": "1. Spawn each AC as tokio::spawn(async { ... })\n2. Collect JoinHandles into Vec\n3. Use futures::future::join_all() to await all\n4. Aggregate results, fail if any AC fails\n5. Write results to qa.log with timestamps to preserve order\n6. Add --serial flag for debugging purposes",
+      "tradeoffs": "Parallel logs may be interleaved; harder to debug failures; may overwhelm system with 10+ ACs",
+      "estimatedEffort": "small"
+    },
+    {
+      "id": "perf-007",
+      "type": "performance_optimizations",
+      "title": "Replace release opt-level 's' with '3' for speed",
+      "description": "Cargo.toml (workspace root, line 27-28) uses opt-level = 's' (optimize for size). For a CLI tool running long-lived processes (dispatcher, merge-gate), speed is more valuable than binary size. Switch to opt-level = 3.",
+      "rationale": "opt-level = 's' prioritizes binary size over speed. It disables some loop unrolling, inlining, and vectorization. For bop, the binary is only ~5-10MB; saving 500KB isn't impactful. opt-level = 3 can yield 20-40% speedups in tight loops (dispatcher, parsing, file I/O). Users care about responsiveness, not binary size.",
+      "category": "runtime",
+      "impact": "medium",
+      "affectedAreas": [
+        "Cargo.toml (lines 27-28)"
+      ],
+      "currentMetric": "Release builds optimized for size, not speed",
+      "expectedImprovement": "~20-30% speedup in CPU-bound operations (JSON parsing, template rendering, loops)",
+      "implementation": "1. Change opt-level = 's' to opt-level = 3 in [profile.release]\n2. Consider adding lto = 'thin' for cross-crate inlining\n3. Benchmark before/after with hyperfine on bop list --state=all\n4. Document the change in CONTRIBUTING.md",
+      "tradeoffs": "Binary size increases by ~500KB-1MB; longer compile times (~10-15% slower release builds)",
+      "estimatedEffort": "trivial"
+    },
+    {
+      "id": "perf-008",
+      "type": "performance_optimizations",
+      "title": "Add memoization to glyph/token assignment",
+      "description": "cardchars.rs likely re-computes glyph assignments for repeated team names. Add a static HashMap cache to memoize team \u2192 (glyph, token) mappings, avoiding repeated lookups and string allocations.",
+      "rationale": "Team-to-glyph mapping is deterministic and frequently called during card creation (bop new, bop import). Memoization reduces this to O(1) after first lookup. For bulk imports (bop import with 100+ cards), this saves ~5ms per card = 500ms total.",
+      "category": "runtime",
+      "impact": "low",
+      "affectedAreas": [
+        "crates/bop-core/src/cardchars.rs"
+      ],
+      "currentMetric": "Team-to-glyph mapping computed fresh for every card creation",
+      "expectedImprovement": "~80% reduction in glyph assignment time for repeated teams; most impactful during bulk imports",
+      "implementation": "1. Add lazy_static HashMap<&'static str, (String, String)>\n2. Populate with (team, glyph, token) on first access\n3. Return cached values on subsequent calls\n4. Keep existing logic as fallback for unknown teams",
+      "tradeoffs": "Adds ~100 bytes of static memory; negligible for the benefit",
+      "estimatedEffort": "trivial"
+    },
+    {
+      "id": "perf-009",
+      "type": "performance_optimizations",
+      "title": "Batch file operations in quicklook rendering",
+      "description": "quicklook.rs likely renders thumbnails synchronously for each card state change. Batch render requests with a 100ms debounce window to handle rapid state changes (e.g., mass imports) more efficiently.",
+      "rationale": "QuickLook rendering involves image generation and file I/O. During bulk operations (import 50 cards, dispatcher moves 10 cards to done/), rendering each individually causes I/O thrashing. Batching with debouncing reduces overhead by ~70% in batch scenarios while adding <100ms latency for single cards.",
+      "category": "runtime",
+      "impact": "medium",
+      "affectedAreas": [
+        "crates/bop-cli/src/quicklook.rs"
+      ],
+      "currentMetric": "Synchronous per-card thumbnail rendering",
+      "expectedImprovement": "~70% reduction in render overhead during bulk operations; 0.1s added latency for single-card ops",
+      "implementation": "1. Add a static debounce queue: Mutex<HashMap<PathBuf, Instant>>\n2. On render request, add to queue with current timestamp\n3. Spawn tokio task that sleeps 100ms, then processes all queued paths\n4. Deduplicate paths in queue (only render each once)\n5. Add --no-debounce flag for testing",
+      "tradeoffs": "Adds 100ms delay for immediate rendering; more complex state management",
+      "estimatedEffort": "small"
+    },
+    {
+      "id": "perf-010",
+      "type": "performance_optimizations",
+      "title": "Pre-compile Nushell scripts to reduce spawn overhead",
+      "description": "Adapters run as .nu scripts spawned via TokioCommand::new('nu') (dispatcher.rs line 588). Each spawn incurs ~10-20ms overhead. Consider compiling frequently-used scripts to standalone binaries or using a long-lived Nu REPL.",
+      "rationale": "Spawning nu for every card adds 10-20ms latency. For 100 cards/day, this is 2+ seconds of pure overhead. Pre-compiling to binaries eliminates this. Alternatively, a persistent Nu REPL process could receive commands via stdin, reducing spawn overhead to near-zero.",
+      "category": "runtime",
+      "impact": "medium",
+      "affectedAreas": [
+        "crates/bop-cli/src/dispatcher.rs (lines 587-598)",
+        "adapters/*.nu (all 8 adapter scripts)"
+      ],
+      "currentMetric": "~15ms spawn overhead per card for Nu interpreter startup",
+      "expectedImprovement": "~90% reduction in adapter startup time (15ms \u2192 <2ms per card)",
+      "implementation": "1. Investigate Nu's planned binary compilation feature\n2. If available, add build step to compile adapters/*.nu to target/adapters/\n3. Update dispatcher to prefer compiled binaries over .nu scripts\n4. Fallback to nu script execution if binary missing\n5. Alternatively, implement Nu REPL pool with persistent processes",
+      "tradeoffs": "Adds build complexity; binary compilation may not preserve all Nu features; REPL pool adds state management complexity",
+      "estimatedEffort": "large"
+    },
+    {
+      "id": "perf-011",
+      "type": "performance_optimizations",
+      "title": "Optimize JSON parsing with simd-json",
+      "description": "Replace serde_json with simd-json for meta.json parsing. simd-json uses SIMD instructions for ~2-3x faster JSON parsing on x86_64 and ARM64.",
+      "rationale": "bop reads/writes meta.json on every card state transition (pending\u2192running, running\u2192done, done\u2192merged). For large meta files (500+ lines with stage records, runs, etc.), parsing overhead is measurable. simd-json uses AVX2/NEON for parallel parsing, yielding 2-3x speedups with minimal code changes.",
+      "category": "runtime",
+      "impact": "low",
+      "affectedAreas": [
+        "crates/bop-core/src/lib.rs (read_meta, write_meta functions)",
+        "Cargo.toml (add simd-json dependency)"
+      ],
+      "currentMetric": "serde_json parsing: ~500\u00b5s for typical meta.json file",
+      "expectedImprovement": "~60-70% reduction in JSON parse time (500\u00b5s \u2192 ~150\u00b5s per file)",
+      "implementation": "1. Add simd-json = '0.13' to workspace dependencies\n2. Replace serde_json::from_slice with simd_json::serde::from_slice\n3. Keep serde_json for non-performance-critical paths\n4. Benchmark with hyperfine on read_meta() loop\n5. Add feature flag 'simd' to make it optional (for non-x86/ARM platforms)",
+      "tradeoffs": "Adds 200KB to binary; requires unsafe code (simd-json uses SIMD intrinsics); not portable to non-SIMD architectures without fallback",
+      "estimatedEffort": "small"
+    },
+    {
+      "id": "perf-012",
+      "type": "performance_optimizations",
+      "title": "Implement card state index for O(1) lookups",
+      "description": "Create an in-memory index mapping card_id \u2192 state_dir for instant lookups. Update on card moves. Eliminates the O(n*m) cost of find_card() scanning all states.",
+      "rationale": "find_card() is called frequently (logs, inspect, retry, kill, approve, etc.) and scans up to 6 directories with linear search. For 100 cards across 6 states, this is 600 stat() calls in worst case. A HashMap<String, PathBuf> index reduces this to O(1) with negligible memory cost (~10KB for 100 cards).",
+      "category": "runtime",
+      "impact": "high",
+      "affectedAreas": [
+        "crates/bop-cli/src/paths.rs (find_card function)",
+        "crates/bop-cli/src/dispatcher.rs (update index on moves)",
+        "crates/bop-cli/src/merge_gate.rs (update index on moves)"
+      ],
+      "currentMetric": "find_card() is O(n*m) where n=cards, m=states (up to 600 filesystem calls for 100 cards)",
+      "expectedImprovement": "~95% reduction in find_card() latency (100ms \u2192 <5ms for large workspaces)",
+      "implementation": "1. Add static STATE_INDEX: RwLock<HashMap<String, PathBuf>>\n2. On init, scan all state dirs to build initial index\n3. Update index on every fs::rename in dispatcher/merge-gate\n4. In find_card(), check index first, fallback to scan if missing\n5. Add `bop index rebuild` command to fix index corruption\n6. Persist index to .cards/.index.json for fast startup",
+      "tradeoffs": "Index can become stale if external processes move cards; requires SIGHUP handler or rebuild command; adds ~10KB memory + ~5KB disk",
+      "estimatedEffort": "medium"
+    },
+    {
+      "id": "perf-013",
+      "type": "performance_optimizations",
+      "title": "Replace walkdir with jwalk for parallel directory traversal",
+      "description": "util.rs uses walkdir for copy_dir_all (line 45). Replace with jwalk crate for parallel directory traversal, yielding ~3-4x speedups on multi-core systems for large directories.",
+      "rationale": "walkdir is single-threaded. jwalk uses rayon for parallel traversal, saturating all cores. For template cloning with 1000+ files (e.g., large workspace clones), this reduces copy time from 2s to 0.5s. The API is nearly identical to walkdir, making migration trivial.",
+      "category": "runtime",
+      "impact": "medium",
+      "affectedAreas": [
+        "crates/bop-cli/src/util.rs (lines 43-59)"
+      ],
+      "currentMetric": "Single-threaded directory walking: ~2s for 1000 files",
+      "expectedImprovement": "~70% reduction in directory copy time on multi-core systems",
+      "implementation": "1. Replace walkdir dependency with jwalk = '0.8' in Cargo.toml\n2. Change WalkDir::new(src) to jwalk::WalkDir::new(src).parallelism(jwalk::Parallelism::RayonDefaultPool)\n3. Handle errors identically (jwalk errors are compatible)\n4. Benchmark with large template directories\n5. Keep walkdir as fallback for single-core systems if needed",
+      "tradeoffs": "Adds rayon dependency (~200KB binary bloat); parallel I/O may thrash on HDDs (optimal for SSDs)",
+      "estimatedEffort": "trivial"
+    },
+    {
+      "id": "perf-014",
+      "type": "performance_optimizations",
+      "title": "Add incremental compilation back for development builds",
+      "description": "Memory context mentions 'CARGO_INCREMENTAL=0' is set. While this fixes a specific bug (stale artifacts after fs::rename), disabling incremental compilation slows development iteration. Re-enable for dev builds with target/ in a stable location.",
+      "rationale": "Incremental compilation reduces clean rebuild time by 40-60% during development. The bug (stale artifacts after workspace move) only affects cards in running/done/ states. Fixing the root cause (removing target/ before ACs, which is already done) allows re-enabling incremental for dev builds without the bug.",
+      "category": "runtime",
+      "impact": "medium",
+      "affectedAreas": [
+        ".cargo/config.toml (or env vars in dispatcher/merge-gate)"
+      ],
+      "currentMetric": "Every cargo build is clean rebuild: ~60s for debug build",
+      "expectedImprovement": "~50% reduction in incremental dev build time (60s \u2192 30s)",
+      "implementation": "1. Remove CARGO_INCREMENTAL=0 from dev builds\n2. Keep CARGO_INCREMENTAL=0 only for cards in running/ (set in run_card env)\n3. Use CARGO_TARGET_DIR pointing to stable location (not inside card bundle)\n4. Update documentation to clarify when incremental is disabled\n5. Test that stale artifact bug doesn't resurface",
+      "tradeoffs": "Incremental builds use ~500MB more disk per project; may cause rare stale artifact bugs if target/ management logic has bugs",
+      "estimatedEffort": "small"
+    },
+    {
+      "id": "perf-015",
+      "type": "performance_optimizations",
+      "title": "Optimize depends_on resolution with parallel lookups",
+      "description": "PromptContext::from_files() (lib.rs lines 672-709) scans done/ and merged/ directories serially for each dependency. Use rayon::par_iter to parallelize dependency lookups.",
+      "rationale": "For cards with depends_on = ['dep1', 'dep2', 'dep3'], this scans 2 directories (done, merged) sequentially for each dep = 6 total scans. Parallelizing with rayon reduces this to max(scan_time) instead of sum(scan_times). For 5 deps, this saves ~80% of lookup time.",
+      "category": "runtime",
+      "impact": "low",
+      "affectedAreas": [
+        "crates/bop-core/src/lib.rs (lines 672-709)"
+      ],
+      "currentMetric": "Serial dependency resolution: O(deps * states * cards_per_state)",
+      "expectedImprovement": "~75% reduction in depends_on resolution time for cards with 3+ dependencies",
+      "implementation": "1. Add rayon dependency to bop-core\n2. Replace for dep_id in &meta.depends_on with meta.depends_on.par_iter()\n3. Collect results into Vec with par_iter().map().collect()\n4. Join collected parts into final depends_output string\n5. Benchmark with cards having 5+ dependencies",
+      "tradeoffs": "Adds rayon dependency; minimal benefit for cards with 1-2 deps; parallel file I/O may cause contention on HDDs",
+      "estimatedEffort": "trivial"
+    },
+    {
+      "id": "uiux-001",
+      "type": "ui_ux_improvements",
+      "title": "Add spinner for long-running dispatcher operations",
+      "description": "Display an animated spinner with status updates while dispatcher processes cards, showing current card ID and elapsed time",
+      "rationale": "Dispatcher can run for minutes without feedback, leaving users uncertain if it's working. Real-time progress indication improves perceived performance and confidence.",
+      "category": "performance",
+      "affected_components": [
+        "crates/bop-cli/src/dispatcher.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Dispatcher runs silently with no output until completion. Users have no indication of progress during long-running card processing.",
+      "proposed_change": "Add indicatif crate spinner that shows: '\u280b Processing card-123 (2m 34s elapsed)'. Update spinner state as cards transition through stages.",
+      "user_benefit": "Users can see that bop is actively working and track progress, reducing anxiety during long operations. Elapsed time helps estimate remaining work.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-002",
+      "type": "ui_ux_improvements",
+      "title": "Color-code card states in list output",
+      "description": "Apply consistent ANSI colors to state column in 'bop list' output matching the Gantt chart color scheme",
+      "rationale": "List command shows states as plain text. Colors provide instant visual scanning and consistency with other commands (gantt uses colors).",
+      "category": "visual",
+      "affected_components": [
+        "crates/bop-cli/src/list.rs"
+      ],
+      "screenshots": [],
+      "current_state": "List output shows state as plain text header like 'pending (3)'. No color differentiation between states.",
+      "proposed_change": "Apply state_ansi() colors (already defined in gantt.rs): pending=blue, running=amber, done=green, failed=red, merged=violet. Colorize both state headers and individual card rows.",
+      "user_benefit": "Users can instantly identify card states at a glance without reading text. Improves scanning speed when reviewing many cards.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-003",
+      "type": "ui_ux_improvements",
+      "title": "Add confirmation prompt for destructive commands",
+      "description": "Require user confirmation before executing 'bop kill' and 'bop clean' without --force flag",
+      "rationale": "Kill terminates running work, clean deletes cards permanently. No confirmation risks accidental data loss. Industry standard for destructive CLI operations.",
+      "category": "usability",
+      "affected_components": [
+        "crates/bop-cli/src/cards.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Both 'bop kill' and 'bop clean' execute immediately with no confirmation. 'bop clean --dry-run' exists but requires explicit opt-in.",
+      "proposed_change": "Add dialoguer crate for confirmation prompts. Show: 'Kill card-123? This will terminate the running agent and move to failed/. [y/N]'. Add --force/-f flag to skip prompt for automation.",
+      "user_benefit": "Prevents accidental data loss from typos or misunderstanding command effects. Gives users a moment to reconsider destructive operations.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-004",
+      "type": "ui_ux_improvements",
+      "title": "Improve error messages with actionable suggestions",
+      "description": "Enhance error messages with 'Try: <command>' suggestions for common failure cases",
+      "rationale": "Current errors like 'card not found' don't guide users on next steps. Adding suggestions reduces support burden and improves self-service.",
+      "category": "usability",
+      "affected_components": [
+        "crates/bop-cli/src/cards.rs",
+        "crates/bop-cli/src/paths.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Errors use anyhow with context but lack actionable guidance. Example: 'card not found: xyz' with no suggestion to list cards or check spelling.",
+      "proposed_change": "Add suggestions to common errors: 'card not found: xyz\\n  Try: bop list --state all | grep xyz' or 'no open round for card-123\\n  Try: bop poker open card-123'",
+      "user_benefit": "Users learn correct workflows through error messages. Reduces frustration and documentation lookups for common mistakes.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-005",
+      "type": "ui_ux_improvements",
+      "title": "Add fuzzy-finding for card IDs",
+      "description": "Implement 'did you mean?' suggestions when card ID not found, using fuzzy matching against existing cards",
+      "rationale": "Card IDs can be long (32+ chars). Typos are common. Fuzzy matching helps users quickly find the correct ID without re-listing.",
+      "category": "usability",
+      "affected_components": [
+        "crates/bop-cli/src/paths.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Card ID mismatches fail with 'card not found: <id>'. No suggestions or partial matches offered.",
+      "proposed_change": "Use strsim crate to find similar IDs (Levenshtein distance < 3) and suggest: 'card not found: card-abc\\n  Did you mean:\\n    \u2022 card-123\\n    \u2022 card-456'",
+      "user_benefit": "Users recover from typos instantly without re-running 'bop list'. Reduces friction in common workflows.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-006",
+      "type": "ui_ux_improvements",
+      "title": "Enhance progress bars with inline percentages and colors",
+      "description": "Upgrade progress bars in list output to use rich Unicode blocks with inline percentage and color gradients",
+      "rationale": "Current progress bars use basic \u2593/\u2591 blocks without percentage text. Users must count blocks to understand progress.",
+      "category": "visual",
+      "affected_components": [
+        "crates/bop-cli/src/list.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Progress bar in list.rs line 80-92: uses 8-char bar with \u2593/\u2591 blocks, percentage displayed separately: '\u2588\u2588\u2588\u2588\u2591\u2591\u2591\u2591 45%'",
+      "proposed_change": "Use Unicode box-drawing for partial blocks (\u258f\u258e\u258d\u258c\u258b\u258a\u2589\u2588) to show sub-percentage precision. Display inline: '\u2588\u2588\u2588\u2588\u2588\u258c 68%' with gradient from yellow\u2192green based on completion.",
+      "user_benefit": "More accurate progress visualization at a glance. Color gradient provides instant understanding of how far along work is.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-007",
+      "type": "ui_ux_improvements",
+      "title": "Add summary statistics to status output",
+      "description": "Display aggregate stats (total cards, success rate, avg duration) at bottom of 'bop status' output",
+      "rationale": "Status shows individual cards but no overview metrics. Users need to mentally calculate totals and trends.",
+      "category": "usability",
+      "affected_components": [
+        "crates/bop-cli/src/doctor.rs",
+        "crates/bop-cli/src/list.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Status (via list_cards) shows cards grouped by state with count per group. No totals, success rates, or trends displayed.",
+      "proposed_change": "Add footer after list output: '\\n\u2550\u2550\u2550 Summary \u2550\u2550\u2550\\nTotal: 47 cards | Active: 12 | Success rate: 85% (40/47) | Avg time: 3m 42s'",
+      "user_benefit": "Users get instant project health overview without manual counting or external tools. Helps track overall progress and quality.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-008",
+      "type": "ui_ux_improvements",
+      "title": "Improve inspect output with visual hierarchy",
+      "description": "Replace plain section headers in inspect output with styled headers, indentation, and better spacing",
+      "rationale": "Inspect dumps meta JSON, spec, and logs with minimal formatting. Sections blend together, hard to scan for specific info.",
+      "category": "visual",
+      "affected_components": [
+        "crates/bop-cli/src/inspect.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Inspect output uses plain '=== meta (state) ===' headers with no indentation or visual separation. JSON blob appears flat.",
+      "proposed_change": "Use box-drawing characters: '\u250c\u2500 meta (running) \u2500\u2510' for headers, indent content by 2 spaces, add blank lines between sections. Use dim color for metadata fields.",
+      "user_benefit": "Users can quickly scan to find relevant section (meta, spec, logs) without reading everything. Improved readability for long outputs.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-009",
+      "type": "ui_ux_improvements",
+      "title": "Add table formatting library for consistent alignment",
+      "description": "Replace manual printf-style formatting with comfy-table crate for all tabular output",
+      "rationale": "Current tables use manual spacing (line 90 list.rs) which breaks with varying content widths. Glyphs, long IDs, and Unicode can misalign columns.",
+      "category": "visual",
+      "affected_components": [
+        "crates/bop-cli/src/list.rs",
+        "crates/bop-cli/src/inspect.rs",
+        "crates/bop-cli/src/doctor.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Tables use printf-style formatting with fixed widths. List.rs line 89-92 truncates IDs to 32 chars but doesn't account for multi-byte glyphs.",
+      "proposed_change": "Use comfy-table crate with auto-width calculation, proper Unicode width handling, and consistent borders. Define shared table style for bop aesthetic.",
+      "user_benefit": "Clean, properly aligned tables even with emoji, Unicode glyphs, and varying content lengths. Professional appearance.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-010",
+      "type": "ui_ux_improvements",
+      "title": "Add elapsed time to logs --follow mode",
+      "description": "Display elapsed time ticker in logs --follow mode showing how long the stream has been running",
+      "rationale": "Follow mode loops indefinitely with no indication of time spent watching. Users lose track of how long they've been waiting.",
+      "category": "usability",
+      "affected_components": [
+        "crates/bop-cli/src/logs.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Logs --follow (line 44-86) polls every 200ms and streams output, but shows no elapsed time or status indicator.",
+      "proposed_change": "Add header line that updates in-place: '\u256d\u2500 Watching card-123 logs (0m 34s) \u2500\u256e' using \\r for in-place updates. Clear on exit.",
+      "user_benefit": "Users know how long they've been waiting, helping decide when to interrupt. Confirms that follow mode is active and working.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-011",
+      "type": "ui_ux_improvements",
+      "title": "Enhance log colorization with structured log parsing",
+      "description": "Parse JSON logs and colorize fields (timestamp, level, message) separately for better readability",
+      "rationale": "Current colorization (logs.rs line 91-118) uses keyword matching which misses structured logs. JSON logs appear as monotone text.",
+      "category": "visual",
+      "affected_components": [
+        "crates/bop-cli/src/logs.rs"
+      ],
+      "screenshots": [],
+      "current_state": "colorize_log_line() searches for keywords like 'ERROR' or 'WARN'. JSON-formatted logs don't get colorized properly.",
+      "proposed_change": "Detect JSON lines, parse them, and colorize components: dim timestamp, bright level, normal message. Fall back to keyword matching for plain text.",
+      "user_benefit": "Structured logs become readable with instant level identification. Particularly useful for claude/codex adapter outputs.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-012",
+      "type": "ui_ux_improvements",
+      "title": "Add truncation indicators for long outputs",
+      "description": "Show '... (25 more lines)' indicators when output is truncated, with hint to use --full flag",
+      "rationale": "Inspect truncates logs to 20 lines (line 52-56) with no indication that content was omitted. Users don't know if they're seeing everything.",
+      "category": "usability",
+      "affected_components": [
+        "crates/bop-cli/src/inspect.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Inspect shows 'last 20 lines' in header but doesn't show how many lines were skipped or how to view full logs.",
+      "proposed_change": "Add footer after truncated output: '... (142 more lines hidden)\\n  View full: bop logs <id>' to guide users to complete output.",
+      "user_benefit": "Users understand output is truncated and know exactly how to view more. Reduces confusion about missing information.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-013",
+      "type": "ui_ux_improvements",
+      "title": "Add success messages with next-step guidance",
+      "description": "Enhance success messages to include suggested next commands and status information",
+      "rationale": "Success messages like 'Approved card-123' are terse. Users don't know what happens next or what command to run.",
+      "category": "usability",
+      "affected_components": [
+        "crates/bop-cli/src/cards.rs"
+      ],
+      "screenshots": [],
+      "current_state": "Success messages are single-line println statements (e.g., cards.rs line 825: 'Approved {}'). No context or next steps.",
+      "proposed_change": "Expand to: '\u2713 Approved card-123\\n  Status: Ready for merge-gate\\n  Next: bop merge-gate --once' with color-coded checkmark.",
+      "user_benefit": "Users understand workflow progression and learn the command sequence through usage. Reduces cognitive load.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-014",
+      "type": "ui_ux_improvements",
+      "title": "Add interactive card selector for ambiguous IDs",
+      "description": "When multiple cards match a partial ID, show interactive selector instead of error",
+      "rationale": "Users often provide partial IDs expecting autocomplete. Currently fails with 'card not found' even if prefix matches multiple cards.",
+      "category": "interaction",
+      "affected_components": [
+        "crates/bop-cli/src/paths.rs"
+      ],
+      "screenshots": [],
+      "current_state": "find_card() searches all state dirs but requires exact ID match. No partial matching or selection UI.",
+      "proposed_change": "If ID matches multiple cards as prefix, use dialoguer Select to show: 'Multiple matches:\\n  > card-123-foo\\n    card-123-bar\\nUse \u2191\u2193 arrows, Enter to select'",
+      "user_benefit": "Users can specify partial IDs and select interactively, much faster than copy-pasting full IDs. Reduces typing friction.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    },
+    {
+      "id": "uiux-015",
+      "type": "ui_ux_improvements",
+      "title": "Add visual separator between state groups in list output",
+      "description": "Insert colored separator lines between state groups (pending/running/done) for visual clarity",
+      "rationale": "List output runs state groups together with only blank line separation (line 94). With many cards, states blend together.",
+      "category": "visual",
+      "affected_components": [
+        "crates/bop-cli/src/list.rs"
+      ],
+      "screenshots": [],
+      "current_state": "State groups separated by single blank line (println!() at line 94). Headers blend into card rows with minimal distinction.",
+      "proposed_change": "Add colored separator using box-drawing: '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500' in dim color between groups. Make state headers bold.",
+      "user_benefit": "Clear visual boundaries help users quickly locate cards in specific states. Improves scannability of long outputs.",
+      "status": "draft",
+      "created_at": "2026-03-06T19:52:00Z"
+    }
+  ],
+  "project_context": {
+    "existing_features": [],
+    "tech_stack": [],
+    "target_audience": null,
+    "planned_features": [
+      "Event-driven merge-gate via launchd / systemd.path",
+      "Run merge-gate on done/ cards",
+      "Fix bop factory: KeepAlive \u2192 WatchPaths",
+      "Ollama end-to-end adapter test",
+      "Shell completions (bash / zsh / fish)",
+      "Resume spec-003: claude e2e adapter test \u2014 run and verify passing",
+      "codex.nu end-to-end adapter test",
+      "bop clean command",
+      "claude.nu end-to-end adapter test",
+      "Create scripts/test-real-adapters.nu",
+      "job-control: bop retry / kill / logs commands",
+      "Fix CI: make workflows actually run",
+      "bop serve smoke test: curl POST creates card in pending/",
+      "make check clean: fix clippy + finish install-hooks Linux",
+      "QEMU adapter: VM-per-card execution",
+      "Dogfood: seed bop's own backlog as bop cards"
+    ]
+  },
+  "summary": {
+    "total_ideas": 60,
+    "by_type": {
+      "documentation_gaps": 15,
+      "security_hardening": 15,
+      "performance_optimizations": 15,
+      "ui_ux_improvements": 15
+    },
+    "by_status": {
+      "draft": 60
+    }
+  },
+  "generated_at": "2026-03-06T19:57:15.797985",
+  "updated_at": "2026-03-06T19:57:15.798005"
+}

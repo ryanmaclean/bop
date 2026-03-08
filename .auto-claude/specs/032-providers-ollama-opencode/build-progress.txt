@@ -1,0 +1,73 @@
+=== AUTO-BUILD PROGRESS ===
+
+Project: Spec 032 — bop providers: Ollama + opencode
+Workspace: /Users/studio/bop
+Started: 2026-03-07
+
+Workflow Type: feature
+Rationale: Adding two new provider implementations (Ollama local/cloud + OpenCode) following existing Provider trait pattern. Single crate, no multi-service complexity.
+
+Session 1 (Planner):
+- Created implementation_plan.json
+- Phases: 4
+- Total subtasks: 6
+- Created context.json
+- Created init.sh
+
+Phase Summary:
+- Phase 1 (Extend ProviderSnapshot + Display): 1 subtask, no dependencies
+  - Add loaded_models field to ProviderSnapshot, update table rendering
+- Phase 2 (Ollama Provider): 2 subtasks, depends on phase-1
+  - subtask-2-1: OllamaLocalProvider (detect via TCP, fetch via /api/ps)
+  - subtask-2-2: OllamaCloudProvider (detect via env/config, fetch with auth)
+- Phase 3 (OpenCode Provider): 1 subtask, depends on phase-1
+  - subtask-3-1: OpenCodeProvider (detect via TCP port 4096, fetch sessions API)
+- Phase 4 (Registration + Integration): 2 subtasks, depends on phases 2+3
+  - subtask-4-1: Register all new providers in mod.rs
+  - subtask-4-2: Full verification (test, clippy, fmt)
+
+Services Involved:
+- bop-cli: All new provider code lives in crates/bop-cli/src/providers/
+
+Key Design Decisions:
+- Ollama local/cloud are separate Provider impls (different detect logic)
+- detect() uses std::net::TcpStream::connect_timeout (sync, 500ms) for port checks
+- ProviderSnapshot gains loaded_models: Option<Vec<String>> for Ollama model names
+- No new Cargo dependencies needed (reqwest, async-trait, tokio, chrono, dirs all present)
+- OpenCode SSE subscription deferred (additive, REST fetch is core)
+
+Parallelism Analysis:
+- Max parallel phases: 2 (phases 2+3 can run together)
+- Recommended workers: 1 (conservative — phases share mod.rs for registration)
+- Parallel groups: [phase-2-ollama, phase-3-opencode] — same dependency, different files
+
+=== STARTUP COMMAND ===
+
+To continue building this spec, run:
+
+  source .auto-claude/.venv/bin/activate && python .auto-claude/run.py --spec 032 --parallel 1
+
+=== END SESSION 1 ===
+
+## 2026-03-08 - Subtask 2-1 Completed: OllamaLocalProvider Implementation
+
+✅ Created crates/bop-cli/src/providers/ollama.rs with OllamaLocalProvider
+✅ Implemented detect() using TcpStream::connect_timeout (localhost:11434, 500ms timeout)
+✅ Implemented fetch() with GET http://localhost:11434/api/ps
+✅ Added parse_ps_response() as separate testable function
+✅ Parses {models:[{name, size_vram, expires_at}]} response format
+✅ Computes loaded model names from response
+✅ Finds earliest expires_at for reset_at field
+✅ Returns ProviderSnapshot with correct fields
+✅ Handles empty models list correctly
+✅ Added 4 unit tests (all passing):
+   - parse_ps_response_with_models
+   - parse_ps_response_with_empty_models
+   - parse_ps_response_with_expires_at
+   - parse_ps_response_with_malformed_json
+✅ Registered OllamaLocalProvider in all_providers()
+
+Commit: 23f883a
+Tests: cargo test -p bop --bin bop ollama (4/4 passed)
+
+Next: subtask-2-2 - Add OllamaCloudProvider

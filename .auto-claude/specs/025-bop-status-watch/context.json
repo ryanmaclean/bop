@@ -1,0 +1,35 @@
+{
+  "files_to_modify": {
+    "bop-cli": [
+      "crates/bop-cli/src/main.rs",
+      "crates/bop-cli/src/list.rs"
+    ]
+  },
+  "files_to_reference": [
+    "crates/bop-cli/src/dispatcher.rs",
+    "crates/bop-cli/src/gantt.rs",
+    "crates/bop-cli/src/merge_gate.rs"
+  ],
+  "patterns": {
+    "notify_watcher_pattern": "dispatcher.rs and merge_gate.rs use notify-debouncer-mini with 100ms debounce. Pattern: spawn thread, create debouncer, watch directory recursively, send events over mpsc channel to async runtime.",
+    "terminal_width_detection": "gantt.rs has term_width() function using ioctl TIOCGWINSZ on Unix. Detects width at runtime, works in Zellij panes and tmux.",
+    "ansi_cursor_control": "Use ANSI escape codes for cursor positioning: \\x1b[{N}A moves cursor up N lines. Must track line count of last output.",
+    "signal_handling": "Use tokio::signal::ctrl_c() for clean shutdown. Drop watcher before exit to avoid fd leak.",
+    "stats_display": "list.rs already has calculate_stats() and print_summary() for displaying counts and averages."
+  },
+  "existing_implementations": {
+    "description": "notify crate already integrated in spec 020. Dispatcher and merge-gate use it to watch .cards/ for filesystem events. Terminal width detection exists in gantt.rs using ioctl.",
+    "relevant_files": [
+      "crates/bop-cli/src/dispatcher.rs",
+      "crates/bop-cli/src/gantt.rs",
+      "crates/bop-cli/src/list.rs"
+    ]
+  },
+  "dependencies_needed": {
+    "new": [],
+    "existing": [
+      "notify = \"6\"",
+      "notify-debouncer-mini = \"0.4\""
+    ]
+  }
+}

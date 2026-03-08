@@ -1,0 +1,36 @@
+{
+  "project_type": "monorepo",
+  "services": {
+    "bop-cli": {
+      "path": "crates/bop-cli",
+      "tech_stack": ["rust", "tokio", "notify"],
+      "dev_command": "cargo build",
+      "test_command": "cargo test",
+      "description": "Main CLI with dispatcher and merge_gate modules"
+    },
+    "bop-core": {
+      "path": "crates/bop-core",
+      "tech_stack": ["rust"],
+      "dev_command": "cargo build",
+      "test_command": "cargo test",
+      "description": "Core types and utilities"
+    }
+  },
+  "infrastructure": {
+    "docker": false,
+    "database": null,
+    "build_system": "cargo"
+  },
+  "conventions": {
+    "linter": "clippy",
+    "formatter": "rustfmt",
+    "testing": "cargo test",
+    "check_command": "make check"
+  },
+  "file_structure": {
+    "workspace_root": ".",
+    "main_crate": "crates/bop-cli",
+    "source_files": "crates/*/src/**/*.rs",
+    "test_files": "crates/*/tests/**/*.rs"
+  }
+}

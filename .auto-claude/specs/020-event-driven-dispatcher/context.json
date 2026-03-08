@@ -1,0 +1,41 @@
+{
+  "files_to_modify": {
+    "bop-cli": [
+      "crates/bop-cli/src/dispatcher.rs",
+      "crates/bop-cli/src/merge_gate.rs",
+      "crates/bop-cli/Cargo.toml",
+      "Cargo.toml"
+    ]
+  },
+  "files_to_reference": [
+    "crates/bop-cli/src/icons.rs"
+  ],
+  "patterns": {
+    "file_watching": "icons.rs (lines 99-150) shows the existing pattern: RecommendedWatcher with std::sync::mpsc::channel for sync contexts. For async, we'll use tokio::sync::mpsc and notify-debouncer-mini.",
+    "polling_loop": "Both dispatcher.rs (line 348) and merge_gate.rs (line 334) use `tokio::time::sleep(Duration::from_millis(poll_ms))` in a loop. Replace with event-driven watcher.",
+    "error_handling": "Functions return anyhow::Result<()> and use ? operator for error propagation",
+    "async_runtime": "Uses tokio async runtime with tokio::process::Command for spawning processes"
+  },
+  "existing_implementations": {
+    "description": "notify v6 is already in Cargo.toml. icons.rs has a working file watcher pattern using notify::RecommendedWatcher",
+    "relevant_files": [
+      "crates/bop-cli/src/icons.rs",
+      "crates/bop-cli/src/dispatcher.rs",
+      "crates/bop-cli/src/merge_gate.rs"
+    ],
+    "key_functions": {
+      "dispatcher": "run_dispatcher() at dispatcher.rs:15 - polls pending/ with tokio::time::sleep",
+      "merge_gate": "run_merge_gate() at merge_gate.rs:13 - polls done/ with tokio::time::sleep",
+      "icons_watcher": "cmd_icons_watch() at icons.rs:100 - reference pattern for notify usage"
+    }
+  },
+  "dependencies": {
+    "already_present": ["notify = \"6\""],
+    "to_add": ["notify-debouncer-mini = \"0.4\""],
+    "feature_flags": ["notify features = [\"macos_fsevent\"] on macOS"]
+  },
+  "cli_interface": {
+    "poll_ms_flag": "Both dispatcher and merge-gate have --poll-ms flag (default 500)",
+    "fallback_required": "Spec requires keeping --poll-ms as fallback when watcher fails"
+  }
+}

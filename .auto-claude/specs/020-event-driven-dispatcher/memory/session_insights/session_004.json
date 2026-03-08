@@ -1,0 +1,130 @@
+{
+  "session_number": 4,
+  "timestamp": "2026-03-07T06:15:42.161489+00:00",
+  "subtasks_completed": [
+    "subtask-3-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/merge_gate.rs",
+        "changes": "Refactored polling mechanism to event-driven filesystem watching",
+        "key_modifications": [
+          "Added notify_debouncer_mini and tokio::sync::mpsc imports",
+          "Moved done_dirs collection outside main loop for watcher setup",
+          "Spawned dedicated thread for filesystem watcher with 100ms debounce",
+          "Replaced tokio::time::sleep(Duration::from_millis(poll_ms)) with channel-based rx.recv().await",
+          "Added needs_scan flag to ensure initial scan and event-triggered rescans",
+          "Implemented .bop extension filter for relevant filesystem events"
+        ],
+        "lines_added": 85,
+        "lines_removed": 15,
+        "net_change": 70
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Event-driven polling replacement",
+        "description": "Shifted from time-based polling (sleep in loop) to filesystem event notification with debounce",
+        "implementation_detail": "Used notify_debouncer_mini with 100ms debounce window to batch rapid filesystem changes"
+      },
+      {
+        "pattern": "Cross-thread channel communication",
+        "description": "Spawned std::thread for watcher, uses std::sync::mpsc internally, bridges to async context via tokio::sync::mpsc::unbounded_channel",
+        "relevance": "Necessary because notify crate requires synchronous channel receiver"
+      },
+      {
+        "pattern": "Team-based directory scanning",
+        "description": "Scans for both flat done/ and team-prefixed directories (team-*) for complete coverage",
+        "implementation_detail": "Checks file_name().to_string_lossy() against team- prefix before adding to watch list"
+      },
+      {
+        "pattern": "Event filtering with extension check",
+        "description": "Only processes filesystem events where path.extension() == 'bop' and event kind is Any/AnyContinuous",
+        "rationale": "Reduces false positives from unrelated directory changes"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Async/sync thread boundary",
+        "description": "Watcher runs in std::thread (blocking), not tokio::task (async). Requires std::sync::mpsc internally but bridges to tokio::sync::mpsc for async loop",
+        "impact": "Complexity in channel setup, potential confusion about threading model"
+      },
+      {
+        "gotcha": "UnusedVariable: poll_ms parameter",
+        "description": "Parameter renamed to _poll_ms after removal of sleep call, but kept for backward API compatibility",
+        "impact": "Technical debt: API still accepts poll_ms but ignores it; should be removed in next cleanup"
+      },
+      {
+        "gotcha": "Directory existence assumption",
+        "description": "Watcher only watches done_dir if done_dir.exists() at startup; new directories created later won't be watched",
+        "impact": "If new team-* directories created after merge_gate starts, their done/ subdirs won't be monitored until restart"
+      },
+      {
+        "gotcha": "Extension filter precision",
+        "description": "Event filter checks .bop extension; any .jobcard files without .bop extension won't trigger rescans",
+        "impact": "Depends on strict filesystem naming convention; any files not ending in .bop are silently ignored"
+      },
+      {
+        "gotcha": "needs_scan flag initialization",
+        "description": "Set to true at start to ensure immediate initial scan, but subtle interaction with !once && !needs_scan branch",
+        "impact": "Once mode skips the recv().await, preventing early exit; behavior correct but requires careful reading"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "outcome_details": {
+      "objective": "Replace polling with filesystem watcher to reduce CPU usage and improve responsiveness",
+      "result": "Achieved\u2014moved from sleep-based polling to event-driven notification with 100ms debounce",
+      "commit": "ff02dfe auto-claude: subtask-3-1 - Refactor run_merge_gate to use notify watcher with 100ms debounce",
+      "test_status": "Completed successfully in session 4"
+    },
+    "recommendations": [
+      {
+        "priority": "medium",
+        "category": "Technical Debt",
+        "item": "Remove _poll_ms parameter",
+        "rationale": "Parameter is ignored after polling removal; cleanup for API clarity",
+        "effort": "Low (breaking change, document in CHANGELOG)"
+      },
+      {
+        "priority": "medium",
+        "category": "Robustness",
+        "item": "Watch for new team-* directories at runtime",
+        "rationale": "Current implementation only watches directories that exist at startup; dynamic team creation won't be monitored",
+        "effort": "Medium (requires periodic directory enumeration or inotify for parent dir)"
+      },
+      {
+        "priority": "low",
+        "category": "Observability",
+        "item": "Add metrics for watcher events vs. actual processing",
+        "rationale": "Debouncing may filter events; visibility into event volume and filtering ratio helps validate design",
+        "effort": "Low (add counter, log periodically)"
+      },
+      {
+        "priority": "low",
+        "category": "Consistency",
+        "item": "Consider using tokio::task instead of std::thread for watcher",
+        "rationale": "Current std::thread approach works but doesn't align with async-first pattern used elsewhere",
+        "effort": "Medium (requires async-compatible notify usage or wrapper)"
+      },
+      {
+        "priority": "low",
+        "category": "Documentation",
+        "item": "Document channel bridge design decision",
+        "rationale": "Async/sync boundary with two-stage channel (std + tokio) is non-obvious; inline comment or arch doc needed",
+        "effort": "Low (comments only)"
+      }
+    ],
+    "subtask_id": "subtask-3-1",
+    "session_num": 4,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/merge_gate.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-3-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

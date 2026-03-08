@@ -1,0 +1,63 @@
+{
+  "files_to_modify": {
+    "bop-cli": [
+      "crates/bop-cli/Cargo.toml",
+      "crates/bop-cli/src/main.rs",
+      "crates/bop-cli/src/list.rs"
+    ],
+    "vibekanban": [
+      "vibekanban/_bop_provider_impl.py"
+    ]
+  },
+  "files_to_create": {
+    "bop-cli": [
+      "crates/bop-cli/src/termcaps.rs",
+      "crates/bop-cli/src/render/mod.rs",
+      "crates/bop-cli/src/render/dumb.rs",
+      "crates/bop-cli/src/render/basic.rs",
+      "crates/bop-cli/src/render/extended.rs",
+      "crates/bop-cli/src/render/full.rs",
+      "crates/bop-cli/src/render/truecolor.rs"
+    ]
+  },
+  "files_to_reference": [
+    "crates/bop-cli/src/colors.rs",
+    "crates/bop-cli/src/list.rs",
+    "crates/bop-cli/src/gantt.rs",
+    "crates/bop-cli/src/util.rs",
+    "crates/bop-cli/src/inspect.rs",
+    "crates/bop-core/src/lib.rs",
+    "crates/bop-core/src/cardchars.rs",
+    "scripts/dashboard.nu",
+    "vibekanban/_bop_provider_impl.py"
+  ],
+  "patterns": {
+    "module_declaration": "Modules declared as `mod foo;` in main.rs, one file per concern",
+    "error_handling": "anyhow::Result for fallible ops, `let _ =` for best-effort, `.context()` for error context",
+    "color_system": "colors.rs provides state_ansi(state) -> ANSI 256-color escape, state_ansi_bg(state) for backgrounds, RESET/DIM/BOLD constants",
+    "terminal_width": "util::term_width() via ioctl TIOCGWINSZ, fallback COLUMNS env then 100",
+    "card_data": "Meta struct (bop_core::Meta) with id, glyph, token, title, stage, priority, progress, runs[], subtasks[], failure_reason, exit_code",
+    "card_rendering": "list.rs reads Meta per card, renders via raw ANSI escape codes — glyph, token, id, stage, priority, 8-cell progress bar",
+    "serde_patterns": "#[serde(default, skip_serializing_if = ...)] on optional fields, #[serde(flatten)] for embedding Meta",
+    "test_pattern": "tempfile::tempdir() for isolation, setup_card_in_state() helpers, tests in #[cfg(test)] mod tests blocks"
+  },
+  "existing_implementations": {
+    "terminal_width_detection": "util.rs term_width() uses raw ioctl TIOCGWINSZ — spec says use terminal_size crate instead for cleaner API",
+    "card_list_display": "list.rs print_state_group() renders flat text rows with ANSI 256-color state headers, glyph, token, id (truncated 32), stage, priority, 8-cell progress bar",
+    "card_watch": "list.rs list_cards_watch() uses notify-debouncer-mini + cursor-up ANSI for in-place redraw",
+    "card_stats": "list.rs calculate_stats() computes total, by_state counts, avg_duration, success_rate",
+    "gantt_rendering": "gantt.rs renders ANSI timeline bars with state_ansi_bg() fills + HTML mode",
+    "state_colors": "colors.rs state_ansi() maps pending=steel-blue, running=amber, done=green, failed=red, merged=violet",
+    "dashboard_script": "scripts/dashboard.nu provides a separate Nushell box-drawing dashboard with team rows, 3s refresh",
+    "vibekanban_provider": "vibekanban/_bop_provider_impl.py reads Meta per card, emits id/title/status/team/stage/meta_path — missing priority/provider/elapsed/progress/ac_spec_id"
+  },
+  "key_types": {
+    "Meta": "bop_core::Meta — primary card data model with 40+ fields",
+    "RunRecord": "bop_core::RunRecord — provider, started_at, ended_at, duration_s, prompt_tokens, completion_tokens, cost_usd, outcome",
+    "Label": "bop_core::Label — name + kind",
+    "Subtask": "bop_core::Subtask — id, title, done",
+    "CardStats": "list.rs CardStats — total, by_state, avg_duration_s, success_rate_pct"
+  },
+  "no_ratatui_crossterm": true,
+  "note": "This spec adds a progressive degradation ANSI renderer, NOT a full TUI. No ratatui/crossterm needed. All output is string-based ANSI escape sequences written to stdout. The future spec 029 (bop ui) will add the full ratatui TUI."
+}

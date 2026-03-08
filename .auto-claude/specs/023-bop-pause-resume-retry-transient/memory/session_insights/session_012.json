@@ -1,0 +1,189 @@
+{
+  "session_number": 12,
+  "timestamp": "2026-03-07T08:45:26.745748+00:00",
+  "subtasks_completed": [
+    "subtask-6-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": ".auto-claude/specs/029-bop-ui-tui/spec.md",
+        "change_type": "new_file",
+        "lines": 230,
+        "purpose": "Comprehensive TUI specification for bop ui \u2014 full interactive terminal interface with ratatui, crossterm, nucleo",
+        "key_sections": [
+          "Layout (3-zone: header/body/footer)",
+          "AppEvent enum pattern (Key, Resize, Tick, Cards, LogLine)",
+          "Pane focus ring (CardList, Detail, LogTail)",
+          "Newline-gated streaming for log tail",
+          "Nucleo fuzzy filter with highlight",
+          "Action popup (lazygit pattern)",
+          "Provider meter bars (htop) + sparkline (btop)",
+          "Demoscene event ticker at width \u2265120",
+          "Snapshot tests via insta crate"
+        ]
+      },
+      {
+        "file": "crates/bop-cli/src/cards.rs",
+        "change_type": "modified",
+        "lines_changed": 120,
+        "key_changes": [
+          {
+            "function": "seed_default_templates",
+            "change": "Reordered Meta struct fields: moved exit_code and paused_at before validation_summary",
+            "reason": "Likely struct field ordering consistency"
+          },
+          {
+            "function": "is_transient_failure",
+            "change": "Replaced content.lines().filter(|l| !l.trim().is_empty()).last() with .rfind(|l| !l.trim().is_empty())",
+            "reason": "Performance: rfind is more idiomatic for finding last matching line, avoids unnecessary filter iterator allocation"
+          },
+          {
+            "location": "cmd_retry_transient",
+            "change": "Reformatted long anyhow::bail! and path construction chains for readability"
+          },
+          {
+            "location": "tests module",
+            "change": "Updated 4 test Meta struct initializations to match new field ordering (exit_code, paused_at)"
+          }
+        ]
+      },
+      {
+        "file": "crates/bop-cli/src/dispatcher.rs",
+        "change_type": "modified",
+        "inference": "Related changes to match spec 029, likely minor updates"
+      },
+      {
+        "file": "dispatch.nu",
+        "change_type": "modified",
+        "inference": "Integration updates for spec 029 TUI, likely dispatch logic changes"
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Struct field reordering",
+        "evidence": "exit_code and paused_at moved in Meta initialization across seed_default_templates and 4 test cases",
+        "impact": "Compilation requires synchronized updates across all struct instantiation sites",
+        "frequency": "Multiple locations"
+      },
+      {
+        "pattern": "Iterator optimization",
+        "evidence": "Replaced lines().filter().last() with .rfind() for log tail reading",
+        "impact": "Reduced allocations, more idiomatic Rust",
+        "frequency": "Single occurrence but generalizable pattern"
+      },
+      {
+        "pattern": "Formatting standardization",
+        "evidence": "Long method chains and bail! statements wrapped for consistency (80-100 char lines)",
+        "impact": "Improved readability and git diff clarity",
+        "frequency": "Multiple locations throughout cards.rs"
+      },
+      {
+        "pattern": "Comprehensive spec documentation",
+        "evidence": "spec 029 includes dependencies, layout ASCII diagrams, acceptance criteria, startup behavior",
+        "impact": "Clear implementation roadmap referencing prior art (ratatui, codex-rs, k9s, lazygit, htop, btop)",
+        "frequency": "Wave-based Auto-Claude methodology"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "Field reordering silent breakage in tests",
+        "details": "When Meta struct field order changes, test initialization must match or compilation fails. Four test cases (lines 2239, 2456, 2533, 2604) all needed exit_code/paused_at repositioning.",
+        "risk": "High: affects test suite validity without obvious error location",
+        "mitigation": "Use struct update syntax (..Default::default()) or derive procedural macros to reduce manual field listing"
+      },
+      {
+        "gotcha": "Log reading pattern inefficiency",
+        "details": "Original pattern lines().filter().last() creates intermediate iterator; rfind() is more direct. This matters in hot paths during live log tail updates.",
+        "risk": "Medium: performance under high-volume logging",
+        "mitigation": "Lint for filter().last() patterns and suggest rfind() replacement"
+      },
+      {
+        "gotcha": "Spec complexity: TUI requires coordinated async task spawning",
+        "details": "spec 029 requires tokio::select!, notify watcher, timer ticks, log tail reader, all feeding AppEvent enum. Crossterm raw mode and alternate screen cleanup must be RAII-guarded against panics.",
+        "risk": "High: easy to leave terminal in broken state on panic or early exit",
+        "mitigation": "Implement Drop guard pattern immediately, add integration tests for panic cleanup"
+      },
+      {
+        "gotcha": "Newline-gated streaming complexity",
+        "details": "spec 029 forbids rendering partial lines (flicker mid-ANSI sequence). Requires buffering until \\n and seeking to EOF on card selection. Off-by-one errors in VecDeque rotation are possible.",
+        "risk": "Medium: visual glitches hard to reproduce",
+        "mitigation": "Snapshot tests for log tail rendering with ANSI sequences"
+      }
+    ],
+    "approach_outcome": {
+      "subtask_id": "subtask-6-1",
+      "description": "Run make check to verify all tests pass",
+      "final_status": "SUCCESS",
+      "session_count": 2,
+      "execution_path": "Attempt 1 \u2192 SUCCESS (re-confirmed in Attempt 2)",
+      "artifacts_delivered": [
+        "Spec 029 full TUI design (230 lines, dependencies, layout, acceptance criteria)",
+        "Fixed field reordering in Meta struct (4 test cases + seed template)",
+        "Log tail iterator optimization (filter().last() \u2192 rfind())",
+        "Code formatting standardization across cards.rs",
+        "Two successful commits: 9b190a8 (spec) + 6daf242 (tests)"
+      ],
+      "test_result": "make check passed \u2014 all tests + clippy + fmt successful",
+      "confidence": "High: reproducible, synchronized across cards.rs tests and dispatcher integration"
+    },
+    "recommendations": [
+      {
+        "priority": "HIGH",
+        "category": "Implementation",
+        "recommendation": "Implement spec 029 TUI as next spec (Wave 6 dependency)",
+        "rationale": "Spec is comprehensive with clear dependencies (ratatui 0.29, crossterm 0.28, nucleo 0.5 all MIT), prior art synthesis, and acceptance criteria. Start with AppEvent enum and basic alternate screen entry."
+      },
+      {
+        "priority": "HIGH",
+        "category": "Testing",
+        "recommendation": "Add RAII panic guard tests for crossterm raw mode + alternate screen cleanup",
+        "rationale": "spec 029 requires Drop guard to restore terminal on panic. Missing this causes broken terminal state. Add test that panics mid-render and verifies cleanup."
+      },
+      {
+        "priority": "HIGH",
+        "category": "Code Quality",
+        "recommendation": "Enforce struct field ordering via clippy or proc-macro in Meta initialization",
+        "rationale": "Four test failures due to reordering suggest manual field ordering is error-prone. Use struct update syntax or derive attributes to reduce surface area."
+      },
+      {
+        "priority": "MEDIUM",
+        "category": "Performance",
+        "recommendation": "Audit hot-path iterators in cards.rs for filter().last() anti-pattern",
+        "rationale": "Log tail reading optimized from filter().last() to rfind(). Likely other similar patterns exist in card state transitions or filtering loops."
+      },
+      {
+        "priority": "MEDIUM",
+        "category": "Snapshot Testing",
+        "recommendation": "Use insta for all TUI widget renders (CardList, Detail, Header, LogTail)",
+        "rationale": "spec 029 calls for snapshot tests. Set up insta crate integration before implementing widgets to catch rendering regressions early."
+      },
+      {
+        "priority": "MEDIUM",
+        "category": "Integration",
+        "recommendation": "Coordinate dispatch.nu changes with spec 029 TUI entry point",
+        "rationale": "dispatch.nu modified in commit; likely needs integration with bop ui subcommand invocation. Test Zellij pane detection ($ZELLIJ env var) before next wave."
+      },
+      {
+        "priority": "LOW",
+        "category": "Documentation",
+        "recommendation": "Update CONTRIBUTING.md with AppEvent pattern example",
+        "rationale": "spec 029 uses codex-rs AppEvent pattern. New contributors will benefit from a minimal example in docs."
+      }
+    ],
+    "subtask_id": "subtask-6-1",
+    "session_num": 12,
+    "success": true,
+    "changed_files": [
+      ".auto-claude/specs/029-bop-ui-tui/spec.md",
+      "crates/bop-cli/src/cards.rs",
+      "crates/bop-cli/src/dispatcher.rs",
+      "dispatch.nu"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-6-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

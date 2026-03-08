@@ -1,0 +1,147 @@
+{
+  "session_number": 7,
+  "timestamp": "2026-03-06T16:28:39.490029+00:00",
+  "subtasks_completed": [
+    "subtask-2-3"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/factory.rs",
+        "changes_summary": "Added Linux systemd support alongside existing macOS launchd implementation",
+        "key_additions": [
+          "OS detection functions: is_linux(), is_macos()",
+          "systemd path helpers: systemd_user_dir(), systemd_service_path(), systemd_path_path()",
+          "generate_systemd_service() - creates systemd .service units with Type=oneshot",
+          "generate_systemd_path() - creates systemd .path units for file watching with dynamic team directory discovery",
+          "Platform-specific implementation functions: cmd_factory_install_macos(), cmd_factory_install_linux()",
+          "Refactored cmd_factory_install(), cmd_factory_start(), cmd_factory_stop(), cmd_factory_status() for multi-platform support"
+        ],
+        "lines_added": 166,
+        "lines_removed": 89,
+        "net_change": 77
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "name": "Platform Abstraction Pattern",
+        "description": "Compile-time OS detection via cfg!(target_os) with helper functions used to branch execution flow",
+        "instances": 4,
+        "locations": [
+          "cmd_factory_install() main dispatcher",
+          "cmd_factory_start() conditional logic",
+          "cmd_factory_stop() conditional logic",
+          "cmd_factory_status() conditional logic"
+        ]
+      },
+      {
+        "name": "Configuration Template Generation",
+        "description": "Both systemd and launchd configs generated from shared parameters (label, subcommand, repo_root) using string formatting",
+        "instances": 2,
+        "locations": [
+          "generate_plist()",
+          "generate_systemd_service()"
+        ]
+      },
+      {
+        "name": "Dynamic Directory Discovery",
+        "description": "generate_systemd_path() scans .cards/ for team-* directories and includes all in PathChanged directives",
+        "rationale": "Allows watching multiple team subdirectories without hardcoding paths"
+      },
+      {
+        "name": "Lenient Command Execution",
+        "description": "All systemctl commands execute with error logging (eprintln!) but non-fatal\u2014installation continues even if enable/start fails",
+        "contrast": "Could allow misconfigured services to remain silent"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "issue": "systemd --user flag required for user-level services",
+        "impact": "Services run as user, not system; affects HOME path availability and permissions model",
+        "location": "cmd_factory_install_linux() daemon-reload, enable, start calls"
+      },
+      {
+        "issue": "HOME environment variable dependency",
+        "impact": "systemd_user_dir() will panic if HOME not set; no fallback provided",
+        "severity": "high",
+        "location": "systemd_user_dir() function"
+      },
+      {
+        "issue": "fs::read_dir() errors silently swallowed in generate_systemd_path()",
+        "impact": "If .cards/ unreadable or missing, no team directories discovered; path unit may be incomplete",
+        "location": "generate_systemd_path() directory enumeration"
+      },
+      {
+        "issue": "Type=oneshot service may prevent future re-triggering",
+        "impact": "If service completes, path unit must restart path watching daemon (implicit via systemd)",
+        "location": "generate_systemd_service() [Service] section"
+      },
+      {
+        "issue": "String::from_utf8_lossy() silently handles non-UTF8 stderr",
+        "impact": "Non-UTF8 error messages truncated/corrupted in error output",
+        "locations": [
+          "cmd_factory_install_linux()",
+          "cmd_factory_start()",
+          "cmd_factory_stop()"
+        ]
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "approach_details": {
+      "strategy": "Platform-conditional branching with separate implementation functions per OS",
+      "strengths": [
+        "Clear separation of macOS (launchd) and Linux (systemd) code paths",
+        "Reuses path resolution logic via resolve_repo_root() helper",
+        "Extracted install_zellij_plugin() to DRY shared logic",
+        "Systemd .path units enable file-watching equivalent to launchd WatchPaths"
+      ],
+      "completeness": "Both install, start, stop, and status commands support both platforms",
+      "testing_gap": "No error case testing for missing systemd or launchctl tools"
+    },
+    "recommendations": [
+      {
+        "priority": "high",
+        "category": "Error Handling",
+        "item": "Add context to systemctl command failures with which unit and which operation failed",
+        "current": "Generic eprintln! with command stderr",
+        "suggested": "Use anyhow::Context or custom error type to provide full call stack"
+      },
+      {
+        "priority": "high",
+        "category": "Robustness",
+        "item": "Add HOME fallback or validation in systemd_user_dir()",
+        "rationale": "Panic-on-HOME-unset is unexplained and may occur in headless/test environments"
+      },
+      {
+        "priority": "medium",
+        "category": "Observability",
+        "item": "Log systemd unit contents after write (matching launchd plist output style)",
+        "current": "Only filename printed",
+        "benefit": "Easier debugging of generated configs"
+      },
+      {
+        "priority": "medium",
+        "category": "Testing",
+        "item": "Add integration test for generate_systemd_service() and generate_systemd_path() output validity",
+        "suggested": "Parse output and validate [Unit], [Service], [Path] sections are present"
+      },
+      {
+        "priority": "low",
+        "category": "Documentation",
+        "item": "Document systemd .path vs .service relationship and lifecycle",
+        "rationale": "Path unit triggers service on file change; users must understand this to debug"
+      }
+    ],
+    "subtask_id": "subtask-2-3",
+    "session_num": 7,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/src/factory.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-2-3"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}

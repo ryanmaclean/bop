@@ -1,0 +1,132 @@
+{
+  "session_number": 2,
+  "timestamp": "2026-03-07T18:00:50.296434+00:00",
+  "subtasks_completed": [
+    "subtask-1-1"
+  ],
+  "discoveries": {
+    "file_insights": [
+      {
+        "file": "crates/bop-cli/src/termcaps.rs",
+        "status": "created",
+        "key_insights": [
+          "New 235-line module implementing terminal capability detection",
+          "TermLevel enum derives Ord/PartialOrd for natural capability ordering (Dumb < Basic < Extended < Full < TrueColor)",
+          "Pure classification logic in classify_level() function isolated from environment I/O, enabling deterministic unit testing",
+          "Width detection via terminal_size crate, re-queried on every TermCaps::detect() call (never cached) to handle Zellij pane resizes",
+          "Two-column layout threshold hardcoded as width \u2265 100 characters"
+        ]
+      },
+      {
+        "file": "crates/bop-cli/Cargo.toml",
+        "status": "modified",
+        "key_insights": [
+          "Added terminal_size = \"0.4\" dependency in [dependencies] section",
+          "No version constraints; uses default caret (^0.4) SemVer"
+        ]
+      },
+      {
+        "file": "crates/bop-cli/src/main.rs",
+        "status": "modified",
+        "key_insights": [
+          "Registered mod termcaps; in module list (alphabetically ordered after serve, before util)",
+          "No pub/private exports, internal module only (not exposed in public API yet)"
+        ]
+      }
+    ],
+    "patterns_discovered": [
+      {
+        "pattern": "Environment variable priority hierarchy",
+        "description": "ZELLIJ (presence only) > COLORTERM (exact value match) > TERM (prefix/contains match) > default fallback",
+        "rationale": "Zellij always provides Full+ support; COLORTERM is explicit intent; TERM is terminal emulator class; fallback is conservative (Basic not Dumb)"
+      },
+      {
+        "pattern": "Pure function separation for testability",
+        "description": "classify_level(zellij, colorterm, term) takes env vars as parameters, never calls std::env::var() internally",
+        "rationale": "Enables 100% unit test coverage without environment mutation; detect_level() wraps it with I/O"
+      },
+      {
+        "pattern": "Lazy capability level + eager width detection",
+        "description": "TermLevel is static per session, but terminal_size ioctl is called on every TermCaps::detect()",
+        "rationale": "Supports dynamic pane resizing in Zellij without re-detecting color support; width changes faster than terminal type"
+      },
+      {
+        "pattern": "Ordered enum for capability levels",
+        "description": "TermLevel implements Ord/PartialOrd, allows comparisons like level >= TermLevel::Full",
+        "rationale": "Cleaner conditional logic for feature gates (e.g., 'if caps.level >= Full { use unicode }')"
+      }
+    ],
+    "gotchas_discovered": [
+      {
+        "gotcha": "TERM=empty should be Dumb, not Basic",
+        "context": "Classification order: checks term.is_empty() before fallback to Basic",
+        "impact": "Prevents misclassification of bare shells (no TERM) as Basic (8-color)"
+      },
+      {
+        "gotcha": "Zellij detection is presence-only (Some vs None), not value inspection",
+        "context": "if zellij.is_some() { return TermLevel::Full; }",
+        "impact": "Avoids brittle string matching on ZELLIJ value; any non-empty value indicates Zellij session"
+      },
+      {
+        "gotcha": "Width detection does NOT fall back to Extended level if ioctl fails",
+        "context": "terminal_size().map_or(80, ...) \u2014 hardcoded 80 as default, independent of TermLevel",
+        "impact": "Safe default (80 char terminals are ubiquitous); but two_column will be false, not derived from level"
+      },
+      {
+        "gotcha": "two_column is a computed field in struct, not stored in enum",
+        "context": "TermCaps { level, width, two_column: width >= 100 }",
+        "impact": "Ensures consistency; but two_column threshold (100) is magic number, not parameterized"
+      }
+    ],
+    "approach_outcome": "SUCCESS",
+    "approach_details": [
+      "\u2713 Added terminal_size 0.4 dependency with no compilation issues",
+      "\u2713 Implemented all 5 TermLevel variants with correct ordering semantics",
+      "\u2713 Detection logic follows exact priority order specified (ZELLIJ\u2192COLORTERM\u2192TERM\u2192dumb\u2192Basic)",
+      "\u2713 Pure classification function enabled 18 unit tests covering priority ordering, edge cases, and level comparisons",
+      "\u2713 Width re-queried on every detect() call for Zellij pane resize support",
+      "\u2713 Module registered in main.rs and compiles without warnings",
+      "\u2713 Comprehensive doc comments explain detection order and caching strategy"
+    ],
+    "recommendations": [
+      {
+        "category": "Performance optimization",
+        "suggestion": "Cache TERM/COLORTERM detection but re-query width on every render. Rationale: env var reads are cheap but terminal_size ioctl is slower; caching level reduces redundant classification on each frame.",
+        "priority": "low"
+      },
+      {
+        "category": "Feature expansion",
+        "suggestion": "Integrate terminfo database for TERM lookups instead of hardcoded xterm/screen/tmux/rxvt. This would support obscure terminals and custom TERM aliases. Reference: ncurses terminfo, Rust termion crate.",
+        "priority": "low"
+      },
+      {
+        "category": "Edge case handling",
+        "suggestion": "Add FORCE_TERM / NO_COLOR env vars for CLI testing and accessibility. Example: FORCE_TERM=dumb bop ui would override all detection.",
+        "priority": "medium"
+      },
+      {
+        "category": "Documentation",
+        "suggestion": "Add TermCaps usage example in rendering module (once TUI is implemented). Document that width must be re-queried after resize events.",
+        "priority": "medium"
+      },
+      {
+        "category": "Related task",
+        "suggestion": "Spec 029 (bop ui) will consume TermCaps for layout selection. When implementing kanban TUI, create layout traits parametrized by TermLevel (e.g., trait DumbLayout, trait TrueColorLayout).",
+        "priority": "future"
+      }
+    ],
+    "subtask_id": "subtask-1-1",
+    "session_num": 2,
+    "success": true,
+    "changed_files": [
+      "crates/bop-cli/Cargo.toml",
+      "crates/bop-cli/src/main.rs",
+      "crates/bop-cli/src/termcaps.rs"
+    ]
+  },
+  "what_worked": [
+    "Implemented subtask: subtask-1-1"
+  ],
+  "what_failed": [],
+  "recommendations_for_next_session": []
+}
