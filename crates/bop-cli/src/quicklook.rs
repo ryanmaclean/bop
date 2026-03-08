@@ -166,11 +166,19 @@ pub fn compress_card(card_dir: &Path) {
     let _ = fs::remove_dir_all(&compressed);
     let _ = fs::remove_dir_all(&backup);
 
+    // Temporarily clear the immutable flag on meta.json so ditto can clone it.
+    let meta_path = card_dir.join("meta.json");
+    bop_core::meta_unprotect(&meta_path);
+
     let status = StdCommand::new("ditto")
         .arg("--hfsCompression")
         .arg(card_dir)
         .arg(&compressed)
         .status();
+
+    // Re-protect regardless of ditto outcome.
+    bop_core::meta_protect(&meta_path);
+
     if !matches!(status, Ok(s) if s.success()) {
         let _ = fs::remove_dir_all(&compressed);
         return;

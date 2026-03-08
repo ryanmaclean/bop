@@ -673,6 +673,38 @@ pub fn read_meta(card_dir: &Path) -> anyhow::Result<Meta> {
     Ok(meta)
 }
 
+/// Clear the macOS user-immutable flag on a file so it can be overwritten.
+/// No-op on non-macOS platforms. Called before writing meta.json.
+pub fn meta_unprotect(path: &Path) {
+    #[cfg(target_os = "macos")]
+    {
+        // UF_IMMUTABLE = 0x00000002; cleared via fchflags(fd, 0)
+        // chflags(2) is the POSIX-ish way; libc::chflags is available on macOS.
+        use std::ffi::CString;
+        if let Ok(c) = CString::new(path.as_os_str().as_encoded_bytes()) {
+            unsafe { libc::chflags(c.as_ptr(), 0) };
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = path;
+}
+
+/// Set the macOS user-immutable flag on a file after writing.
+/// Prevents accidental manual edits — any write attempt returns EPERM.
+/// No-op on non-macOS platforms.
+pub fn meta_protect(path: &Path) {
+    #[cfg(target_os = "macos")]
+    {
+        use std::ffi::CString;
+        const UF_IMMUTABLE: u32 = 0x00000002;
+        if let Ok(c) = CString::new(path.as_os_str().as_encoded_bytes()) {
+            unsafe { libc::chflags(c.as_ptr(), UF_IMMUTABLE) };
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = path;
+}
+
 pub fn write_meta(card_dir: &Path, meta: &Meta) -> anyhow::Result<()> {
     use std::io::Write;
 
@@ -689,6 +721,9 @@ pub fn write_meta(card_dir: &Path, meta: &Meta) -> anyhow::Result<()> {
     // Canonical form is compact JSON (eliminates whitespace ambiguity)
     let bytes = serde_json::to_vec(&meta_with_checksum)?;
     let target = meta_path(card_dir);
+
+    // Clear immutable flag before writing so the atomic rename succeeds
+    meta_unprotect(&target);
 
     // Atomic write: temp file + rename
     // Create temp file in same directory to ensure atomic rename on same filesystem
@@ -708,6 +743,9 @@ pub fn write_meta(card_dir: &Path, meta: &Meta) -> anyhow::Result<()> {
     temp_file
         .persist(&target)
         .map_err(|e| anyhow::anyhow!("failed to persist meta.json: {}", e))?;
+
+    // Lock the file: any process that doesn't go through write_meta gets EPERM
+    meta_protect(&target);
 
     // Best-effort: log the meta_written event to JSONL audit log
     let _ = append_event(
@@ -1683,6 +1721,8 @@ mod tests {
 
         // Replace checksum with an invalid one
         corrupted_meta["checksum"] = serde_json::Value::String("0".repeat(64));
+        // meta.json is immutable after write_meta; unprotect before raw write
+        meta_unprotect(&meta_path);
         fs::write(&meta_path, serde_json::to_vec(&corrupted_meta).unwrap()).unwrap();
 
         // Read should now fail due to checksum mismatch
@@ -1698,5 +1738,67 @@ mod tests {
             "error message should mention checksum mismatch, got: {}",
             err_msg
         );
+    }
+
+    /// After write_meta, the meta.json file must be immutable on macOS.
+    /// A raw fs::write attempt must fail with a permission error.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn meta_json_is_immutable_after_write_meta() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = Meta {
+            id: "imm-1".into(),
+            created: chrono::Utc::now(),
+            stage: "implement".into(),
+            ..Default::default()
+        };
+        write_meta(dir.path(), &m).unwrap();
+
+        // Direct write to the protected file must fail
+        let path = meta_path(dir.path());
+        let result = fs::write(&path, b"tampered");
+        assert!(
+            result.is_err(),
+            "direct write to meta.json must be rejected after write_meta (got Ok)"
+        );
+    }
+
+    /// write_meta must be idempotent: calling it twice succeeds even though the
+    /// file is already immutable after the first call.
+    #[test]
+    fn meta_write_meta_twice_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut m = Meta {
+            id: "imm-2".into(),
+            created: chrono::Utc::now(),
+            stage: "implement".into(),
+            ..Default::default()
+        };
+        write_meta(dir.path(), &m).unwrap();
+
+        // Update a field and write again — must not fail with EPERM
+        m.stage = "qa".into();
+        write_meta(dir.path(), &m)
+            .expect("second write_meta must succeed (unprotect + write + protect cycle)");
+
+        let back = read_meta(dir.path()).unwrap();
+        assert_eq!(back.stage, "qa");
+    }
+
+    /// read_meta must succeed even when meta.json has the immutable flag set.
+    #[test]
+    fn meta_read_meta_works_on_immutable_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = Meta {
+            id: "imm-3".into(),
+            created: chrono::Utc::now(),
+            stage: "implement".into(),
+            ..Default::default()
+        };
+        write_meta(dir.path(), &m).unwrap();
+
+        // read_meta must not fail; the immutable flag is a write-only restriction
+        let back = read_meta(dir.path()).expect("read_meta must succeed on immutable meta.json");
+        assert_eq!(back.id, "imm-3");
     }
 }
