@@ -48,6 +48,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
     match app.mode {
         Mode::Normal => handle_normal(app, key),
         Mode::Filter => handle_filter(app, key),
+        Mode::Search => handle_search(app, key),
         Mode::ActionPopup => handle_action_popup(app, key),
         Mode::Detail => handle_detail(app, key),
         Mode::LogTail => handle_logtail(app, key),
@@ -90,7 +91,7 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
             app.open_detail_for_selected();
         }
         KeyCode::Char('/') => {
-            app.enter_filter_mode();
+            app.enter_search_mode();
         }
         KeyCode::Enter => {
             app.open_detail_for_selected();
@@ -263,6 +264,48 @@ fn handle_filter(app: &mut App, key: KeyEvent) {
                 app.filter = Some(state.query.clone());
             }
             app.apply_filter_collapse();
+        }
+        _ => {}
+    }
+}
+
+// ── Search mode ──────────────────────────────────────────────────────────────
+
+/// Handle key events in global Search mode.
+///
+/// Keystrokes update the search query and recompute the flat results list.
+/// Special keys:
+/// - `Esc` — cancel search, return to Normal mode
+/// - `Enter` — jump to the highlighted card in the kanban
+/// - `j` / `Down` — move selection down (wrapping)
+/// - `k` / `Up` — move selection up (wrapping)
+/// - `Backspace` — delete the last character from the query
+/// - Any printable `Char` — append to query
+fn handle_search(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            app.cancel_search();
+        }
+        KeyCode::Enter => {
+            app.confirm_search();
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            app.search_select_next();
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            app.search_select_prev();
+        }
+        KeyCode::Backspace => {
+            if let Some(ref mut state) = app.search_state {
+                state.query.pop();
+            }
+            app.update_search_results();
+        }
+        KeyCode::Char(c) => {
+            if let Some(ref mut state) = app.search_state {
+                state.query.push(c);
+            }
+            app.update_search_results();
         }
         _ => {}
     }
@@ -833,6 +876,7 @@ mod tests {
             marked_cards: std::collections::HashSet::new(),
             subshell_worktree: None,
             subshell_card_id: None,
+            search_state: None,
             terminal_width: 120,
             terminal_height: 40,
         }

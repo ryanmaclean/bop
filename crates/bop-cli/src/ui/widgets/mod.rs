@@ -11,6 +11,7 @@ pub mod header;
 pub mod kanban;
 pub mod logtail;
 pub mod newcard;
+pub mod search;
 
 pub use footer::render_footer;
 pub use header::render_header;

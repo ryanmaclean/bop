@@ -182,6 +182,24 @@ fn new_card_legend(input: &str) -> Vec<Span<'static>> {
     ]
 }
 
+/// Build keybinding hint spans for global Search mode with the current query.
+fn search_legend(query: &str) -> Vec<Span<'static>> {
+    vec![
+        Span::styled("Search: ", Style::default().fg(Color::Cyan)),
+        Span::styled(
+            format!("{}{}", query, BLOCK_CURSOR),
+            Style::default().fg(Color::White),
+        ),
+        Span::styled("  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("[j/k]", Style::default().fg(Color::Cyan)),
+        Span::styled("nav ", Style::default().fg(Color::DarkGray)),
+        Span::styled("[↵]", Style::default().fg(Color::Cyan)),
+        Span::styled("jump ", Style::default().fg(Color::DarkGray)),
+        Span::styled("[Esc]", Style::default().fg(Color::Cyan)),
+        Span::styled("cancel", Style::default().fg(Color::DarkGray)),
+    ]
+}
+
 /// Build keybinding hint spans for Subshell mode.
 fn subshell_legend() -> Vec<Span<'static>> {
     vec![Span::styled(
@@ -265,6 +283,14 @@ pub fn render_footer(frame: &mut Frame, area: Rect, app: &App, terminal_height: 
                     .or(app.filter.as_deref())
                     .unwrap_or("");
                 filter_legend(query)
+            }
+            Mode::Search => {
+                let query = app
+                    .search_state
+                    .as_ref()
+                    .map(|s| s.query.as_str())
+                    .unwrap_or("");
+                search_legend(query)
             }
             Mode::ActionPopup => action_popup_legend(),
             Mode::NewCard => new_card_legend(&app.newcard_input),

@@ -1,0 +1,21 @@
+---
+source: crates/bop-cli/src/ui/mod.rs
+expression: content
+---
+
+
+
+                ╭─────────────── Global Search ────────────────╮
+                │/ bop█                                        │
+                │──────────────────────────────────────────────│
+                │  [PEND] 061-bop-ui-search                    │
+                │> [RUN ] 060-bop-bench                        │
+                │  [DONE] 059-bop-done                         │
+                │                                              │
+                │                                              │
+                │                                              │
+                │                                              │
+                │                                              │
+                │                                              │
+                │                                              │
+                ╰──────────────────────────────────────────────╯

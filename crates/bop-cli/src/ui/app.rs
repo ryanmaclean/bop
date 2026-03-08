@@ -54,6 +54,7 @@ pub enum Mode {
     /// Default: column/card navigation, action keys active.
     Normal,
     /// `/` filter active — keystrokes go to nucleo query input.
+    #[allow(dead_code)]
     Filter,
     /// Enter key opened the action popup overlay.
     ActionPopup,
@@ -65,6 +66,29 @@ pub enum Mode {
     NewCard,
     /// `!` subshell — TUI suspended, shell active in card worktree.
     Subshell,
+    /// `/` global search overlay — flat list across all states.
+    Search,
+}
+
+// ── SearchState ─────────────────────────────────────────────────────────────
+
+/// A single result entry in the global search overlay.
+#[derive(Debug, Clone)]
+pub struct SearchResult {
+    /// Card identifier (e.g. `"061-bop-ui-search"`).
+    pub card_id: String,
+    /// State directory the card currently lives in (e.g. `"pending"`).
+    pub state: String,
+}
+
+/// State for the global search overlay (active while `Mode::Search`).
+pub struct SearchState {
+    /// The query string being typed by the user.
+    pub query: String,
+    /// Filtered results matching the current query across all states.
+    pub results: Vec<SearchResult>,
+    /// Index of the currently highlighted result row.
+    pub selected: usize,
 }
 
 /// Active tab inside the detail panel.
@@ -227,6 +251,8 @@ pub struct App {
     pub subshell_worktree: Option<PathBuf>,
     /// Card ID for the pending subshell pane name.
     pub subshell_card_id: Option<String>,
+    /// Global search overlay state (present while `Mode::Search`).
+    pub search_state: Option<SearchState>,
     /// Current terminal width in columns (updated on resize events).
     pub terminal_width: u16,
     /// Current terminal height in rows (updated on resize events).
@@ -301,6 +327,7 @@ impl App {
             marked_cards: HashSet::new(),
             subshell_worktree: None,
             subshell_card_id: None,
+            search_state: None,
             terminal_width: term_w,
             terminal_height: term_h,
         };
@@ -434,6 +461,7 @@ impl App {
     /// Enter filter mode: initialises the [`FilterState`] and switches to
     /// `Mode::Filter`. If a confirmed filter was previously active, its query
     /// is used as the starting text.
+    #[allow(dead_code)]
     pub fn enter_filter_mode(&mut self) {
         let mut state = FilterState::new();
         if let Some(ref existing) = self.filter {
@@ -469,6 +497,93 @@ impl App {
         self.mode = Mode::Normal;
         // Restore collapse state based on card counts (not filter).
         self.update_collapse();
+    }
+
+    // ── Global search (Mode::Search) ────────────────────────────────────
+
+    /// Enter global search mode: build initial results, switch to `Mode::Search`.
+    pub fn enter_search_mode(&mut self) {
+        let mut state = SearchState {
+            query: String::new(),
+            results: Vec::new(),
+            selected: 0,
+        };
+        state.results = self.all_cards_as_results();
+        self.search_state = Some(state);
+        self.mode = Mode::Search;
+    }
+
+    /// Cancel search: clear state, return to Normal.
+    pub fn cancel_search(&mut self) {
+        self.search_state = None;
+        self.mode = Mode::Normal;
+    }
+
+    /// Confirm search: jump to the highlighted card in the kanban, exit search.
+    pub fn confirm_search(&mut self) {
+        let card_id = self
+            .search_state
+            .as_ref()
+            .and_then(|s| s.results.get(s.selected))
+            .map(|r| r.card_id.clone());
+        self.search_state = None;
+        self.mode = Mode::Normal;
+        if let Some(id) = card_id {
+            let _ = self.select_card_by_id(&id);
+        }
+    }
+
+    /// Recompute search results from the current query.
+    pub fn update_search_results(&mut self) {
+        let all = self.all_cards_as_results();
+        if let Some(ref mut state) = self.search_state {
+            state.results = if state.query.is_empty() {
+                all
+            } else {
+                let q = state.query.to_ascii_lowercase();
+                all.into_iter()
+                    .filter(|r| r.card_id.to_ascii_lowercase().contains(&q))
+                    .collect()
+            };
+            // Clamp selection to valid range.
+            if state.results.is_empty() {
+                state.selected = 0;
+            } else if state.selected >= state.results.len() {
+                state.selected = state.results.len() - 1;
+            }
+        }
+    }
+
+    /// Select next result in the search overlay (wrapping).
+    pub fn search_select_next(&mut self) {
+        if let Some(ref mut state) = self.search_state {
+            if !state.results.is_empty() {
+                state.selected = (state.selected + 1) % state.results.len();
+            }
+        }
+    }
+
+    /// Select previous result in the search overlay (wrapping).
+    pub fn search_select_prev(&mut self) {
+        if let Some(ref mut state) = self.search_state {
+            if !state.results.is_empty() {
+                let len = state.results.len();
+                state.selected = if state.selected == 0 { len - 1 } else { state.selected - 1 };
+            }
+        }
+    }
+
+    /// Collect every card across all columns as [`SearchResult`] entries.
+    fn all_cards_as_results(&self) -> Vec<SearchResult> {
+        self.columns
+            .iter()
+            .flat_map(|col| {
+                col.cards.iter().map(|card| SearchResult {
+                    card_id: card.id.clone(),
+                    state: col.state.clone(),
+                })
+            })
+            .collect()
     }
 
     /// Show a toast message for 2 seconds.

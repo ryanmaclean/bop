@@ -28,6 +28,7 @@ use detail_panel::render_detail_panel;
 use event::{EventLoop, TerminalGuard};
 use factory_tab::FactoryTabWidget;
 use log_pane::render_log_pane;
+use widgets::search::render_search_overlay;
 use widgets::{render_footer, render_header, render_kanban, render_logtail};
 
 /// Launch the interactive TUI kanban board.
@@ -190,6 +191,13 @@ fn draw(
                         );
                     }
                 }
+
+                // ── Global search overlay ──────────────────────────────
+                if app.mode == Mode::Search {
+                    if let Some(ref search_state) = app.search_state {
+                        render_search_overlay(frame, zones[1], search_state);
+                    }
+                }
             }
         }
 
@@ -249,6 +257,7 @@ fn render_minimal_status(frame: &mut ratatui::Frame, area: ratatui::layout::Rect
         AppTab::Kanban => match app.mode {
             Mode::Normal => "normal",
             Mode::Filter => "filter",
+            Mode::Search => "search",
             Mode::ActionPopup => "action",
             Mode::Detail => "detail",
             Mode::LogTail => "logs",
@@ -382,6 +391,7 @@ mod snapshot_tests {
             marked_cards: HashSet::new(),
             subshell_worktree: None,
             subshell_card_id: None,
+            search_state: None,
             terminal_width: 80,
             terminal_height: 24,
         }
@@ -811,6 +821,81 @@ mod snapshot_tests {
         let content = buffer_to_string(terminal.backend().buffer());
         let stable = stabilize_time(&content);
         insta::assert_snapshot!("full_tui_layout", stable);
+    }
+
+    // ── Search overlay ──────────────────────────────────────────────────
+
+    #[test]
+    fn snapshot_search_overlay_with_results() {
+        use crate::ui::app::{SearchResult, SearchState};
+        use crate::ui::widgets::search::render_search_overlay;
+
+        let state = SearchState {
+            query: "bop".to_string(),
+            results: vec![
+                SearchResult { card_id: "061-bop-ui-search".into(), state: "pending".into() },
+                SearchResult { card_id: "060-bop-bench".into(), state: "running".into() },
+                SearchResult { card_id: "059-bop-done".into(), state: "done".into() },
+            ],
+            selected: 1,
+        };
+
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render_search_overlay(frame, frame.area(), &state);
+            })
+            .unwrap();
+
+        let content = buffer_to_string(terminal.backend().buffer());
+        insta::assert_snapshot!("search_overlay_with_results", content);
+    }
+
+    #[test]
+    fn snapshot_search_overlay_empty() {
+        use crate::ui::app::SearchState;
+        use crate::ui::widgets::search::render_search_overlay;
+
+        let state = SearchState {
+            query: "zzz".to_string(),
+            results: vec![],
+            selected: 0,
+        };
+
+        let backend = TestBackend::new(80, 16);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render_search_overlay(frame, frame.area(), &state);
+            })
+            .unwrap();
+
+        let content = buffer_to_string(terminal.backend().buffer());
+        insta::assert_snapshot!("search_overlay_empty", content);
+    }
+
+    #[test]
+    fn snapshot_footer_search_mode() {
+        let columns = build_test_columns(vec![], vec![], vec![], vec![], vec![]);
+        let mut app = test_app(columns);
+        app.mode = Mode::Search;
+        app.search_state = Some(crate::ui::app::SearchState {
+            query: "bop".into(),
+            results: vec![],
+            selected: 0,
+        });
+
+        let backend = TestBackend::new(80, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render_footer(frame, frame.area(), &app, 24);
+            })
+            .unwrap();
+
+        let content = buffer_to_string(terminal.backend().buffer());
+        insta::assert_snapshot!("footer_search_mode", content);
     }
 
     // ── Time stabilizer ─────────────────────────────────────────────────

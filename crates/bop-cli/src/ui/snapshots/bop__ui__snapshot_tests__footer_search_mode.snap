@@ -1,0 +1,5 @@
+---
+source: crates/bop-cli/src/ui/mod.rs
+expression: content
+---
+Search: bop█  [j/k]nav [↵]jump [Esc]cancel

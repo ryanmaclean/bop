@@ -26,6 +26,7 @@ pub struct FilterState {
 
 impl FilterState {
     /// Create a new empty filter state.
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             query: String::new(),
