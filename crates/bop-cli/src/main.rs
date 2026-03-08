@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 #[allow(dead_code)]
 mod acplan;
+mod benchmark;
 mod bridge;
 mod cards;
 mod colors;
@@ -383,6 +384,23 @@ enum Command {
         /// Show detail for a single card id.
         #[arg(long)]
         card: Option<String>,
+    },
+    /// Run the same spec against multiple providers and compare results.
+    Benchmark {
+        /// Path to the spec markdown file.
+        spec_file: String,
+        /// Comma-separated provider list (e.g. codex,claude,ollama-local).
+        #[arg(long, value_delimiter = ',', num_args = 1..)]
+        providers: Vec<String>,
+        /// Number of runs per provider (averaged in final output).
+        #[arg(long, default_value_t = 1)]
+        runs: usize,
+        /// Optional judge provider for qualitative scoring.
+        #[arg(long)]
+        judge: Option<String>,
+        /// Emit machine-readable JSON to stdout.
+        #[arg(long)]
+        json: bool,
     },
     /// Unified live dashboard for running + done cards with log tail.
     Watch {
@@ -1066,6 +1084,14 @@ async fn main() -> anyhow::Result<()> {
         } => providers::cmd_providers(watch, json, interval).await,
         Command::Bridge { sub } => bridge::cmd_bridge(sub).await,
         Command::Stats { by, json, card } => stats::cmd_stats(&root, by, json, card.as_deref()),
+        Command::Benchmark {
+            spec_file,
+            providers,
+            runs,
+            judge,
+            json,
+        } => benchmark::cmd_benchmark(&root, &spec_file, providers, runs, judge.as_deref(), json)
+            .await,
         Command::Watch { all } => watch::cmd_watch(&root, all).await,
         Command::Project { .. } => unreachable!("project command handled before cards root resolution"),
     }
