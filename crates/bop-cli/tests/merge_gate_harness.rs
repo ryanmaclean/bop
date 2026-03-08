@@ -106,6 +106,45 @@ fn merge_gate_moves_failing_card_to_failed_and_writes_report() {
 }
 
 #[test]
+fn merge_gate_writes_qa_success_report_on_pass() {
+    build_jc();
+
+    let td = tempfile::tempdir().unwrap();
+    let cards = td.path().join(".cards");
+
+    let status = Command::new(bop_bin())
+        .args(["--cards-dir", cards.to_str().unwrap(), "init"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    write_card(&cards, "mg-qa-ok", &["exit 0"]);
+
+    let status = Command::new(bop_bin())
+        .args([
+            "--cards-dir",
+            cards.to_str().unwrap(),
+            "merge-gate",
+            "--once",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let report = cards
+        .join("merged")
+        .join("mg-qa-ok.bop")
+        .join("output")
+        .join("qa_report.md");
+    assert!(report.exists(), "qa_report.md should exist in merged card");
+    let contents = fs::read_to_string(&report).unwrap();
+    assert!(
+        contents.contains("qa passed"),
+        "qa_report.md should contain success message, got: {contents}"
+    );
+}
+
+#[test]
 fn merge_gate_jj_squash_workspace_forgotten_after_merge() {
     // Verify forget_workspace is called by the merge gate path.
     // This is a compile-time verification that the jj worktree functions
