@@ -8,7 +8,7 @@ Four skills provide orientation for this repo — invoke before working:
 - `bop-system` — what `bop` is, card lifecycle, state machine
 - `vibekanban` — Quick Look cards, Zellij plugin, glyph system, SwiftUI card anatomy
 - `unicode-glyphs` — playing card encoding, BMP/SMP safety, font recommendations
-- `bop-team` — champagne rule: every unit of work on bop = a bop card
+- `bop-team` — champ rule: champs drink their own champagne. every unit of work on bop = a bop card
 
 ## System context for dispatched agents
 

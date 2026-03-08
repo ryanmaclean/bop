@@ -68,7 +68,7 @@ def specs [] {
     # ── Wave 4: foundation hardening — fix before adding more features ───────
     ["010", "fix factory: KeepAlive → WatchPaths",     4, 2, "direct"],
     ["011", "fix CI: replace self-hosted with ubuntu",  4, 2, "direct"],
-    ["012", "champagne: seed bop's own backlog as cards", 4, 2, "direct"],
+    ["012", "champ: seed bop's own backlog as cards", 4, 2, "direct"],
 
     # ── Wave 5: VM-first execution — QEMU adapter (dub + zam) ────────────────
     # Target: every card runs in an isolated VM, not on the host
@@ -272,7 +272,7 @@ print\(f'approved spec_hash=\{h\}'\)
 }
 
 # ---------------------------------------------------------------------------
-# Card ↔ Spec linkage (champagne path)
+# Card ↔ Spec linkage (champ path)
 # Search .cards/ state dirs for a card matching the spec, write ac_spec_id
 # into its meta.json. Non-fatal — just prints a warning if nothing found.
 # ---------------------------------------------------------------------------
