@@ -931,6 +931,18 @@ pub async fn run_card(
         }
     };
 
+    // ── Attestation: input snapshot ───────────────────────────────────────────
+    let attest_input_commit = bop_core::attestation::git_commit(&workdir);
+    let attest_prompt_hash = bop_core::attestation::blake3_file(&prompt_file);
+    let attest_spec_hash = bop_core::attestation::blake3_file(&card_dir.join("spec.md"));
+    let attest_meta_checksum = bop_core::attestation::blake3_file(&card_dir.join("meta.json"));
+    let attest_adapter_path = if std::path::Path::new(adapter).is_absolute() {
+        PathBuf::from(adapter)
+    } else {
+        std::env::current_dir()?.join(adapter)
+    };
+    let attest_adapter_hash = bop_core::attestation::blake3_file(&attest_adapter_path);
+
     let stage = meta
         .as_ref()
         .map(|m| m.stage.clone())
@@ -938,6 +950,7 @@ pub async fn run_card(
     let started_at = Utc::now();
     let started_at_iso = started_at.to_rfc3339();
     let run_id = short_run_id();
+    let attest_run_id = run_id.clone();
     let mut run_idx: Option<usize> = None;
     if let Some(ref mut m) = meta {
         let rec = m
@@ -1095,6 +1108,70 @@ pub async fn run_card(
     }
 
     let finished_at = Utc::now();
+
+    // ── Attestation: output snapshot + seal ───────────────────────────────────
+    {
+        let output_commit = bop_core::attestation::git_commit(&workdir);
+        let actions_path = card_dir.join("logs").join("actions.jsonl");
+        let action_log_hash = if actions_path.exists() {
+            Some(bop_core::attestation::blake3_file(&actions_path))
+        } else {
+            None
+        };
+        let attest_model = bop_core::attestation::model_from_action_log(&actions_path);
+        let diff_hash = bop_core::attestation::capture_diff(
+            &workdir,
+            card_dir,
+            attest_input_commit.as_deref(),
+            output_commit.as_deref(),
+        );
+        let files_modified = bop_core::attestation::git_changed_files(
+            &workdir,
+            attest_input_commit.as_deref(),
+            output_commit.as_deref(),
+        );
+        let card_id = meta.as_ref().map(|m| m.id.clone()).unwrap_or_else(|| {
+            card_dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string()
+        });
+        let mut attest = bop_core::attestation::Attestation {
+            schema: 1,
+            card_id,
+            run_id: attest_run_id,
+            stage: stage.clone(),
+            input_commit: attest_input_commit,
+            input_prompt_hash: attest_prompt_hash,
+            input_spec_hash: attest_spec_hash,
+            input_meta_checksum: attest_meta_checksum,
+            provider: provider_name.to_string(),
+            adapter: adapter.to_string(),
+            adapter_hash: attest_adapter_hash,
+            model: attest_model,
+            output_commit,
+            exit_code,
+            stdout_hash: bop_core::attestation::blake3_file(&stdout_log),
+            stderr_hash: bop_core::attestation::blake3_file(&stderr_log),
+            action_log_hash,
+            action_count: bop_core::attestation::action_count_from_log(&actions_path),
+            diff_hash,
+            files_modified,
+            started_at: started_at.to_rfc3339(),
+            ended_at: finished_at.to_rfc3339(),
+            duration_s: finished_at
+                .signed_duration_since(started_at)
+                .num_seconds()
+                .try_into()
+                .ok(),
+            vm_attestation: None,
+            record_hash: None,
+        };
+        attest.seal();
+        let _ = attest.write(card_dir);
+    }
+
     let duration_s = finished_at
         .signed_duration_since(started_at)
         .num_seconds()

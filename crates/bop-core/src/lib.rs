@@ -1,3 +1,4 @@
+pub mod attestation;
 pub mod cardchars;
 pub mod config;
 pub mod lineage;
