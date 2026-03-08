@@ -81,33 +81,29 @@ impl Drop for TerminalGuard {
 }
 
 pub async fn cmd_watch(root: &Path, all: bool) -> anyhow::Result<()> {
-    let (sources, all_mode) = if all {
+    let sources = if all {
         let projects = project::registered_watch_projects()?;
         if projects.is_empty() {
             anyhow::bail!("no registered projects (run: bop project add <path> --alias <alias>)");
         }
-        let sources = projects
+        projects
             .into_iter()
             .map(|p| WatchSource {
                 project_name: Some(p.name),
                 cards_root: p.cards_root,
             })
-            .collect();
-        (sources, true)
+            .collect()
     } else {
-        (
-            vec![WatchSource {
-                project_name: None,
-                cards_root: root.to_path_buf(),
-            }],
-            false,
-        )
+        vec![WatchSource {
+            project_name: None,
+            cards_root: root.to_path_buf(),
+        }]
     };
 
-    run_watch(&sources, all_mode)
+    run_watch(&sources)
 }
 
-fn run_watch(sources: &[WatchSource], all_mode: bool) -> anyhow::Result<()> {
+fn run_watch(sources: &[WatchSource]) -> anyhow::Result<()> {
     let _guard = TerminalGuard::new()?;
     let mut stdout = io::stdout();
     let mut state = UiState::default();
@@ -139,7 +135,6 @@ fn run_watch(sources: &[WatchSource], all_mode: bool) -> anyhow::Result<()> {
             &state,
             &log_title,
             &log_lines,
-            all_mode,
         )?;
 
         if !event::poll(Duration::from_millis(REFRESH_MS))? {
@@ -171,13 +166,12 @@ fn render_frame(
     state: &UiState,
     log_title: &str,
     log_lines: &[String],
-    all_mode: bool,
 ) -> anyhow::Result<()> {
     execute!(stdout, cursor::MoveTo(0, 0), Clear(ClearType::All))?;
 
     let hline = "━".repeat(width.max(1));
     writeln!(stdout, "{hline}")?;
-    let title = if all_mode {
+    let title = if rows.iter().any(|card| card.project_name.is_some()) {
         "bop watch --all"
     } else {
         "bop watch"
