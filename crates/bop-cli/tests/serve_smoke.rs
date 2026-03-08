@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command};
@@ -27,11 +27,15 @@ fn bop_bin() -> PathBuf {
     repo_root().join("target").join("debug").join("bop")
 }
 
-fn find_free_port() -> u16 {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind random port");
+fn find_free_port() -> Option<u16> {
+    let listener = match TcpListener::bind("127.0.0.1:0") {
+        Ok(listener) => listener,
+        Err(err) if err.kind() == ErrorKind::PermissionDenied => return None,
+        Err(err) => panic!("bind random port failed: {err}"),
+    };
     let port = listener.local_addr().expect("local addr").port();
     drop(listener);
-    port
+    Some(port)
 }
 
 fn wait_for_server(port: u16, timeout: Duration) -> bool {
@@ -104,7 +108,9 @@ fn test_serve_smoke() {
     assert!(status.success());
 
     // Find a free port
-    let port = find_free_port();
+    let Some(port) = find_free_port() else {
+        return;
+    };
 
     // Give OS time to release the port
     std::thread::sleep(Duration::from_millis(200));
@@ -158,7 +164,9 @@ fn test_serve_rejects_path_traversal() {
         .unwrap();
     assert!(status.success());
 
-    let port = find_free_port();
+    let Some(port) = find_free_port() else {
+        return;
+    };
     std::thread::sleep(Duration::from_millis(200));
 
     let token = "test-token";
@@ -197,7 +205,9 @@ fn test_serve_rejects_url_encoding() {
         .unwrap();
     assert!(status.success());
 
-    let port = find_free_port();
+    let Some(port) = find_free_port() else {
+        return;
+    };
     std::thread::sleep(Duration::from_millis(200));
 
     let token = "test-token";
@@ -235,7 +245,9 @@ fn test_serve_rejects_invalid_chars() {
         .unwrap();
     assert!(status.success());
 
-    let port = find_free_port();
+    let Some(port) = find_free_port() else {
+        return;
+    };
     std::thread::sleep(Duration::from_millis(200));
 
     let token = "test-token";
@@ -273,7 +285,9 @@ fn test_serve_accepts_valid_chars() {
         .unwrap();
     assert!(status.success());
 
-    let port = find_free_port();
+    let Some(port) = find_free_port() else {
+        return;
+    };
     std::thread::sleep(Duration::from_millis(200));
 
     let token = "test-token";

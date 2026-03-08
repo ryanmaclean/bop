@@ -5,7 +5,7 @@
 /// filesystem changes, and timer ticks into a single async stream.
 use std::collections::{HashSet, VecDeque};
 use std::fs;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -13,6 +13,7 @@ use chrono::Utc;
 use crossterm::event::KeyEvent;
 use crossterm::terminal;
 use ratatui::widgets::ListState;
+use serde_json::Value;
 
 use crate::paths;
 use crate::providers::read_providers;
@@ -56,7 +57,7 @@ pub enum Mode {
     Filter,
     /// Enter key opened the action popup overlay.
     ActionPopup,
-    /// `d` opened the card detail overlay.
+    /// Enter opened the card detail panel.
     Detail,
     /// Log tail overlay — full-height scrollable log view.
     LogTail,
@@ -66,13 +67,27 @@ pub enum Mode {
     Subshell,
 }
 
-/// Top-level body tab selection.
+/// Active tab inside the detail panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetailTab {
+    Meta,
+    Diff,
+    Replay,
+    Output,
+    Log,
+}
+
+/// Top-level body tab selection.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppTab {
     /// Default kanban board body.
     Kanban,
     /// Factory services panel body.
     Factory,
+    /// Full-screen card detail panel for a card ID.
+    Detail(String),
+    /// Integrated log pane for a card (`logs/stdout.log`).
+    Log(String),
 }
 
 // ── KanbanColumn ────────────────────────────────────────────────────────────
@@ -93,7 +108,7 @@ pub struct KanbanColumn {
     pub cards: Vec<CardView>,
     /// Ratatui selection state for the list widget.
     pub list_state: ListState,
-    /// WIP limit for this column (from config `max_concurrent` for "running").
+    /// WIP limit for this column (running reads `max_workers`/`max_concurrent`).
     pub wip_limit: Option<usize>,
     /// Auto-collapsed when card count is 0.
     pub collapsed: bool,
@@ -126,6 +141,7 @@ impl KanbanColumn {
     }
 
     /// WIP saturation fraction (0.0–1.0). Returns 0.0 when no limit is set.
+    #[allow(dead_code)]
     pub fn wip_saturation(&self) -> f32 {
         match self.wip_limit {
             Some(limit) if limit > 0 => (self.cards.len() as f32 / limit as f32).min(1.0),
@@ -153,7 +169,7 @@ pub struct App {
     pub filter_state: Option<FilterState>,
     /// Current interaction mode.
     pub mode: Mode,
-    /// Active body tab (`Kanban` or `Factory`).
+    /// Active body tab (`Kanban`, `Factory`, or `Log(card_id)`).
     pub tab: AppTab,
     /// Factory services panel state.
     pub factory_tab: FactoryTabState,
@@ -173,12 +189,20 @@ pub struct App {
     pub prev_done_count: usize,
     /// Scroll offset for the Detail overlay (lines scrolled from top).
     pub detail_scroll: usize,
+    /// Active detail sub-tab (`Meta`, `Diff`, `Replay`, `Output`, `Log`).
+    pub detail_tab: DetailTab,
+    /// Follow mode for detail Log tab.
+    pub detail_log_follow: bool,
     /// Ratatui selection state for the ActionPopup list widget.
     pub action_list_state: ListState,
     /// Scroll offset for the LogTail overlay (lines scrolled from top).
     pub log_scroll: usize,
     /// Follow mode for LogTail — auto-scrolls to show latest lines.
     pub log_follow: bool,
+    /// Scroll offset for the integrated Log tab (lines above bottom).
+    pub log_pane_scroll: usize,
+    /// Follow mode for the integrated Log tab.
+    pub log_pane_follow: bool,
     /// Card ID currently being tailed in LogTail mode (None when not tailing).
     pub log_tail_card_id: Option<String>,
     /// File position in `logs/stdout.log` for incremental reading.
@@ -193,10 +217,16 @@ pub struct App {
     pub newcard_input: String,
     /// Transient status message shown in the footer (cleared on next keypress).
     pub status_message: Option<String>,
+    /// Short-lived toast message (used for invalid move errors).
+    pub toast_message: Option<String>,
+    /// Tick deadline for clearing `toast_message`.
+    pub toast_deadline_tick: Option<u64>,
     /// Set of card IDs marked for bulk operations (Tab multi-select, yazi pattern).
     pub marked_cards: HashSet<String>,
-    /// Worktree path for the pending subshell (set by `!` key, consumed by event loop).
+    /// Shell cwd for the pending subshell (set by `Ctrl+O`, consumed by event loop).
     pub subshell_worktree: Option<PathBuf>,
+    /// Card ID for the pending subshell pane name.
+    pub subshell_card_id: Option<String>,
     /// Current terminal width in columns (updated on resize events).
     pub terminal_width: u16,
     /// Current terminal height in rows (updated on resize events).
@@ -205,16 +235,22 @@ pub struct App {
 
 /// Maximum number of log lines retained in the circular buffer.
 const LOG_BUF_CAPACITY: usize = 200;
+/// Read window for integrated log-pane tailing.
+const LOG_PANE_READ_BYTES: i64 = 16384;
+/// Refresh cadence for integrated log-pane updates (2 x 250ms = 500ms).
+const LOG_PANE_REFRESH_TICKS: u64 = 2;
 
 /// Number of throughput sparkline samples.
 const THROUGHPUT_SAMPLES: usize = 8;
+/// Toast visibility duration in ticks (8 * 250ms = 2s).
+const TOAST_TTL_TICKS: u64 = 8;
 
 impl App {
     /// Create a new App by scanning the filesystem for cards.
     ///
     /// Reads cards from the `.cards` directory using the same pattern as
-    /// `list.rs::collect_card_views`. Reads `max_concurrent` from the
-    /// bop-core config for the "running" column's WIP limit.
+    /// `list.rs::collect_card_views`. Reads the running WIP limit from
+    /// config (`max_workers`/`max_concurrent`, default 3).
     pub fn new(cards_root: &Path) -> anyhow::Result<Self> {
         let columns = build_columns(cards_root);
 
@@ -249,6 +285,8 @@ impl App {
             action_list_state: ListState::default(),
             log_scroll: 0,
             log_follow: false,
+            log_pane_scroll: 0,
+            log_pane_follow: true,
             log_tail_card_id: None,
             log_stdout_pos: 0,
             log_stderr_pos: 0,
@@ -256,8 +294,11 @@ impl App {
             log_stderr_incomplete: String::new(),
             newcard_input: String::new(),
             status_message: None,
+            toast_message: None,
+            toast_deadline_tick: None,
             marked_cards: HashSet::new(),
             subshell_worktree: None,
+            subshell_card_id: None,
             terminal_width: term_w,
             terminal_height: term_h,
         };
@@ -272,9 +313,9 @@ impl App {
 
     /// Toggle between kanban and factory tabs.
     pub fn toggle_tab(&mut self) {
-        match self.tab {
-            AppTab::Kanban => self.switch_to_factory_tab(),
+        match &self.tab {
             AppTab::Factory => self.switch_to_kanban_tab(),
+            _ => self.switch_to_factory_tab(),
         }
     }
 
@@ -308,6 +349,14 @@ impl App {
         let col = self.focused_column()?;
         let idx = col.list_state.selected()?;
         col.cards.get(idx)
+    }
+
+    /// Return a card by ID from any column.
+    pub fn card_by_id(&self, card_id: &str) -> Option<&CardView> {
+        self.columns
+            .iter()
+            .flat_map(|column| column.cards.iter())
+            .find(|card| card.id == card_id)
     }
 
     /// Total card count across all columns.
@@ -371,6 +420,12 @@ impl App {
         self.mode = Mode::Normal;
         // Restore collapse state based on card counts (not filter).
         self.update_collapse();
+    }
+
+    /// Show a toast message for 2 seconds.
+    pub fn show_toast(&mut self, message: impl Into<String>) {
+        self.toast_message = Some(message.into());
+        self.toast_deadline_tick = Some(self.tick_count.wrapping_add(TOAST_TTL_TICKS));
     }
 
     // ── Multi-select (Tab / yazi pattern) ──────────────────────────────
@@ -448,11 +503,25 @@ impl App {
     /// meters, track throughput deltas, and poll log files in LogTail mode.
     pub fn on_tick(&mut self) {
         self.tick_count = self.tick_count.wrapping_add(1);
+        if self
+            .toast_deadline_tick
+            .is_some_and(|deadline| self.tick_count >= deadline)
+        {
+            self.toast_message = None;
+            self.toast_deadline_tick = None;
+        }
         self.refresh_provider_meters();
 
         // Factory tab refreshes at 2s cadence.
         if self.tab == AppTab::Factory && self.tick_count.is_multiple_of(FACTORY_REFRESH_TICKS) {
             self.refresh_factory_tab();
+        }
+
+        // Integrated Log tab refreshes every 500ms.
+        if matches!(self.tab, AppTab::Log(_))
+            && self.tick_count.is_multiple_of(LOG_PANE_REFRESH_TICKS)
+        {
+            self.refresh_log_pane();
         }
 
         // Poll log files when in LogTail mode (250ms interval via tick).
@@ -464,6 +533,81 @@ impl App {
     /// Refresh factory status rows and selected log tail.
     pub fn refresh_factory_tab(&mut self) {
         self.factory_tab.refresh();
+    }
+
+    /// Toggle integrated Log tab for the currently selected card.
+    pub fn toggle_log_pane_for_selected(&mut self) {
+        if matches!(self.tab, AppTab::Log(_)) {
+            self.switch_to_kanban_tab();
+            return;
+        }
+
+        let Some(card) = self.selected_card() else {
+            return;
+        };
+
+        self.open_log_pane_for_card(card.id.clone());
+    }
+
+    /// Return the card ID when the integrated Log tab is active.
+    pub fn log_tab_card_id(&self) -> Option<&str> {
+        match &self.tab {
+            AppTab::Log(card_id) => Some(card_id.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Open integrated Log tab for a specific card ID.
+    pub fn open_log_pane_for_card(&mut self, card_id: String) {
+        self.tab = AppTab::Log(card_id);
+        self.mode = Mode::Normal;
+        self.log_pane_scroll = 0;
+        self.log_pane_follow = true;
+        self.refresh_log_pane();
+    }
+
+    /// Close integrated Log tab and return to kanban.
+    pub fn close_log_pane(&mut self) {
+        if matches!(self.tab, AppTab::Log(_)) {
+            self.switch_to_kanban_tab();
+        }
+    }
+
+    /// Cycle to the next running card's integrated log.
+    pub fn cycle_log_pane_running_card(&mut self) {
+        let running_ids: Vec<String> = self
+            .columns
+            .iter()
+            .find(|column| column.state == "running")
+            .map(|column| column.cards.iter().map(|card| card.id.clone()).collect())
+            .unwrap_or_default();
+
+        if running_ids.is_empty() {
+            return;
+        }
+
+        let current_idx = self
+            .log_tab_card_id()
+            .and_then(|current| running_ids.iter().position(|id| id == current));
+        let next_idx = current_idx
+            .map(|idx| (idx + 1) % running_ids.len())
+            .unwrap_or(0);
+        self.open_log_pane_for_card(running_ids[next_idx].clone());
+    }
+
+    /// Refresh integrated log-pane buffer from `logs/stdout.log`.
+    pub fn refresh_log_pane(&mut self) {
+        let Some(card_id) = self.log_tab_card_id() else {
+            return;
+        };
+        let Some(card_dir) = paths::find_card(&self.cards_root, card_id) else {
+            self.log_buf.clear();
+            return;
+        };
+
+        let stdout_path = card_dir.join("logs").join("stdout.log");
+        let lines = read_log_tail(&stdout_path, LOG_PANE_READ_BYTES, LOG_BUF_CAPACITY);
+        self.log_buf = lines.into();
     }
 
     /// Enter LogTail mode for the currently selected card.
@@ -685,23 +829,20 @@ impl App {
         self.track_completions();
     }
 
-    // ── Subshell (`!` key, vim `:!` convention) ───────────────────────
+    // ── Subshell (`Ctrl+O`) ───────────────────────────────────────────
 
     /// Prepare to enter a subshell for the currently selected card.
     ///
-    /// Looks up the card's worktree directory via `meta.json`'s
-    /// `workspace_path` field, falling back to `.bop/workspaces/<id>/`
-    /// relative to the project root. If a valid worktree is found,
-    /// sets `mode = Subshell` and stores the path in `subshell_worktree`
-    /// for the event loop to consume. Otherwise, sets a status message
-    /// explaining why the subshell can't be opened.
+    /// Uses `<card>/worktree/` when present, otherwise falls back to the
+    /// card directory itself. The selected directory is stored for the
+    /// event loop to consume in `run_subshell()`.
     pub fn prepare_subshell(&mut self) {
         let card = match self.selected_card() {
             Some(c) => c.clone(),
             None => return,
         };
 
-        let card_dir = match paths::find_card(&self.cards_root, &card.id) {
+        let card_dir = match find_card_dir(&self.cards_root, &card.id) {
             Some(p) => p,
             None => {
                 self.status_message = Some(format!("card not found: {}", card.id));
@@ -709,37 +850,23 @@ impl App {
             }
         };
 
-        // Try meta.json workspace_path first.
-        if let Ok(meta) = bop_core::read_meta(&card_dir) {
-            if let Some(ref ws_path) = meta.workspace_path {
-                let p = PathBuf::from(ws_path);
-                if p.is_dir() {
-                    self.subshell_worktree = Some(p);
-                    self.mode = Mode::Subshell;
-                    return;
-                }
-            }
-        }
+        let worktree_dir = card_dir.join("worktree");
+        let shell_cwd = if worktree_dir.is_dir() {
+            worktree_dir
+        } else {
+            card_dir
+        };
 
-        // Fallback: .bop/workspaces/<id>/ relative to project root.
-        if let Some(project_root) = self.cards_root.parent() {
-            let ws_dir = project_root.join(".bop").join("workspaces").join(&card.id);
-            if ws_dir.is_dir() {
-                self.subshell_worktree = Some(ws_dir);
-                self.mode = Mode::Subshell;
-                return;
-            }
-        }
-
-        self.status_message = Some(format!("no worktree for {}", card.id));
+        self.subshell_worktree = Some(shell_cwd);
+        self.subshell_card_id = Some(card.id);
+        self.mode = Mode::Subshell;
     }
 
-    /// Run the subshell synchronously in the given worktree directory.
+    /// Run the subshell synchronously in the selected card directory.
     ///
-    /// Spawns `$SHELL` (defaulting to `/bin/sh`) in the worktree and waits
-    /// for it to exit. This is called by the event loop AFTER the terminal
-    /// has been restored (alternate screen left, raw mode disabled).
-    /// Returns when the shell process exits.
+    /// If already inside Zellij, opens a new pane via:
+    /// `zellij run --name <card-id> -- $SHELL` with cwd set to the card path.
+    /// Otherwise falls back to spawning `$SHELL` directly and waiting for exit.
     pub fn run_subshell(&mut self) {
         let worktree = match self.subshell_worktree.take() {
             Some(p) => p,
@@ -748,13 +875,31 @@ impl App {
                 return;
             }
         };
+        let card_id = self
+            .subshell_card_id
+            .take()
+            .unwrap_or_else(|| "card".to_string());
 
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
 
-        // Inform the user which directory they're dropping into.
-        eprintln!("\x1b[1m[bop] subshell in: {}\x1b[0m", worktree.display());
-        eprintln!("\x1b[2m(exit to return to bop ui)\x1b[0m");
+        if std::env::var_os("ZELLIJ").is_some() {
+            let status = Command::new("zellij")
+                .arg("run")
+                .arg("--name")
+                .arg(&card_id)
+                .arg("--")
+                .arg(&shell)
+                .current_dir(&worktree)
+                .status();
 
+            if matches!(status, Ok(s) if s.success()) {
+                self.mode = Mode::Normal;
+                return;
+            }
+        }
+
+        eprintln!("\x1b[1m[bop] shell in: {}\x1b[0m", worktree.display());
+        eprintln!("\x1b[2m(exit to return to bop ui)\x1b[0m");
         let _ = Command::new(&shell).current_dir(&worktree).status();
 
         self.mode = Mode::Normal;
@@ -836,10 +981,37 @@ pub(crate) fn build_columns(cards_root: &Path) -> Vec<KanbanColumn> {
         .iter()
         .map(|&state| {
             let cards = collect_card_views(cards_root, state).unwrap_or_default();
-            let limit = if state == "running" { wip_limit } else { None };
+            let limit = if state == "running" {
+                Some(wip_limit)
+            } else {
+                None
+            };
             KanbanColumn::new(state, cards, limit)
         })
         .collect()
+}
+
+/// Locate a card directory by id in both root and `team-*` state trees.
+pub(crate) fn find_card_dir(cards_root: &Path, card_id: &str) -> Option<PathBuf> {
+    if let Some(path) = paths::find_card(cards_root, card_id) {
+        return Some(path);
+    }
+
+    if let Ok(entries) = fs::read_dir(cards_root) {
+        for entry in entries.flatten() {
+            let team_path = entry.path();
+            if !team_path.is_dir() || !entry.file_name().to_string_lossy().starts_with("team-") {
+                continue;
+            }
+            for state in COLUMN_STATES {
+                let state_dir = team_path.join(state);
+                if let Some(path) = paths::find_card_in_dir(&state_dir, card_id) {
+                    return Some(path);
+                }
+            }
+        }
+    }
+    None
 }
 
 // ── Filesystem helpers (mirroring list.rs patterns) ─────────────────────────
@@ -913,37 +1085,53 @@ fn required_width(
         .sum()
 }
 
-/// Read the WIP limit from bop-core config (`max_concurrent`).
+/// Read the running-column WIP limit.
 ///
-/// Returns None if the config file is missing or the field is unset.
-/// This mirrors how the dispatcher reads `max_concurrent` for the
-/// "running" column's WIP indicator.
-fn read_wip_limit(cards_root: &Path) -> Option<usize> {
-    // Try project config first: <cards_root>/../.bop/config.json
-    let project_config = cards_root
+/// Precedence:
+/// 1. `<cards_root>/.bop/config.json` (`max_workers` or `max_concurrent`)
+/// 2. `<cards_root>/../.bop/config.json` (`max_workers` or `max_concurrent`)
+/// 3. `~/.bop/config.json` (`max_workers` or `max_concurrent`)
+/// 4. default `3`
+fn read_wip_limit(cards_root: &Path) -> usize {
+    const DEFAULT_WIP_LIMIT: usize = 3;
+
+    let cards_local = cards_root.join(".bop").join("config.json");
+    if let Some(limit) = read_wip_limit_from_json(&cards_local) {
+        return limit;
+    }
+
+    if let Some(project_config) = cards_root
         .parent()
-        .map(|p| p.join(".bop").join("config.json"));
-
-    if let Some(ref path) = project_config {
-        if path.exists() {
-            if let Ok(cfg) = bop_core::config::read_config_file(path) {
-                if cfg.max_concurrent.is_some() {
-                    return cfg.max_concurrent;
-                }
-            }
+        .map(|p| p.join(".bop").join("config.json"))
+    {
+        if let Some(limit) = read_wip_limit_from_json(&project_config) {
+            return limit;
         }
     }
 
-    // Fall back to global config
     if let Some(global_path) = bop_core::config::global_config_path() {
-        if global_path.exists() {
-            if let Ok(cfg) = bop_core::config::read_config_file(&global_path) {
-                return cfg.max_concurrent;
-            }
+        if let Some(limit) = read_wip_limit_from_json(&global_path) {
+            return limit;
         }
     }
 
-    None
+    DEFAULT_WIP_LIMIT
+}
+
+fn read_wip_limit_from_json(path: &Path) -> Option<usize> {
+    let json = fs::read_to_string(path).ok()?;
+    let value: Value = serde_json::from_str(&json).ok()?;
+
+    let max_workers = value
+        .get("max_workers")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize);
+    let max_concurrent = value
+        .get("max_concurrent")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize);
+
+    max_workers.or(max_concurrent)
 }
 
 /// Read new bytes from a log file and extract complete lines.
@@ -1002,6 +1190,44 @@ fn read_log_chunk(path: &Path, pos: &mut u64, incomplete: &mut String) -> Vec<St
         lines.push(line);
     }
 
+    lines
+}
+
+/// Read the tail of a log file using a bounded seek-from-end window.
+///
+/// Uses the same `BufReader + SeekFrom::End` pattern as `factory_tab.rs`.
+/// Returns at most `max_lines` from the end of the file.
+fn read_log_tail(path: &Path, read_bytes: i64, max_lines: usize) -> Vec<String> {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut reader = BufReader::new(file);
+    let file_len = match reader.get_ref().metadata() {
+        Ok(meta) => meta.len(),
+        Err(_) => return Vec::new(),
+    };
+
+    let seek_result = if file_len > read_bytes as u64 {
+        reader.seek(SeekFrom::End(-read_bytes))
+    } else {
+        reader.seek(SeekFrom::Start(0))
+    };
+    if seek_result.is_err() {
+        return Vec::new();
+    }
+
+    let mut chunk = String::new();
+    if reader.read_to_string(&mut chunk).is_err() {
+        return Vec::new();
+    }
+
+    let mut lines: Vec<String> = chunk.lines().map(str::to_owned).collect();
+    if lines.len() > max_lines {
+        let split_at = lines.len() - max_lines;
+        lines = lines.split_off(split_at);
+    }
     lines
 }
 
@@ -1180,14 +1406,34 @@ mod tests {
         let cards_root = td.path().join(".cards");
         fs::create_dir_all(&cards_root).unwrap();
         let limit = read_wip_limit(&cards_root);
-        assert_eq!(limit, Some(4));
+        assert_eq!(limit, 4);
     }
 
     #[test]
-    fn read_wip_limit_returns_none_when_missing() {
+    fn read_wip_limit_defaults_to_three_when_missing() {
         let td = tempdir().unwrap();
         let limit = read_wip_limit(td.path());
-        assert!(limit.is_none());
+        assert_eq!(limit, 3);
+    }
+
+    #[test]
+    fn read_wip_limit_prefers_cards_local_max_workers() {
+        let td = tempdir().unwrap();
+        let cards_root = td.path().join(".cards");
+        let cards_bop_dir = cards_root.join(".bop");
+        let project_bop_dir = td.path().join(".bop");
+        fs::create_dir_all(&cards_bop_dir).unwrap();
+        fs::create_dir_all(&project_bop_dir).unwrap();
+
+        fs::write(
+            cards_bop_dir.join("config.json"),
+            r#"{"max_workers": 7, "max_concurrent": 2}"#,
+        )
+        .unwrap();
+        fs::write(project_bop_dir.join("config.json"), r#"{"max_workers": 4}"#).unwrap();
+
+        let limit = read_wip_limit(&cards_root);
+        assert_eq!(limit, 7);
     }
 
     // ── read_log_chunk (newline-gated streaming) ─────────────────────

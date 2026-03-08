@@ -2,7 +2,9 @@ pub mod app;
 pub mod event;
 pub mod factory_tab;
 pub mod input;
+pub mod log_pane;
 pub mod widgets;
+pub mod wizard;
 
 use std::io::{self, Stdout};
 use std::path::Path;
@@ -23,6 +25,7 @@ use crate::paths;
 use app::{App, AppEvent, AppTab, Mode};
 use event::{EventLoop, TerminalGuard};
 use factory_tab::FactoryTabWidget;
+use log_pane::render_log_pane;
 use widgets::{render_detail, render_footer, render_header, render_kanban, render_logtail};
 
 /// Launch the interactive TUI kanban board.
@@ -150,36 +153,42 @@ fn draw(
         render_header(frame, zones[0], app);
 
         // ── Body (remaining space) ─────────────────────────────────────
-        if app.tab == AppTab::Factory {
-            frame.render_widget(FactoryTabWidget::new(&app.factory_tab), zones[1]);
-        } else {
-            render_kanban(frame, zones[1], app);
-
-            // ── Detail overlay (right 50% of body) ────────────────────
-            if app.mode == Mode::Detail {
-                if let Some(card) = app.selected_card().cloned() {
-                    let card_dir = paths::find_card(&app.cards_root, &card.id);
-                    render_detail(
-                        frame,
-                        zones[1],
-                        &card,
-                        app.detail_scroll,
-                        card_dir.as_deref(),
-                    );
-                }
+        match &app.tab {
+            AppTab::Factory => {
+                frame.render_widget(FactoryTabWidget::new(&app.factory_tab), zones[1]);
             }
+            AppTab::Log(card_id) => {
+                render_log_pane(frame, zones[1], app, card_id);
+            }
+            AppTab::Kanban => {
+                render_kanban(frame, zones[1], app);
 
-            // ── LogTail overlay (full body zone) ───────────────────────
-            if app.mode == Mode::LogTail {
-                if let Some(ref card_id) = app.log_tail_card_id.clone() {
-                    render_logtail(
-                        frame,
-                        zones[1],
-                        card_id,
-                        &app.log_buf,
-                        app.log_scroll,
-                        app.log_follow,
-                    );
+                // ── Detail overlay (right 50% of body) ────────────────
+                if app.mode == Mode::Detail {
+                    if let Some(card) = app.selected_card().cloned() {
+                        let card_dir = paths::find_card(&app.cards_root, &card.id);
+                        render_detail(
+                            frame,
+                            zones[1],
+                            &card,
+                            app.detail_scroll,
+                            card_dir.as_deref(),
+                        );
+                    }
+                }
+
+                // ── LogTail overlay (full body zone) ───────────────────
+                if app.mode == Mode::LogTail {
+                    if let Some(ref card_id) = app.log_tail_card_id.clone() {
+                        render_logtail(
+                            frame,
+                            zones[1],
+                            card_id,
+                            &app.log_buf,
+                            app.log_scroll,
+                            app.log_follow,
+                        );
+                    }
                 }
             }
         }
@@ -233,10 +242,10 @@ fn render_minimal_status(frame: &mut ratatui::Frame, area: ratatui::layout::Rect
         ));
     }
 
-    let mode_str = if app.tab == AppTab::Factory {
-        "factory"
-    } else {
-        match app.mode {
+    let mode_str = match &app.tab {
+        AppTab::Factory => "factory",
+        AppTab::Log(_) => "log",
+        AppTab::Kanban => match app.mode {
             Mode::Normal => "normal",
             Mode::Filter => "filter",
             Mode::ActionPopup => "action",
@@ -244,7 +253,7 @@ fn render_minimal_status(frame: &mut ratatui::Frame, area: ratatui::layout::Rect
             Mode::LogTail => "logs",
             Mode::NewCard => "new",
             Mode::Subshell => "shell",
-        }
+        },
     };
 
     spans.push(Span::styled(" · ", Style::default().fg(Color::DarkGray)));
@@ -357,6 +366,8 @@ mod snapshot_tests {
             action_list_state: ratatui::widgets::ListState::default(),
             log_scroll: 0,
             log_follow: false,
+            log_pane_scroll: 0,
+            log_pane_follow: true,
             log_tail_card_id: None,
             log_stdout_pos: 0,
             log_stderr_pos: 0,
@@ -364,8 +375,11 @@ mod snapshot_tests {
             log_stderr_incomplete: String::new(),
             newcard_input: String::new(),
             status_message: None,
+            toast_message: None,
+            toast_deadline_tick: None,
             marked_cards: HashSet::new(),
             subshell_worktree: None,
+            subshell_card_id: None,
             terminal_width: 80,
             terminal_height: 24,
         }

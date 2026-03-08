@@ -6,6 +6,7 @@ pub mod history;
 pub mod ollama;
 pub mod opencode;
 
+use anyhow::Context;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -14,7 +15,8 @@ use std::fs;
 use std::future::Future;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use bop_core::Meta;
 
@@ -51,13 +53,58 @@ pub struct ProvidersFile {
     pub providers: BTreeMap<String, AdapterConfig>,
 }
 
-pub type ProviderSelection = (
-    String,
-    String,
-    i32,
-    BTreeMap<String, String>,
-    Option<String>,
-);
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderSelection {
+    pub name: String,
+    pub command: String,
+    pub rate_limit_exit: i32,
+    pub env: BTreeMap<String, String>,
+    pub model: Option<String>,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DispatchProviderConfig {
+    pub auto_select_provider: bool,
+    pub quota_block_threshold: f64,
+    pub prefer_cheap_provider: Option<String>,
+}
+
+impl Default for DispatchProviderConfig {
+    fn default() -> Self {
+        Self {
+            auto_select_provider: true,
+            quota_block_threshold: 0.90,
+            prefer_cheap_provider: None,
+        }
+    }
+}
+
+impl DispatchProviderConfig {
+    pub fn from_dispatch_config(cfg: Option<&bop_core::config::DispatchConfig>) -> Self {
+        let mut out = Self::default();
+        if let Some(cfg) = cfg {
+            if let Some(auto) = cfg.auto_select_provider {
+                out.auto_select_provider = auto;
+            }
+            if let Some(threshold) = cfg.quota_block_threshold {
+                let normalized = if threshold > 1.0 {
+                    threshold / 100.0
+                } else {
+                    threshold
+                };
+                out.quota_block_threshold = normalized.clamp(0.0, 1.0);
+            }
+            out.prefer_cheap_provider = cfg
+                .prefer_cheap_provider
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+        }
+        out
+    }
+}
 
 fn validate_provider(name: &str, p: &AdapterConfig) -> anyhow::Result<()> {
     if name.trim().is_empty() {
@@ -154,13 +201,210 @@ pub fn rotate_provider_chain(meta: &mut Meta) {
     meta.provider_chain.push(first);
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ProviderCache {
+    snapshots: Vec<ProviderSnapshot>,
+    updated_at: Option<Instant>,
+}
+
+impl ProviderCache {
+    pub fn get_cached(&self, max_age: Duration) -> Option<Vec<ProviderSnapshot>> {
+        let updated_at = self.updated_at?;
+        if updated_at.elapsed() <= max_age {
+            return Some(self.snapshots.clone());
+        }
+        None
+    }
+
+    pub fn refresh(&mut self) -> anyhow::Result<Vec<ProviderSnapshot>> {
+        self.refresh_with(refresh_provider_snapshots)
+    }
+
+    pub fn get_or_refresh(&mut self, max_age: Duration) -> anyhow::Result<Vec<ProviderSnapshot>> {
+        if let Some(cached) = self.get_cached(max_age) {
+            return Ok(cached);
+        }
+        self.refresh()
+    }
+
+    fn refresh_with<F>(&mut self, fetch: F) -> anyhow::Result<Vec<ProviderSnapshot>>
+    where
+        F: FnOnce() -> anyhow::Result<Vec<ProviderSnapshot>>,
+    {
+        let snapshots = fetch()?;
+        self.snapshots = snapshots.clone();
+        self.updated_at = Some(Instant::now());
+        Ok(snapshots)
+    }
+
+    #[cfg(test)]
+    fn get_or_refresh_with<F>(
+        &mut self,
+        max_age: Duration,
+        fetch: F,
+    ) -> anyhow::Result<Vec<ProviderSnapshot>>
+    where
+        F: FnOnce() -> anyhow::Result<Vec<ProviderSnapshot>>,
+    {
+        if let Some(cached) = self.get_cached(max_age) {
+            return Ok(cached);
+        }
+        self.refresh_with(fetch)
+    }
+}
+
+fn provider_cache() -> &'static Mutex<ProviderCache> {
+    static CACHE: OnceLock<Mutex<ProviderCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(ProviderCache::default()))
+}
+
+fn run_provider_future<F, T>(future: F) -> anyhow::Result<T>
+where
+    F: Future<Output = anyhow::Result<T>> + Send + 'static,
+    T: Send + 'static,
+{
+    let handle = std::thread::spawn(move || -> anyhow::Result<T> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        rt.block_on(future)
+    });
+
+    handle
+        .join()
+        .map_err(|_| anyhow::anyhow!("provider quota refresh thread panicked"))?
+}
+
+fn refresh_provider_snapshots() -> anyhow::Result<Vec<ProviderSnapshot>> {
+    let providers = detect_all_providers();
+    if providers.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    run_provider_future(async move {
+        let provider_order: Vec<String> = providers
+            .iter()
+            .map(|provider| provider.name().to_string())
+            .collect();
+        let mut snapshots = fetch_provider_snapshots(&providers, None, None).await;
+        sort_snapshots(&mut snapshots, &provider_order);
+        Ok(snapshots)
+    })
+}
+
+fn preferred_rank(provider: &str, cost_tier: u8, cheap_provider: Option<&str>) -> u8 {
+    let is_cheap = cheap_provider.map(|p| p == provider).unwrap_or(false)
+        || provider == "ollama-local"
+        || provider == "ollama";
+
+    match cost_tier {
+        1 => {
+            if is_cheap {
+                0
+            } else {
+                1
+            }
+        }
+        2 => {
+            if is_cheap || provider == "codex" {
+                0
+            } else {
+                1
+            }
+        }
+        3.. => {
+            if provider == "codex" || provider == "claude" {
+                0
+            } else if is_cheap {
+                2
+            } else {
+                1
+            }
+        }
+        _ => 1,
+    }
+}
+
+fn reorder_by_cost_tier(providers: &mut [String], cost_tier: u8, cheap_provider: Option<&str>) {
+    providers.sort_by_key(|provider| preferred_rank(provider, cost_tier, cheap_provider));
+}
+
+fn quota_utilization(snapshots: &[ProviderSnapshot], provider: &str) -> Option<f64> {
+    snapshots.iter().find_map(|snap| {
+        if snap.provider != provider {
+            return None;
+        }
+
+        let mut max_pct: Option<f64> = None;
+        if let Some(primary) = snap.primary_pct {
+            max_pct = Some(f64::from(primary) / 100.0);
+        }
+        if let Some(secondary) = snap.secondary_pct {
+            let secondary = f64::from(secondary) / 100.0;
+            max_pct = Some(max_pct.map(|p| p.max(secondary)).unwrap_or(secondary));
+        }
+        max_pct
+    })
+}
+
+fn meta_cost_tier(meta: Option<&Meta>) -> u8 {
+    let Some(meta) = meta else {
+        return 2;
+    };
+
+    if let Some(cost) = meta.cost {
+        return cost.max(1);
+    }
+
+    meta.priority
+        .and_then(|priority| u8::try_from(priority).ok())
+        .map(|p| p.max(1))
+        .unwrap_or(2)
+}
+
+fn build_selection(name: &str, config: &AdapterConfig, reason: String) -> ProviderSelection {
+    ProviderSelection {
+        name: name.to_string(),
+        command: config.command.clone(),
+        rate_limit_exit: config.rate_limit_exit,
+        env: config.env.clone(),
+        model: config.model.clone(),
+        reason,
+    }
+}
+
+fn lock_provider_cache() -> std::sync::MutexGuard<'static, ProviderCache> {
+    match provider_cache().lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+pub fn load_dispatch_provider_config(cards_dir: &Path) -> anyhow::Result<DispatchProviderConfig> {
+    let base = bop_core::load_config().unwrap_or_default();
+    let cards_local_path = cards_dir.join(".bop").join("config.json");
+    let merged = if cards_local_path.exists() {
+        let local = bop_core::config::read_config_file(&cards_local_path)
+            .with_context(|| format!("cards-local config error: {}", cards_local_path.display()))?;
+        bop_core::config::merge_configs(base, local)
+    } else {
+        base
+    };
+
+    Ok(DispatchProviderConfig::from_dispatch_config(
+        merged.dispatch.as_ref(),
+    ))
+}
+
 pub fn select_provider(
     cards_dir: &Path,
     meta: Option<&mut Meta>,
     stage: &str,
+    cfg: &DispatchProviderConfig,
 ) -> anyhow::Result<Option<ProviderSelection>> {
     let pf = read_providers(cards_dir)?;
     let now = Utc::now().timestamp();
+    let cost_tier = meta_cost_tier(meta.as_deref());
 
     let avoid_provider = if stage == "qa" {
         meta.as_ref()
@@ -180,7 +424,22 @@ pub fn select_provider(
         None => vec!["mock".to_string(), "mock2".to_string()],
     };
 
-    let mut fallback: Option<ProviderSelection> = None;
+    let quota_snapshots = if cfg.auto_select_provider {
+        let mut cache = lock_provider_cache();
+        match cache.get_or_refresh(Duration::from_secs(60)) {
+            Ok(snapshots) => snapshots,
+            Err(err) => {
+                eprintln!("[providers] quota refresh failed: {err}");
+                Vec::new()
+            }
+        }
+    } else {
+        Vec::new()
+    };
+
+    let mut eligible: Vec<String> = Vec::new();
+    let mut fallback: Option<String> = None;
+
     for name in chain {
         let Some(p) = pf.providers.get(&name) else {
             continue;
@@ -191,31 +450,80 @@ pub fn select_provider(
             }
         }
 
+        if cfg.auto_select_provider {
+            if let Some(utilization) = quota_utilization(&quota_snapshots, &name) {
+                if utilization >= cfg.quota_block_threshold {
+                    continue;
+                }
+            }
+        }
+
         if let Some(ref avoid) = avoid_provider {
             if &name == avoid {
                 if fallback.is_none() {
-                    fallback = Some((
-                        name,
-                        p.command.clone(),
-                        p.rate_limit_exit,
-                        p.env.clone(),
-                        p.model.clone(),
-                    ));
+                    fallback = Some(name.clone());
                 }
                 continue;
             }
         }
 
-        return Ok(Some((
-            name,
-            p.command.clone(),
-            p.rate_limit_exit,
-            p.env.clone(),
-            p.model.clone(),
-        )));
+        eligible.push(name);
     }
 
-    Ok(fallback)
+    if eligible.is_empty() {
+        if let Some(fallback_name) = fallback {
+            if let Some(provider) = pf.providers.get(&fallback_name) {
+                return Ok(Some(build_selection(
+                    &fallback_name,
+                    provider,
+                    format!(
+                        "stage={} fallback to implementation provider because no alternative was eligible",
+                        stage
+                    ),
+                )));
+            }
+        }
+        return Ok(None);
+    }
+
+    let mut ordered = eligible.clone();
+    if cfg.auto_select_provider {
+        reorder_by_cost_tier(
+            &mut ordered,
+            cost_tier,
+            cfg.prefer_cheap_provider.as_deref(),
+        );
+    }
+    let selected_name = ordered.remove(0);
+    let Some(provider) = pf.providers.get(&selected_name) else {
+        return Ok(None);
+    };
+
+    let utilization_note = quota_utilization(&quota_snapshots, &selected_name)
+        .map(|u| {
+            format!(
+                ", quota={:.0}%<{:.0}%",
+                u * 100.0,
+                cfg.quota_block_threshold * 100.0
+            )
+        })
+        .unwrap_or_default();
+
+    let reason = if cfg.auto_select_provider {
+        let reorder_note = if eligible.first() != Some(&selected_name) {
+            ", reordered_by_cost_tier=true"
+        } else {
+            ""
+        };
+        format!(
+            "stage={}, cost_tier={}{}{}, cooldown=ready",
+            stage, cost_tier, utilization_note, reorder_note
+        )
+    } else {
+        format!("stage={}, auto_select_provider=false", stage)
+    };
+
+    Ok(Some(build_selection(&selected_name, provider, reason)))
 }
 
 pub fn set_provider_cooldown(
@@ -408,6 +716,77 @@ fn format_non_quota_detail(snap: &ProviderSnapshot) -> Option<String> {
     Some(parts.join("  "))
 }
 
+fn normalize_utilization_label(label: &str) -> String {
+    let mut out = String::with_capacity(label.len());
+    let mut prev_underscore = false;
+
+    for ch in label.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            prev_underscore = false;
+        } else if !prev_underscore {
+            out.push('_');
+            prev_underscore = true;
+        }
+    }
+
+    out.trim_matches('_').to_string()
+}
+
+fn reset_in_secs(reset: Option<&DateTime<Utc>>) -> Option<i64> {
+    let t = reset?;
+    let now = Utc::now();
+    Some((*t - now).num_seconds().max(0))
+}
+
+fn snapshot_json_entry(snap: &ProviderSnapshot) -> serde_json::Value {
+    let mut obj = serde_json::Map::new();
+    obj.insert(
+        "name".to_string(),
+        serde_json::Value::String(snap.provider.clone()),
+    );
+
+    if let (Some(label), Some(pct)) = (snap.primary_label.as_deref(), snap.primary_pct) {
+        let label_key = normalize_utilization_label(label);
+        if !label_key.is_empty() {
+            obj.insert(
+                format!("utilization_{label_key}"),
+                serde_json::json!(f64::from(pct) / 100.0),
+            );
+        }
+    }
+
+    if let (Some(label), Some(pct)) = (snap.secondary_label.as_deref(), snap.secondary_pct) {
+        let label_key = normalize_utilization_label(label);
+        if !label_key.is_empty() {
+            obj.insert(
+                format!("utilization_{label_key}"),
+                serde_json::json!(f64::from(pct) / 100.0),
+            );
+        }
+    }
+
+    match reset_in_secs(snap.reset_at.as_ref()) {
+        Some(secs) => {
+            obj.insert("reset_in_secs".to_string(), serde_json::json!(secs));
+        }
+        None => {
+            obj.insert("reset_in_secs".to_string(), serde_json::Value::Null);
+        }
+    }
+
+    match &snap.error {
+        Some(err) => {
+            obj.insert("error".to_string(), serde_json::Value::String(err.clone()));
+        }
+        None => {
+            obj.insert("error".to_string(), serde_json::Value::Null);
+        }
+    }
+
+    serde_json::Value::Object(obj)
+}
+
 /// Render an ANSI table of provider snapshots.
 fn format_providers_table(snapshots: &[ProviderSnapshot]) -> String {
     let mut out = String::new();
@@ -479,7 +858,8 @@ fn format_providers_table(snapshots: &[ProviderSnapshot]) -> String {
 
 fn render_snapshots(snapshots: &[ProviderSnapshot], json: bool) -> anyhow::Result<String> {
     if json {
-        let out = serde_json::to_string_pretty(snapshots)?;
+        let entries: Vec<serde_json::Value> = snapshots.iter().map(snapshot_json_entry).collect();
+        let out = serde_json::to_string_pretty(&serde_json::json!({ "providers": entries }))?;
         return Ok(format!("{out}\n"));
     }
     Ok(format_providers_table(snapshots))
@@ -695,6 +1075,7 @@ mod tests {
     use tempfile::tempdir;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+    static CACHE_LOCK: Mutex<()> = Mutex::new(());
 
     fn mock_provider(command: &str) -> AdapterConfig {
         AdapterConfig {
@@ -704,6 +1085,13 @@ mod tests {
             model: None,
             env: Default::default(),
             probe: true,
+        }
+    }
+
+    fn manual_select_cfg() -> DispatchProviderConfig {
+        DispatchProviderConfig {
+            auto_select_provider: false,
+            ..Default::default()
         }
     }
 
@@ -883,11 +1271,17 @@ mod tests {
             provider_chain: vec!["a".into(), "b".into()],
             ..Default::default()
         };
-        let result = select_provider(td.path(), Some(&mut meta), "implement").unwrap();
+        let result = select_provider(
+            td.path(),
+            Some(&mut meta),
+            "implement",
+            &manual_select_cfg(),
+        )
+        .unwrap();
         assert!(result.is_some());
-        let (name, cmd, _, _, _) = result.unwrap();
-        assert_eq!(name, "a");
-        assert_eq!(cmd, "cmd_a");
+        let selected = result.unwrap();
+        assert_eq!(selected.name, "a");
+        assert_eq!(selected.command, "cmd_a");
     }
 
     #[test]
@@ -905,9 +1299,15 @@ mod tests {
             provider_chain: vec!["a".into(), "b".into()],
             ..Default::default()
         };
-        let result = select_provider(td.path(), Some(&mut meta), "implement").unwrap();
-        let (name, _, _, _, _) = result.unwrap();
-        assert_eq!(name, "b");
+        let result = select_provider(
+            td.path(),
+            Some(&mut meta),
+            "implement",
+            &manual_select_cfg(),
+        )
+        .unwrap();
+        let selected = result.unwrap();
+        assert_eq!(selected.name, "b");
     }
 
     #[test]
@@ -927,7 +1327,13 @@ mod tests {
             provider_chain: vec!["a".into(), "b".into()],
             ..Default::default()
         };
-        let result = select_provider(td.path(), Some(&mut meta), "implement").unwrap();
+        let result = select_provider(
+            td.path(),
+            Some(&mut meta),
+            "implement",
+            &manual_select_cfg(),
+        )
+        .unwrap();
         assert!(result.is_none());
     }
 
@@ -958,9 +1364,10 @@ mod tests {
             stages,
             ..Default::default()
         };
-        let result = select_provider(td.path(), Some(&mut meta), "qa").unwrap();
-        let (name, _, _, _, _) = result.unwrap();
-        assert_eq!(name, "qa_prov");
+        let result =
+            select_provider(td.path(), Some(&mut meta), "qa", &manual_select_cfg()).unwrap();
+        let selected = result.unwrap();
+        assert_eq!(selected.name, "qa_prov");
     }
 
     #[test]
@@ -988,9 +1395,206 @@ mod tests {
             stages,
             ..Default::default()
         };
-        let result = select_provider(td.path(), Some(&mut meta), "qa").unwrap();
-        let (name, _, _, _, _) = result.unwrap();
-        assert_eq!(name, "only_prov");
+        let result =
+            select_provider(td.path(), Some(&mut meta), "qa", &manual_select_cfg()).unwrap();
+        let selected = result.unwrap();
+        assert_eq!(selected.name, "only_prov");
+    }
+
+    #[test]
+    fn select_provider_skips_provider_at_or_above_quota_threshold() {
+        let _guard = CACHE_LOCK.lock().unwrap();
+        let td = tempdir().unwrap();
+        let mut pf = ProvidersFile::default();
+        pf.providers
+            .insert("codex".to_string(), mock_provider("cmd_codex"));
+        pf.providers
+            .insert("claude".to_string(), mock_provider("cmd_claude"));
+        write_providers(td.path(), &pf).unwrap();
+
+        {
+            let mut cache = lock_provider_cache();
+            let _ = cache.refresh_with(|| {
+                Ok(vec![
+                    ProviderSnapshot {
+                        provider: "codex".into(),
+                        display_name: "Codex".into(),
+                        primary_pct: Some(95),
+                        secondary_pct: None,
+                        primary_label: Some("session".into()),
+                        secondary_label: None,
+                        tokens_used: None,
+                        cost_usd: None,
+                        reset_at: None,
+                        source: "test".into(),
+                        error: None,
+                        loaded_models: None,
+                    },
+                    ProviderSnapshot {
+                        provider: "claude".into(),
+                        display_name: "Claude".into(),
+                        primary_pct: Some(20),
+                        secondary_pct: None,
+                        primary_label: Some("5h".into()),
+                        secondary_label: None,
+                        tokens_used: None,
+                        cost_usd: None,
+                        reset_at: None,
+                        source: "test".into(),
+                        error: None,
+                        loaded_models: None,
+                    },
+                ])
+            });
+        }
+
+        let mut meta = Meta {
+            provider_chain: vec!["codex".into(), "claude".into()],
+            ..Default::default()
+        };
+        let cfg = DispatchProviderConfig {
+            auto_select_provider: true,
+            quota_block_threshold: 0.90,
+            prefer_cheap_provider: None,
+        };
+        let selected = select_provider(td.path(), Some(&mut meta), "implement", &cfg)
+            .unwrap()
+            .unwrap();
+        assert_eq!(selected.name, "claude");
+    }
+
+    #[test]
+    fn select_provider_prefers_cheap_provider_for_cost_one_when_configured() {
+        let _guard = CACHE_LOCK.lock().unwrap();
+        let td = tempdir().unwrap();
+        let mut pf = ProvidersFile::default();
+        pf.providers
+            .insert("codex".to_string(), mock_provider("cmd_codex"));
+        pf.providers.insert(
+            "ollama-local".to_string(),
+            mock_provider("cmd_ollama_local"),
+        );
+        write_providers(td.path(), &pf).unwrap();
+
+        {
+            let mut cache = lock_provider_cache();
+            let _ = cache.refresh_with(|| {
+                Ok(vec![
+                    ProviderSnapshot {
+                        provider: "codex".into(),
+                        display_name: "Codex".into(),
+                        primary_pct: Some(10),
+                        secondary_pct: None,
+                        primary_label: Some("session".into()),
+                        secondary_label: None,
+                        tokens_used: None,
+                        cost_usd: None,
+                        reset_at: None,
+                        source: "test".into(),
+                        error: None,
+                        loaded_models: None,
+                    },
+                    ProviderSnapshot {
+                        provider: "ollama-local".into(),
+                        display_name: "Ollama".into(),
+                        primary_pct: None,
+                        secondary_pct: None,
+                        primary_label: None,
+                        secondary_label: None,
+                        tokens_used: None,
+                        cost_usd: None,
+                        reset_at: None,
+                        source: "test".into(),
+                        error: None,
+                        loaded_models: Some(vec!["llama3".into()]),
+                    },
+                ])
+            });
+        }
+
+        let mut meta = Meta {
+            provider_chain: vec!["codex".into(), "ollama-local".into()],
+            cost: Some(1),
+            ..Default::default()
+        };
+        let cfg = DispatchProviderConfig {
+            auto_select_provider: true,
+            quota_block_threshold: 0.90,
+            prefer_cheap_provider: Some("ollama-local".into()),
+        };
+        let selected = select_provider(td.path(), Some(&mut meta), "implement", &cfg)
+            .unwrap()
+            .unwrap();
+        assert_eq!(selected.name, "ollama-local");
+    }
+
+    #[test]
+    fn select_provider_cost_tier_routing_reorders_but_never_drops_chain_options() {
+        let _guard = CACHE_LOCK.lock().unwrap();
+        let td = tempdir().unwrap();
+        let mut pf = ProvidersFile::default();
+        pf.providers.insert(
+            "ollama-local".to_string(),
+            mock_provider("cmd_ollama_local"),
+        );
+        write_providers(td.path(), &pf).unwrap();
+
+        {
+            let mut cache = lock_provider_cache();
+            let _ = cache.refresh_with(|| Ok(Vec::new()));
+        }
+
+        let mut meta = Meta {
+            provider_chain: vec!["ollama-local".into()],
+            cost: Some(3),
+            ..Default::default()
+        };
+        let cfg = DispatchProviderConfig {
+            auto_select_provider: true,
+            quota_block_threshold: 0.90,
+            prefer_cheap_provider: Some("ollama-local".into()),
+        };
+        let selected = select_provider(td.path(), Some(&mut meta), "implement", &cfg)
+            .unwrap()
+            .unwrap();
+        assert_eq!(selected.name, "ollama-local");
+    }
+
+    #[test]
+    fn provider_cache_reuses_fresh_snapshot_within_max_age() {
+        let mut cache = ProviderCache::default();
+        let mut refresh_count = 0usize;
+
+        let first = cache
+            .get_or_refresh_with(Duration::from_secs(60), || {
+                refresh_count += 1;
+                Ok(vec![ProviderSnapshot {
+                    provider: "codex".into(),
+                    display_name: "Codex".into(),
+                    primary_pct: Some(12),
+                    secondary_pct: None,
+                    primary_label: Some("session".into()),
+                    secondary_label: None,
+                    tokens_used: None,
+                    cost_usd: None,
+                    reset_at: None,
+                    source: "test".into(),
+                    error: None,
+                    loaded_models: None,
+                }])
+            })
+            .unwrap();
+
+        let second = cache
+            .get_or_refresh_with(Duration::from_secs(60), || {
+                refresh_count += 1;
+                Ok(Vec::new())
+            })
+            .unwrap();
+
+        assert_eq!(refresh_count, 1);
+        assert_eq!(first.len(), second.len());
+        assert_eq!(first[0].provider, second[0].provider);
     }
 
     #[test]
@@ -1003,5 +1607,66 @@ mod tests {
         let now = Utc::now().timestamp();
         assert!(cd > now);
         assert!(cd <= now + 301);
+    }
+
+    #[test]
+    fn render_snapshots_json_is_wrapped_and_parseable() {
+        let snapshots = vec![
+            ProviderSnapshot {
+                provider: "claude".into(),
+                display_name: "Claude Code".into(),
+                primary_pct: Some(61),
+                secondary_pct: Some(30),
+                primary_label: Some("5h".into()),
+                secondary_label: Some("7d".into()),
+                tokens_used: None,
+                cost_usd: None,
+                reset_at: Some(Utc::now() + chrono::Duration::minutes(20)),
+                source: "oauth".into(),
+                error: None,
+                loaded_models: None,
+            },
+            ProviderSnapshot {
+                provider: "codex".into(),
+                display_name: "Codex CLI".into(),
+                primary_pct: Some(5),
+                secondary_pct: None,
+                primary_label: Some("session".into()),
+                secondary_label: Some("weekly".into()),
+                tokens_used: None,
+                cost_usd: None,
+                reset_at: None,
+                source: "oauth".into(),
+                error: Some("note".into()),
+                loaded_models: None,
+            },
+        ];
+
+        let out = render_snapshots(&snapshots, true).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let providers = parsed.get("providers").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(providers.len(), 2);
+
+        let claude = &providers[0];
+        assert_eq!(claude.get("name").and_then(|v| v.as_str()), Some("claude"));
+        assert_eq!(
+            claude.get("utilization_5h").and_then(|v| v.as_f64()),
+            Some(0.61)
+        );
+        assert_eq!(
+            claude.get("utilization_7d").and_then(|v| v.as_f64()),
+            Some(0.30)
+        );
+        assert!(claude.get("reset_in_secs").is_some());
+        assert!(claude.get("error").unwrap().is_null());
+
+        let codex = &providers[1];
+        assert_eq!(codex.get("name").and_then(|v| v.as_str()), Some("codex"));
+        assert_eq!(
+            codex.get("utilization_session").and_then(|v| v.as_f64()),
+            Some(0.05)
+        );
+        assert!(codex.get("reset_in_secs").unwrap().is_null());
+        assert_eq!(codex.get("error").and_then(|v| v.as_str()), Some("note"));
     }
 }

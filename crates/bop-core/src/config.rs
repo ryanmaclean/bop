@@ -10,6 +10,31 @@ pub struct Config {
     pub cooldown_seconds: Option<u64>,
     pub log_retention_days: Option<u64>,
     pub default_template: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatch: Option<DispatchConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct DispatchConfig {
+    pub auto_select_provider: Option<bool>,
+    pub quota_block_threshold: Option<f64>,
+    pub prefer_cheap_provider: Option<String>,
+}
+
+fn merge_dispatch(
+    base: Option<DispatchConfig>,
+    overlay: Option<DispatchConfig>,
+) -> Option<DispatchConfig> {
+    match (base, overlay) {
+        (None, None) => None,
+        (Some(base), None) => Some(base),
+        (None, Some(overlay)) => Some(overlay),
+        (Some(base), Some(overlay)) => Some(DispatchConfig {
+            auto_select_provider: overlay.auto_select_provider.or(base.auto_select_provider),
+            quota_block_threshold: overlay.quota_block_threshold.or(base.quota_block_threshold),
+            prefer_cheap_provider: overlay.prefer_cheap_provider.or(base.prefer_cheap_provider),
+        }),
+    }
 }
 
 /// Merge `overlay` on top of `base`.  Non-None overlay values win.
@@ -22,6 +47,7 @@ pub fn merge_configs(base: Config, overlay: Config) -> Config {
         cooldown_seconds: overlay.cooldown_seconds.or(base.cooldown_seconds),
         log_retention_days: overlay.log_retention_days.or(base.log_retention_days),
         default_template: overlay.default_template.or(base.default_template),
+        dispatch: merge_dispatch(base.dispatch, overlay.dispatch),
     }
 }
 
@@ -33,7 +59,7 @@ pub fn parse_config(json: &str) -> anyhow::Result<Config> {
     serde_json::from_str(json).context(
         "malformed config: expected schema with optional fields: \
         default_provider_chain, max_concurrent, cooldown_seconds, \
-        log_retention_days, default_template",
+        log_retention_days, default_template, dispatch",
     )
 }
 
@@ -123,7 +149,12 @@ mod tests {
   "max_concurrent": 3,
   "cooldown_seconds": 120,
   "log_retention_days": 7,
-  "default_template": "implement"
+  "default_template": "implement",
+  "dispatch": {
+    "auto_select_provider": true,
+    "quota_block_threshold": 0.9,
+    "prefer_cheap_provider": "ollama-local"
+  }
 }"#;
         let cfg = parse_config(json).unwrap();
         assert_eq!(
@@ -134,6 +165,14 @@ mod tests {
         assert_eq!(cfg.cooldown_seconds, Some(120));
         assert_eq!(cfg.log_retention_days, Some(7));
         assert_eq!(cfg.default_template, Some("implement".to_string()));
+        assert_eq!(
+            cfg.dispatch,
+            Some(DispatchConfig {
+                auto_select_provider: Some(true),
+                quota_block_threshold: Some(0.9),
+                prefer_cheap_provider: Some("ollama-local".to_string())
+            })
+        );
     }
 
     #[test]
@@ -167,17 +206,35 @@ mod tests {
         let base = Config {
             max_concurrent: Some(2),
             cooldown_seconds: Some(300),
+            dispatch: Some(DispatchConfig {
+                auto_select_provider: Some(true),
+                quota_block_threshold: Some(0.9),
+                prefer_cheap_provider: None,
+            }),
             ..Default::default()
         };
         let overlay = Config {
             max_concurrent: Some(5),
             default_template: Some("qa".to_string()),
+            dispatch: Some(DispatchConfig {
+                auto_select_provider: None,
+                quota_block_threshold: Some(0.8),
+                prefer_cheap_provider: Some("ollama-local".to_string()),
+            }),
             ..Default::default()
         };
         let merged = merge_configs(base, overlay);
         assert_eq!(merged.max_concurrent, Some(5)); // overlay wins
         assert_eq!(merged.cooldown_seconds, Some(300)); // base kept
         assert_eq!(merged.default_template, Some("qa".to_string()));
+        assert_eq!(
+            merged.dispatch,
+            Some(DispatchConfig {
+                auto_select_provider: Some(true),
+                quota_block_threshold: Some(0.8),
+                prefer_cheap_provider: Some("ollama-local".to_string()),
+            })
+        );
     }
 
     #[test]

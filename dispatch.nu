@@ -122,6 +122,51 @@ def specs [] {
     ["039", "factory status tab in bop ui TUI",                          12, 3, "codex"],
     ["040", "codex MCP per-project routing",                             12, 1, "codex"],
 
+    # ── Wave 13: UX polish, CI, provider hardening ───────────────────────────
+    # 041+043+044+045 parallel (no deps between them)
+    # 042 after 031/032 (extends provider plumbing)
+    # 046 after 041 (reuses input.rs patterns)
+    ["041", "bop ui: fuzzy filter, Shift+H/L moves, Ctrl+O, WIP limit", 13, 3, "codex"],
+    ["042", "providers: live Codex + Gemini quota polling",              13, 3, "codex"],
+    ["043", "bop gantt: HTML hover tooltips + duration heatmap",         13, 2, "codex"],
+    ["044", "CI workflow: fix GitHub Actions + Linux compat",            13, 2, "codex"],
+    ["045", "bop doctor: hardened diagnostics + --fix flag",             13, 2, "codex"],
+    ["046", "bop new: interactive TUI card creation wizard",             13, 3, "codex"],
+
+    # ── Wave 14: observability-first (TRIZ P2+P25) + QEMU P1 skeleton ────────
+    # P2 Extraction: unified watch surface replaces scattered log/attach/stats
+    # P25 Self-service: system reports its own state without user knowing cmds
+    # P1 Segmentation: QEMU in first segment only (skeleton, no agent yet)
+    # P6 Universality: card bundle as portable exchange format (bop export)
+    # 047+048+050+051 parallel; 049 after 041 (extends bop ui)
+    ["047", "bop watch: unified live dashboard (log tail + cost + pane)", 14, 3, "codex"],
+    ["048", "bop stats: historical cost + token report",                  14, 2, "codex"],
+    ["049", "bop ui: integrated log stream pane (L toggle)",              14, 3, "codex"],
+    ["050", "QEMU adapter skeleton: 9P card mount + exit passthrough",    14, 4, "codex"],
+    ["051", "bop export/import: portable card bundle tarball",            14, 2, "codex"],
+
+    # ── Wave 15: intelligence + QEMU seg 2 (TRIZ P35+P10+P3) ─────────────────
+    # P35 param change: quota-aware provider selection at runtime
+    # P10 preliminary action: pre-prepare VM image; pre-check quota before dispatch
+    # P3  local quality: different routing per cost tier
+    # 052+053+055 parallel; 054 after 050 (QEMU seg 2 needs seg 1 skeleton)
+    ["052", "provider auto-select: quota-aware + cost-tier routing",      15, 3, "codex"],
+    ["053", "bop diff: show card output git diff",                        15, 2, "codex"],
+    ["054", "QEMU seg 2: Alpine cloud-init + shell agent in VM",          15, 4, "codex"],
+    ["055", "bop replay: reconstruct card timeline from events.jsonl",    15, 2, "codex"],
+
+    # ── Wave 16: universality + intelligence + QEMU pool (TRIZ P6+P1+P24+P10) ─
+    # P6  Universality: bop ui card detail replaces inspect/diff/replay/log
+    # P1  Segmentation: multi-project --project flag, one install many repos
+    # P24 Intermediary: webhooks — one outbound POST serves all consumers
+    # P10 Preliminary action: QEMU pool pre-warms N VMs before cards arrive
+    # 056+057+059+060 parallel; 058 after 054 (QEMU seg 3 needs seg 2)
+    ["056", "bop ui: card detail panel (meta/diff/replay/output/log tabs)",  16, 4, "codex"],
+    ["057", "webhook notifications: POST on state transitions (Slack/JSON)", 16, 3, "codex"],
+    ["058", "QEMU VM pool: pre-warm N VMs, lease per card",                  16, 4, "codex"],
+    ["059", "multi-project: bop --project <path> + registry",               16, 3, "codex"],
+    ["060", "bop benchmark: compare providers on same spec",                 16, 3, "codex"],
+
     # ── Wave 7: lightweight UX + Zellij live links + security ────────────────
     # Goals: working Zellij deep links in Quick Look, live log tail,
     # color-coded CLI, serve.rs security hardening, event-driven dispatcher.
@@ -369,7 +414,7 @@ def "main plan" [--wave: int = -1] {
   print $"  State file: (ansi light_gray)($STATE_FILE)(ansi reset)"
   print $"  Specs: ($filtered | length) total\n"
 
-  for $w in [0 1 2 3 4 5 6 7 8 9 10 11 12] {
+  for $w in [0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16] {
     let wave_specs = $filtered | where wave == $w
     if ($wave_specs | length) == 0 { continue }
 

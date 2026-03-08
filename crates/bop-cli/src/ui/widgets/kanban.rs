@@ -8,8 +8,8 @@
 ///
 /// Focus and WIP indicators:
 /// - Focused column: `Color::Yellow` border
-/// - Running column ≥75% WIP: amber title
-/// - Running column at 100% WIP: red title + border
+/// - Running column at WIP limit: yellow title
+/// - Running column above WIP limit: red title + border
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -25,7 +25,7 @@ use crate::ui::widgets::filter::FilterMatch;
 
 // ── Glyph helpers ────────────────────────────────────────────────────────────
 
-/// State glyph for column headers and collapsed dividers.
+/// State glyph for column headers.
 ///
 /// Matches the spec's visual language: `·` pending, `⚙` running,
 /// `✓` done, `✗` failed, `~` merged.
@@ -94,7 +94,7 @@ fn format_duration(secs: u64) -> String {
 /// Build the column title `Line` with state glyph, name, and count.
 ///
 /// Running columns with a WIP limit show `⚙ RUNNING (N/M)`, with color
-/// changing at 75% (amber) and 100% (red) saturation.
+/// changing at limit (yellow) and above-limit (red).
 fn column_title(col: &KanbanColumn) -> Line<'static> {
     let glyph = state_glyph(&col.state);
     let name = col.state.to_uppercase();
@@ -119,15 +119,18 @@ fn column_title(col: &KanbanColumn) -> Line<'static> {
 
 /// Determine title color based on state and WIP saturation.
 ///
-/// Running column with WIP limit: amber at ≥75%, red at 100%.
+/// Running column with WIP limit: yellow at limit, red above limit.
 /// All other columns use their default state color.
 fn title_color(col: &KanbanColumn) -> Color {
-    if col.state == "running" && col.wip_limit.is_some() {
-        let sat = col.wip_saturation();
-        if sat >= 1.0 {
-            Color::Red
-        } else if sat >= 0.75 {
-            Color::Yellow
+    if col.state == "running" {
+        if let Some(limit) = col.wip_limit {
+            if col.cards.len() > limit {
+                Color::Red
+            } else if col.cards.len() == limit {
+                Color::Yellow
+            } else {
+                state_ratatui_color(&col.state)
+            }
         } else {
             state_ratatui_color(&col.state)
         }
@@ -138,15 +141,16 @@ fn title_color(col: &KanbanColumn) -> Color {
 
 /// Determine border color for a column.
 ///
-/// Priority: running at 100% WIP → red (even if focused), focused → yellow,
-/// running ≥75% → amber, default → dark gray.
+/// Priority: running above WIP limit → red (even if focused), focused → yellow,
+/// running at limit → yellow, default → dark gray.
 fn border_color(col: &KanbanColumn, is_focused: bool) -> Color {
-    if col.state == "running" && col.wip_limit.is_some() {
-        let sat = col.wip_saturation();
-        if sat >= 1.0 {
-            return Color::Red;
-        } else if sat >= 0.75 {
-            return Color::Yellow;
+    if col.state == "running" {
+        if let Some(limit) = col.wip_limit {
+            if col.cards.len() > limit {
+                return Color::Red;
+            } else if col.cards.len() == limit {
+                return Color::Yellow;
+            }
         }
     }
 
@@ -351,21 +355,17 @@ fn build_progress_line(card: &CardView, color: Color) -> Line<'static> {
 
 // ── Collapsed divider ────────────────────────────────────────────────────────
 
-/// Render a collapsed column as a 3-char narrow divider with state glyph.
+/// Render a collapsed column as a 3-char narrow divider.
 ///
-/// Shows a bordered 3-column-wide block with the state glyph inside.
-/// Border color is dark gray; glyph is in the state's color.
-fn render_collapsed_divider(frame: &mut Frame, area: Rect, state: &str) {
-    let glyph = state_glyph(state);
-    let color = state_ratatui_color(state);
-
+/// Shows a bordered 3-column-wide block with `∅` centered.
+fn render_collapsed_divider(frame: &mut Frame, area: Rect, _state: &str) {
     let block = Block::bordered().border_style(Style::default().fg(Color::DarkGray));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     if inner.height > 0 && inner.width > 0 {
-        let glyph_widget = Paragraph::new(glyph.to_string()).style(Style::default().fg(color));
+        let glyph_widget = Paragraph::new("∅").style(Style::default().fg(Color::DarkGray));
         frame.render_widget(glyph_widget, inner);
     }
 }
@@ -596,20 +596,20 @@ mod tests {
     }
 
     #[test]
-    fn title_color_running_under_75_pct() {
+    fn title_color_running_below_limit() {
         let col = KanbanColumn::new_test("running", 1, Some(4));
         assert_eq!(title_color(&col), state_ratatui_color("running"));
     }
 
     #[test]
-    fn title_color_running_at_75_pct() {
-        let col = KanbanColumn::new_test("running", 3, Some(4));
+    fn title_color_running_at_limit() {
+        let col = KanbanColumn::new_test("running", 4, Some(4));
         assert_eq!(title_color(&col), Color::Yellow);
     }
 
     #[test]
-    fn title_color_running_at_100_pct() {
-        let col = KanbanColumn::new_test("running", 4, Some(4));
+    fn title_color_running_over_limit() {
+        let col = KanbanColumn::new_test("running", 5, Some(4));
         assert_eq!(title_color(&col), Color::Red);
     }
 
@@ -626,14 +626,14 @@ mod tests {
     }
 
     #[test]
-    fn border_color_running_at_limit_overrides_focus() {
-        let col = KanbanColumn::new_test("running", 4, Some(4));
+    fn border_color_running_over_limit_overrides_focus() {
+        let col = KanbanColumn::new_test("running", 5, Some(4));
         assert_eq!(border_color(&col, true), Color::Red);
     }
 
     #[test]
-    fn border_color_running_at_75_pct_amber() {
-        let col = KanbanColumn::new_test("running", 3, Some(4));
+    fn border_color_running_at_limit_is_yellow() {
+        let col = KanbanColumn::new_test("running", 4, Some(4));
         assert_eq!(border_color(&col, false), Color::Yellow);
     }
 

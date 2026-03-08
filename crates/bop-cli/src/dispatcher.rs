@@ -128,6 +128,7 @@ pub async fn run_dispatcher(
     paths::ensure_cards_layout(cards_dir)?;
     providers::seed_providers(cards_dir)?;
     providers::ensure_mock_provider_command(cards_dir, global_adapter)?;
+    let dispatch_provider_cfg = providers::load_dispatch_provider_config(cards_dir)?;
     let _dispatcher_lock = lock::acquire_dispatcher_lock(cards_dir)?;
 
     let pending_dir = cards_dir.join("pending");
@@ -464,13 +465,12 @@ pub async fn run_dispatcher(
                         .map(|m| m.stage.clone())
                         .unwrap_or_else(|| "implement".to_string());
 
-                    let (
-                        provider_name,
-                        _provider_cmd,
-                        rate_limit_exit,
-                        provider_env,
-                        provider_model,
-                    ) = match providers::select_provider(cards_dir, meta.as_mut(), &stage)? {
+                    let selected = match providers::select_provider(
+                        cards_dir,
+                        meta.as_mut(),
+                        &stage,
+                        &dispatch_provider_cfg,
+                    )? {
                         Some(v) => v,
                         None => {
                             let pending_path = pending_dir.join(&name);
@@ -496,6 +496,14 @@ pub async fn run_dispatcher(
                             continue;
                         }
                     };
+                    let provider_name = selected.name.clone();
+                    let rate_limit_exit = selected.rate_limit_exit;
+                    let provider_env = selected.env;
+                    let provider_model = selected.model;
+                    eprintln!(
+                        "[dispatcher] selected provider '{}' for card '{}' ({})",
+                        provider_name, name, selected.reason
+                    );
 
                     if let Some(ref mut meta) = meta {
                         let _ = write_meta(&running_path, meta);

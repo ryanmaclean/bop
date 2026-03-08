@@ -2,6 +2,7 @@ use anyhow::Context;
 use bop_core::{write_meta, Meta, StageStatus};
 use chrono::Utc;
 use std::fs;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use tokio::process::Command as TokioCommand;
 
@@ -391,6 +392,7 @@ pub fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
             workflow_mode: Some("default-feature".to_string()),
             step_index: Some(1),
             priority: None,
+            cost: None,
             provider_chain: vec![],
             stages: Default::default(),
             acceptance_criteria: vec![],
@@ -444,6 +446,101 @@ pub fn seed_default_templates(cards_dir: &Path) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+#[derive(Debug, Clone)]
+pub struct NewCardResult {
+    pub id: String,
+}
+
+fn normalize_team_prefixed_id(raw_id: &str) -> anyhow::Result<(String, Option<String>)> {
+    let id = raw_id.trim();
+    if let Some(suffix) = id.strip_prefix("team-cli/") {
+        if suffix.trim().is_empty() {
+            anyhow::bail!("card id cannot be empty after team prefix");
+        }
+        return Ok((suffix.trim().to_string(), Some("cli".to_string())));
+    }
+    if let Some(suffix) = id.strip_prefix("team-arch/") {
+        if suffix.trim().is_empty() {
+            anyhow::bail!("card id cannot be empty after team prefix");
+        }
+        return Ok((suffix.trim().to_string(), Some("arch".to_string())));
+    }
+    if let Some(suffix) = id.strip_prefix("team-quality/") {
+        if suffix.trim().is_empty() {
+            anyhow::bail!("card id cannot be empty after team prefix");
+        }
+        return Ok((suffix.trim().to_string(), Some("quality".to_string())));
+    }
+    if let Some(suffix) = id.strip_prefix("team-platform/") {
+        if suffix.trim().is_empty() {
+            anyhow::bail!("card id cannot be empty after team prefix");
+        }
+        return Ok((suffix.trim().to_string(), Some("platform".to_string())));
+    }
+    Ok((id.to_string(), None))
+}
+
+fn write_provider_chain(card_dir: &Path, provider_chain: &[String]) -> anyhow::Result<()> {
+    let mut meta = bop_core::read_meta(card_dir)
+        .with_context(|| format!("failed to read meta for {}", card_dir.display()))?;
+    meta.provider_chain = provider_chain.to_vec();
+    write_meta(card_dir, &meta)
+        .with_context(|| format!("failed to write meta for {}", card_dir.display()))?;
+    Ok(())
+}
+
+pub fn cmd_new(
+    cards_dir: &Path,
+    template: Option<&str>,
+    id: Option<&str>,
+    team: Option<&str>,
+    cfg: &bop_core::Config,
+) -> anyhow::Result<NewCardResult> {
+    const DEFAULT_INTERACTIVE_PROVIDER_CHAIN: &[&str] = &["codex", "claude", "ollama-local"];
+    const USAGE: &str = "usage: bop new <template> <id>";
+
+    let template = template.map(str::trim).filter(|s| !s.is_empty());
+    let id = id.map(str::trim).filter(|s| !s.is_empty());
+
+    match (template, id) {
+        (Some(template), Some(id)) => {
+            create_card(cards_dir, template, id, None, team)?;
+            return Ok(NewCardResult { id: id.to_string() });
+        }
+        (None, None) => {}
+        _ => anyhow::bail!("{USAGE}"),
+    }
+
+    if !std::io::stdin().is_terminal() {
+        anyhow::bail!("{USAGE}");
+    }
+
+    let default_provider_chain = cfg
+        .default_provider_chain
+        .clone()
+        .filter(|chain| !chain.is_empty())
+        .unwrap_or_else(|| {
+            DEFAULT_INTERACTIVE_PROVIDER_CHAIN
+                .iter()
+                .map(|name| name.to_string())
+                .collect()
+        });
+
+    let wizard = crate::ui::wizard::run_new_card_wizard(cards_dir, &default_provider_chain)?;
+    let (id, inferred_team) = normalize_team_prefixed_id(&wizard.id)?;
+    let team = team.or(inferred_team.as_deref());
+    let card_dir = create_card(
+        cards_dir,
+        &wizard.template,
+        &id,
+        Some(wizard.spec.as_str()),
+        team,
+    )?;
+    write_provider_chain(&card_dir, &wizard.provider_chain)?;
+
+    Ok(NewCardResult { id })
 }
 
 // ── create_card ──────────────────────────────────────────────────────────────
@@ -503,6 +600,7 @@ pub fn create_card(
         workflow_mode: None,
         step_index: None,
         priority: None,
+        cost: None,
         provider_chain: vec![],
         stages: Default::default(),
         acceptance_criteria: vec![],
@@ -2272,6 +2370,7 @@ mod tests {
             workflow_mode: None,
             step_index: None,
             priority: None,
+            cost: None,
             timeout_seconds: None,
             provider_chain: vec![],
             acceptance_criteria: vec![],
@@ -2450,6 +2549,7 @@ mod tests {
             workflow_mode: None,
             step_index: None,
             priority: None,
+            cost: None,
             timeout_seconds: None,
             provider_chain: vec![],
             stages: Default::default(),
@@ -2530,6 +2630,7 @@ mod tests {
             workflow_mode: None,
             step_index: None,
             priority: None,
+            cost: None,
             timeout_seconds: None,
             provider_chain: vec![],
             acceptance_criteria: vec![],
@@ -2602,6 +2703,7 @@ mod tests {
             workflow_mode: None,
             step_index: None,
             priority: None,
+            cost: None,
             timeout_seconds: None,
             provider_chain: vec![],
             stages: Default::default(),
@@ -2797,6 +2899,7 @@ mod tests {
             metadata_source: None,
             metadata_key: None,
             priority: None,
+            cost: None,
             timeout_seconds: None,
             provider_chain: vec![],
             stages: Default::default(),
@@ -2866,6 +2969,7 @@ mod tests {
             metadata_source: None,
             metadata_key: None,
             priority: None,
+            cost: None,
             timeout_seconds: None,
             provider_chain: vec![],
             stages: Default::default(),
@@ -2978,6 +3082,7 @@ mod tests {
             workflow_mode: None,
             step_index: None,
             priority: None,
+            cost: None,
             timeout_seconds: None,
             provider_chain: vec![],
             acceptance_criteria: vec![],

@@ -8,15 +8,13 @@
 /// - `h` / `l` — move column focus left / right (wrapping)
 /// - `j` / `k` — move selected card down / up within current column
 ///
-/// Other modes (Filter, ActionPopup, Detail, LogTail, NewCard) will be
-/// wired in subsequent subtasks.
+/// Additional tab contexts and mode handlers are wired below.
 use std::fs;
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::app::{App, AppTab, Mode};
+use super::app::{find_card_dir, App, AppTab, Mode};
 use crate::cards;
-use crate::paths;
 use crate::ui::widgets::action::{actions_for_state, ActionKind};
 use crate::ui::widgets::newcard::create_card;
 
@@ -31,9 +29,16 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         return;
     }
 
-    if app.tab == AppTab::Factory {
-        handle_factory(app, key);
-        return;
+    match &app.tab {
+        AppTab::Factory => {
+            handle_factory(app, key);
+            return;
+        }
+        AppTab::Log(_) => {
+            handle_log_tab(app, key);
+            return;
+        }
+        AppTab::Kanban => {}
     }
 
     match app.mode {
@@ -98,19 +103,30 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
             try_move_card(app, CardMoveDir::Left);
         }
         KeyCode::Char('L') => {
-            // Shift+L: move selected card right (toward merged).
+            // Shift+L: toggle integrated log pane for selected card.
+            app.toggle_log_pane_for_selected();
+        }
+        KeyCode::Char('>') => {
+            // Shift+.: move selected card right (toward merged).
             try_move_card(app, CardMoveDir::Right);
         }
         KeyCode::Tab => {
             // Tab multi-select (yazi pattern): toggle mark on hovered card.
             app.toggle_mark();
         }
+        KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            // Ctrl+O: open card shell (zellij pane if available, shell fallback).
+            app.prepare_subshell();
+        }
         KeyCode::Char('!') => {
-            // Subshell (vim :! convention): drop to $SHELL in card worktree.
+            // Back-compat alias for opening a card shell.
             app.prepare_subshell();
         }
         KeyCode::Esc => {
-            // Esc clears all marks in Normal mode.
+            // Esc clears filter and marks in Normal mode.
+            if app.filter.is_some() || app.filter_state.is_some() {
+                app.clear_filter();
+            }
             app.clear_marks();
         }
         _ => {}
@@ -164,6 +180,42 @@ fn handle_factory(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Tab => {
             app.toggle_tab();
+        }
+        _ => {}
+    }
+}
+
+// ── Integrated Log tab ──────────────────────────────────────────────────────
+
+/// Handle key events in integrated Log tab mode.
+///
+/// Keybindings:
+/// - `k` / `Up` — scroll up one line and pause follow mode
+/// - `j` / `Down` — scroll down one line (stays paused)
+/// - `f` — resume following (jump to bottom)
+/// - `Tab` — cycle to next running card log
+/// - `L` / `Esc` — return to kanban tab
+fn handle_log_tab(app: &mut App, key: KeyEvent) {
+    app.status_message = None;
+
+    match key.code {
+        KeyCode::Char('k') | KeyCode::Up => {
+            app.log_pane_scroll = app.log_pane_scroll.saturating_add(1);
+            app.log_pane_follow = false;
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            app.log_pane_scroll = app.log_pane_scroll.saturating_sub(1);
+            app.log_pane_follow = false;
+        }
+        KeyCode::Char('f') => {
+            app.log_pane_follow = true;
+            app.log_pane_scroll = 0;
+        }
+        KeyCode::Tab => {
+            app.cycle_log_pane_running_card();
+        }
+        KeyCode::Char('L') | KeyCode::Esc => {
+            app.close_log_pane();
         }
         _ => {}
     }
@@ -485,27 +537,39 @@ fn move_card_selection(app: &mut App, dir: Direction) {
     col.list_state.select(Some(new_idx));
 }
 
-// ── Card movement (Shift+H/L) ──────────────────────────────────────────────
+// ── Card movement (H / Shift+.) ────────────────────────────────────────────
 
-/// Direction for card state movement (Shift+H = left, Shift+L = right).
+/// Direction for card state movement (`H` = left, `>` = right).
 enum CardMoveDir {
     Left,
     Right,
 }
 
-/// Allowed card state transitions from the TUI.
-///
-/// Only safe moves are permitted:
-/// - `done → pending` (Shift+H from done column)
-/// - `failed → pending` (Shift+H from failed column)
-///
-/// `pending → running` is NOT allowed — that's the dispatcher's job.
-fn allowed_target_state(source_state: &str, dir: &CardMoveDir) -> Option<&'static str> {
-    match (source_state, dir) {
-        ("done", CardMoveDir::Left) => Some("pending"),
-        ("failed", CardMoveDir::Left) => Some("pending"),
+/// Return the adjacent state in column order for manual movement.
+fn adjacent_state(source_state: &str, dir: &CardMoveDir) -> Option<&'static str> {
+    const ORDER: [&str; 5] = ["pending", "running", "done", "failed", "merged"];
+    let idx = ORDER.iter().position(|s| *s == source_state)?;
+
+    match dir {
+        CardMoveDir::Left if idx > 0 => Some(ORDER[idx - 1]),
+        CardMoveDir::Right if idx + 1 < ORDER.len() => Some(ORDER[idx + 1]),
         _ => None,
     }
+}
+
+/// Validate move against the card lifecycle graph.
+fn is_valid_transition(source_state: &str, target_state: &str) -> bool {
+    matches!(
+        (source_state, target_state),
+        ("pending", "running")
+            | ("running", "done")
+            | ("running", "failed")
+            | ("done", "merged")
+            | ("running", "pending")
+            | ("done", "running")
+            | ("failed", "running")
+            | ("merged", "done")
+    )
 }
 
 /// Try to move the selected card to an adjacent state column via `fs::rename`.
@@ -520,20 +584,32 @@ fn try_move_card(app: &mut App, dir: CardMoveDir) {
         _ => return,
     };
 
-    // Check if the move is allowed.
-    let target_state = match allowed_target_state(&source_state, &dir) {
+    // Manual move keys always target the adjacent rendered column.
+    let target_state = match adjacent_state(&source_state, &dir) {
         Some(state) => state,
         None => {
-            app.status_message = Some(format!("cannot move card from {}", source_state));
+            app.show_toast(format!(
+                "invalid move: {} has no adjacent state",
+                source_state
+            ));
             return;
         }
     };
 
+    // Enforce valid state machine transitions.
+    if !is_valid_transition(&source_state, target_state) {
+        app.show_toast(format!(
+            "invalid move: {} -> {}",
+            source_state, target_state
+        ));
+        return;
+    }
+
     // Find the card's actual directory on disk.
-    let card_path = match paths::find_card(&app.cards_root, &card_id) {
+    let card_path = match find_card_dir(&app.cards_root, &card_id) {
         Some(p) => p,
         None => {
-            app.status_message = Some(format!("card not found: {}", card_id));
+            app.show_toast(format!("card not found: {}", card_id));
             return;
         }
     };
@@ -544,21 +620,21 @@ fn try_move_card(app: &mut App, dir: CardMoveDir) {
     let card_dir_name = match card_path.file_name() {
         Some(n) => n.to_os_string(),
         None => {
-            app.status_message = Some("invalid card path".to_string());
+            app.show_toast("invalid card path");
             return;
         }
     };
     let state_dir = match card_path.parent() {
         Some(p) => p,
         None => {
-            app.status_message = Some("invalid card path".to_string());
+            app.show_toast("invalid card path");
             return;
         }
     };
     let base_dir = match state_dir.parent() {
         Some(p) => p,
         None => {
-            app.status_message = Some("invalid card path".to_string());
+            app.show_toast("invalid card path");
             return;
         }
     };
@@ -567,7 +643,7 @@ fn try_move_card(app: &mut App, dir: CardMoveDir) {
 
     // Ensure target state directory exists.
     if fs::create_dir_all(&target_dir).is_err() {
-        app.status_message = Some("failed to create target directory".to_string());
+        app.show_toast("failed to create target directory");
         return;
     }
 
@@ -575,7 +651,7 @@ fn try_move_card(app: &mut App, dir: CardMoveDir) {
 
     // Check if target already exists.
     if target_path.exists() {
-        app.status_message = Some(format!("card already exists in {}", target_state));
+        app.show_toast(format!("card already exists in {}", target_state));
         return;
     }
 
@@ -585,10 +661,12 @@ fn try_move_card(app: &mut App, dir: CardMoveDir) {
             // Refresh columns from disk.
             let new_columns = super::app::build_columns(&app.cards_root);
             app.refresh_columns(new_columns);
+            app.toast_message = None;
+            app.toast_deadline_tick = None;
             app.status_message = Some(format!("moved {} → {}", card_id, target_state));
         }
         Err(e) => {
-            app.status_message = Some(format!("move failed: {}", e));
+            app.show_toast(format!("move failed: {}", e));
         }
     }
 }
@@ -693,6 +771,8 @@ mod tests {
             action_list_state: ListState::default(),
             log_scroll: 0,
             log_follow: false,
+            log_pane_scroll: 0,
+            log_pane_follow: true,
             log_tail_card_id: None,
             log_stdout_pos: 0,
             log_stderr_pos: 0,
@@ -700,8 +780,11 @@ mod tests {
             log_stderr_incomplete: String::new(),
             newcard_input: String::new(),
             status_message: None,
+            toast_message: None,
+            toast_deadline_tick: None,
             marked_cards: std::collections::HashSet::new(),
             subshell_worktree: None,
+            subshell_card_id: None,
             terminal_width: 120,
             terminal_height: 40,
         }
@@ -1063,5 +1146,74 @@ mod tests {
 
         handle_key(&mut app, key(KeyCode::Esc));
         assert_eq!(app.tab, AppTab::Kanban);
+    }
+
+    #[test]
+    fn uppercase_l_toggles_integrated_log_tab() {
+        let columns = vec![KanbanColumn::new(
+            "running",
+            vec![test_card("card-a", "running")],
+            None,
+        )];
+        let mut app = test_app(columns);
+
+        handle_key(&mut app, key(KeyCode::Char('L')));
+        assert_eq!(app.tab, AppTab::Log("card-a".to_string()));
+
+        handle_key(&mut app, key(KeyCode::Char('L')));
+        assert_eq!(app.tab, AppTab::Kanban);
+    }
+
+    #[test]
+    fn esc_closes_integrated_log_tab() {
+        let columns = vec![KanbanColumn::new(
+            "running",
+            vec![test_card("card-a", "running")],
+            None,
+        )];
+        let mut app = test_app(columns);
+        app.open_log_pane_for_card("card-a".to_string());
+
+        handle_key(&mut app, key(KeyCode::Esc));
+        assert_eq!(app.tab, AppTab::Kanban);
+    }
+
+    #[test]
+    fn k_pauses_follow_and_f_resumes() {
+        let columns = vec![KanbanColumn::new(
+            "running",
+            vec![test_card("card-a", "running")],
+            None,
+        )];
+        let mut app = test_app(columns);
+        app.open_log_pane_for_card("card-a".to_string());
+
+        handle_key(&mut app, key(KeyCode::Char('k')));
+        assert!(!app.log_pane_follow);
+        assert_eq!(app.log_pane_scroll, 1);
+
+        handle_key(&mut app, key(KeyCode::Char('f')));
+        assert!(app.log_pane_follow);
+        assert_eq!(app.log_pane_scroll, 0);
+    }
+
+    #[test]
+    fn tab_cycles_between_running_logs() {
+        let columns = vec![
+            KanbanColumn::new("pending", vec![test_card("p1", "pending")], None),
+            KanbanColumn::new(
+                "running",
+                vec![test_card("run-a", "running"), test_card("run-b", "running")],
+                None,
+            ),
+        ];
+        let mut app = test_app(columns);
+        app.open_log_pane_for_card("run-a".to_string());
+
+        handle_key(&mut app, key(KeyCode::Tab));
+        assert_eq!(app.tab, AppTab::Log("run-b".to_string()));
+
+        handle_key(&mut app, key(KeyCode::Tab));
+        assert_eq!(app.tab, AppTab::Log("run-a".to_string()));
     }
 }

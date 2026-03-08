@@ -236,6 +236,10 @@ pub struct Meta {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<i64>,
+    /// Cost tier for provider routing:
+    /// 1=trivial, 2=small, 3=medium, 4+=complex.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<u64>,
 
@@ -379,6 +383,7 @@ impl Default for Meta {
             workflow_mode: None,
             step_index: None,
             priority: None,
+            cost: None,
             timeout_seconds: None,
             provider_chain: Vec::new(),
             stages: BTreeMap::new(),

@@ -1,0 +1,8 @@
+{
+  "isAutoProfile": false,
+  "model": "codex",
+  "thinkingLevel": "high",
+  "phaseModels": {
+    "coding": "codex"
+  }
+}

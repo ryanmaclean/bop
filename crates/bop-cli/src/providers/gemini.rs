@@ -1,6 +1,7 @@
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
@@ -9,6 +10,9 @@ use super::{Provider, ProviderSnapshot};
 
 /// Google OAuth2 token endpoint for refreshing access tokens.
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+
+/// Gemini models endpoint used to validate access token auth.
+const MODELS_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 
 /// Google Cloud Code API endpoint for loading code assist project info.
 const LOAD_CODE_ASSIST_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
@@ -119,6 +123,22 @@ impl GeminiProvider {
         dirs::home_dir().map(|h| h.join(".gemini").join("oauth_creds.json"))
     }
 
+    /// Path to Gemini refresh-token file: `~/.gemini/credentials.json`.
+    fn refresh_credentials_path() -> Option<PathBuf> {
+        dirs::home_dir().map(|h| h.join(".gemini").join("credentials.json"))
+    }
+
+    /// Candidate local session/state files that may contain Gemini quota info.
+    fn local_quota_paths() -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        if let Some(home) = dirs::home_dir() {
+            paths.push(home.join(".gemini").join("session.json"));
+            paths.push(home.join(".gemini").join("state.json"));
+            paths.push(home.join(".config").join("gemini").join("session.json"));
+        }
+        paths
+    }
+
     /// Check if the `gemini` binary is on PATH.
     fn binary_on_path() -> bool {
         std::process::Command::new("which")
@@ -135,6 +155,9 @@ impl GeminiProvider {
         Self::credentials_path()
             .map(|p| p.exists())
             .unwrap_or(false)
+            || Self::refresh_credentials_path()
+                .map(|p| p.exists())
+                .unwrap_or(false)
     }
 
     /// Read and parse credentials from `~/.gemini/oauth_creds.json`.
@@ -148,6 +171,352 @@ impl GeminiProvider {
             .with_context(|| format!("cannot read Gemini credentials: {}", path.display()))?;
         serde_json::from_str(&json)
             .with_context(|| format!("malformed Gemini credentials at {}", path.display()))
+    }
+
+    fn base_snapshot() -> ProviderSnapshot {
+        ProviderSnapshot {
+            provider: "gemini".into(),
+            display_name: "Gemini CLI".into(),
+            primary_pct: None,
+            secondary_pct: None,
+            primary_label: Some("Pro".into()),
+            secondary_label: Some("Flash".into()),
+            tokens_used: None,
+            cost_usd: None,
+            reset_at: None,
+            source: "oauth".into(),
+            error: None,
+            loaded_models: None,
+        }
+    }
+
+    fn has_quota_data(snapshot: &ProviderSnapshot) -> bool {
+        snapshot.primary_pct.is_some()
+            || snapshot.secondary_pct.is_some()
+            || snapshot.reset_at.is_some()
+    }
+
+    fn parse_numeric(value: &Value) -> Option<f64> {
+        match value {
+            Value::Number(n) => n.as_f64(),
+            Value::String(s) => s.trim().parse::<f64>().ok(),
+            _ => None,
+        }
+    }
+
+    fn parse_pct_value(value: &Value) -> Option<u8> {
+        let raw = Self::parse_numeric(value)?;
+        let pct = if (0.0..=1.0).contains(&raw) {
+            raw * 100.0
+        } else {
+            raw
+        };
+        Some(pct.round().clamp(0.0, 100.0) as u8)
+    }
+
+    fn parse_remaining_to_pct(value: &Value) -> Option<u8> {
+        let remaining = Self::parse_numeric(value)?;
+        let used = (1.0 - remaining).clamp(0.0, 1.0) * 100.0;
+        Some(used.round().clamp(0.0, 100.0) as u8)
+    }
+
+    fn parse_reset_value(value: &Value) -> Option<DateTime<Utc>> {
+        let s = value.as_str()?;
+        DateTime::parse_from_rfc3339(s)
+            .ok()
+            .map(|dt| dt.with_timezone(&Utc))
+    }
+
+    fn read_refresh_token() -> anyhow::Result<String> {
+        let mut tried: Vec<String> = Vec::new();
+
+        if let Some(path) = Self::refresh_credentials_path() {
+            tried.push(path.display().to_string());
+            if path.exists() {
+                let body = std::fs::read_to_string(&path).with_context(|| {
+                    format!("cannot read Gemini refresh credentials: {}", path.display())
+                })?;
+                let value: Value = serde_json::from_str(&body)
+                    .with_context(|| format!("malformed JSON in {}", path.display()))?;
+                if let Some(token) = Self::extract_refresh_token_from_value(&value) {
+                    return Ok(token);
+                }
+            }
+        }
+
+        if let Ok(creds) = Self::read_credentials() {
+            if let Some(token) = creds.refresh_token {
+                if !token.trim().is_empty() {
+                    return Ok(token);
+                }
+            }
+        }
+        if let Some(path) = Self::credentials_path() {
+            tried.push(path.display().to_string());
+        }
+
+        anyhow::bail!(
+            "no Gemini refresh token found (checked {})",
+            tried.join(", ")
+        )
+    }
+
+    fn extract_refresh_token_from_value(value: &Value) -> Option<String> {
+        if let Some(s) = value.get("refresh_token").and_then(Value::as_str) {
+            if !s.trim().is_empty() {
+                return Some(s.trim().to_string());
+            }
+        }
+        if let Some(s) = value.get("refreshToken").and_then(Value::as_str) {
+            if !s.trim().is_empty() {
+                return Some(s.trim().to_string());
+            }
+        }
+
+        if let Value::Object(map) = value {
+            for child in map.values() {
+                if let Some(token) = Self::extract_refresh_token_from_value(child) {
+                    return Some(token);
+                }
+            }
+        } else if let Value::Array(items) = value {
+            for child in items {
+                if let Some(token) = Self::extract_refresh_token_from_value(child) {
+                    return Some(token);
+                }
+            }
+        }
+        None
+    }
+
+    async fn exchange_refresh_token(
+        refresh_token: &str,
+        client_info: &OAuthClientInfo,
+    ) -> anyhow::Result<String> {
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(TOKEN_URL)
+            .form(&[
+                ("grant_type", "refresh_token"),
+                ("client_id", &client_info.client_id),
+                ("client_secret", &client_info.client_secret),
+                ("refresh_token", refresh_token),
+            ])
+            .send()
+            .await
+            .context("failed to POST token refresh request")?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("token refresh failed (HTTP {status}): {body}");
+        }
+
+        let token_resp: TokenRefreshResponse = resp
+            .json()
+            .await
+            .context("failed to parse token refresh response")?;
+
+        Ok(token_resp.access_token)
+    }
+
+    async fn validate_models_auth(
+        client: &reqwest::Client,
+        access_token: &str,
+    ) -> anyhow::Result<Vec<String>> {
+        let resp = client
+            .get(MODELS_URL)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .send()
+            .await
+            .context("failed to GET Gemini models endpoint")?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("models endpoint failed (HTTP {status}): {body}");
+        }
+
+        let value: Value = resp
+            .json()
+            .await
+            .context("failed to parse models response")?;
+        let models = value
+            .get("models")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.get("name").and_then(Value::as_str))
+                    .map(ToOwned::to_owned)
+                    .collect::<Vec<String>>()
+            })
+            .unwrap_or_default();
+
+        Ok(models)
+    }
+
+    fn parse_local_quota_value(value: &Value) -> Option<ProviderSnapshot> {
+        // First, try the existing quota schema parser.
+        if let Ok(parsed) = serde_json::from_value::<QuotaResponse>(value.clone()) {
+            let entries = parsed.into_entries();
+            if !entries.is_empty() {
+                let mut snap = Self::parse_quota_response(&entries);
+                snap.source = "file".into();
+                return Some(snap);
+            }
+        }
+
+        // Fallback: parse coarse pro/flash fields from local state.
+        let pro_candidate = value
+            .get("pro")
+            .and_then(|v| {
+                v.get("utilization")
+                    .or_else(|| v.get("percent_used"))
+                    .and_then(Self::parse_pct_value)
+                    .or_else(|| {
+                        v.get("remaining_fraction")
+                            .and_then(Self::parse_remaining_to_pct)
+                    })
+            })
+            .or_else(|| value.get("utilization_pro").and_then(Self::parse_pct_value))
+            .or_else(|| value.get("pro_utilization").and_then(Self::parse_pct_value));
+
+        let flash_candidate = value
+            .get("flash")
+            .and_then(|v| {
+                v.get("utilization")
+                    .or_else(|| v.get("percent_used"))
+                    .and_then(Self::parse_pct_value)
+                    .or_else(|| {
+                        v.get("remaining_fraction")
+                            .and_then(Self::parse_remaining_to_pct)
+                    })
+            })
+            .or_else(|| {
+                value
+                    .get("utilization_flash")
+                    .and_then(Self::parse_pct_value)
+            })
+            .or_else(|| {
+                value
+                    .get("flash_utilization")
+                    .and_then(Self::parse_pct_value)
+            });
+
+        if pro_candidate.is_none() && flash_candidate.is_none() {
+            return None;
+        }
+
+        let reset_at = value
+            .get("reset_at")
+            .and_then(Self::parse_reset_value)
+            .or_else(|| value.get("resetTime").and_then(Self::parse_reset_value))
+            .or_else(|| {
+                value
+                    .get("pro")
+                    .and_then(|v| v.get("reset_time"))
+                    .and_then(Self::parse_reset_value)
+            });
+
+        let mut snap = Self::base_snapshot();
+        snap.source = "file".into();
+        snap.primary_pct = pro_candidate;
+        snap.secondary_pct = flash_candidate;
+        snap.reset_at = reset_at;
+        Some(snap)
+    }
+
+    fn fetch_via_local_quota_file() -> anyhow::Result<ProviderSnapshot> {
+        let mut errors: Vec<String> = Vec::new();
+
+        for path in Self::local_quota_paths() {
+            if !path.exists() {
+                continue;
+            }
+            let body = match std::fs::read_to_string(&path) {
+                Ok(b) => b,
+                Err(e) => {
+                    errors.push(format!("{}: {}", path.display(), e));
+                    continue;
+                }
+            };
+            let value: Value = match serde_json::from_str(&body) {
+                Ok(v) => v,
+                Err(e) => {
+                    errors.push(format!("{}: malformed JSON ({})", path.display(), e));
+                    continue;
+                }
+            };
+            if let Some(snap) = Self::parse_local_quota_value(&value) {
+                return Ok(snap);
+            }
+            errors.push(format!("{}: no quota fields", path.display()));
+        }
+
+        if errors.is_empty() {
+            anyhow::bail!("no local Gemini session/state files found")
+        } else {
+            anyhow::bail!("{}", errors.join("; "))
+        }
+    }
+
+    async fn run_gemini_command(args: &[&str]) -> anyhow::Result<String> {
+        let output = tokio::process::Command::new("gemini")
+            .args(args)
+            .output()
+            .await
+            .with_context(|| format!("failed to run `gemini {}`", args.join(" ")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            anyhow::bail!(
+                "`gemini {}` exited with {}{}",
+                args.join(" "),
+                output.status,
+                if stderr.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(": {stderr}")
+                }
+            );
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        if !stdout.trim().is_empty() {
+            return Ok(stdout);
+        }
+        if !stderr.trim().is_empty() {
+            return Ok(stderr);
+        }
+        anyhow::bail!("`gemini {}` produced no output", args.join(" "))
+    }
+
+    async fn fetch_via_cli_commands() -> anyhow::Result<ProviderSnapshot> {
+        let attempts: &[&[&str]] = &[&["usage"], &["status"], &["--version"]];
+        let mut errors: Vec<String> = Vec::new();
+
+        for args in attempts {
+            let output = match Self::run_gemini_command(args).await {
+                Ok(out) => out,
+                Err(e) => {
+                    errors.push(format!("`gemini {}` failed: {e}", args.join(" ")));
+                    continue;
+                }
+            };
+            let mut snap = Self::parse_pty_output(&output);
+            snap.source = "cli".into();
+            if Self::has_quota_data(&snap) {
+                return Ok(snap);
+            }
+            errors.push(format!(
+                "`gemini {}` output had no parseable quota data",
+                args.join(" ")
+            ));
+        }
+
+        anyhow::bail!("{}", errors.join("; "))
     }
 
     /// Find the full path to the `gemini` binary via `which`.
@@ -703,51 +1072,115 @@ impl Provider for GeminiProvider {
     /// call loadCodeAssist (best-effort) → call retrieveUserQuota → parse.
     /// If any OAuth step fails, falls back to PTY via `gemini /stats model`.
     async fn fetch(&self) -> anyhow::Result<ProviderSnapshot> {
+        let mut notes: Vec<String> = Vec::new();
+
+        // Spec step 1 fallback gate: confirm CLI is present.
+        let gemini_present = match Self::run_gemini_command(&["--version"]).await {
+            Ok(_) => true,
+            Err(e) => {
+                notes.push(format!("gemini --version failed: {e}"));
+                false
+            }
+        };
+
+        // New primary path:
+        // 1) read refresh token from ~/.gemini/credentials.json
+        // 2) exchange token
+        // 3) call models endpoint to validate auth
+        // 4) parse local session/state quota
+        if let Some(client_info) = Self::extract_oauth_client() {
+            match Self::read_refresh_token() {
+                Ok(refresh_token) => {
+                    match Self::exchange_refresh_token(&refresh_token, &client_info).await {
+                        Ok(access_token) => {
+                            let client = reqwest::Client::new();
+                            match Self::validate_models_auth(&client, &access_token).await {
+                                Ok(models) => match Self::fetch_via_local_quota_file() {
+                                    Ok(mut snap) if Self::has_quota_data(&snap) => {
+                                        if !models.is_empty() {
+                                            snap.loaded_models = Some(models);
+                                        }
+                                        return Ok(snap);
+                                    }
+                                    Ok(_) => notes.push(
+                                        "local Gemini quota state missing quota fields".into(),
+                                    ),
+                                    Err(e) => {
+                                        notes.push(format!("local Gemini quota unavailable: {e}"))
+                                    }
+                                },
+                                Err(e) => notes.push(format!("models auth check failed: {e}")),
+                            }
+                        }
+                        Err(e) => notes.push(format!("refresh-token exchange failed: {e}")),
+                    }
+                }
+                Err(e) => notes.push(format!("refresh token unavailable: {e}")),
+            }
+        } else {
+            notes.push("unable to extract Gemini OAuth client credentials".into());
+        }
+
+        // Compatibility fallback: existing cloudcode quota flow.
         let creds = match Self::read_credentials() {
-            Ok(c) => c,
-            Err(_) => {
-                // No OAuth credentials — try PTY fallback.
-                return Self::fetch_via_pty().await;
+            Ok(c) => Some(c),
+            Err(e) => {
+                notes.push(format!("oauth_creds fallback unavailable: {e}"));
+                None
             }
         };
 
-        // Extract OAuth client info from the gemini npm package.
-        let client_info = match Self::extract_oauth_client() {
-            Some(info) => info,
-            None => {
-                // Cannot locate OAuth client — try PTY fallback.
-                return Self::fetch_via_pty().await;
+        if let (Some(creds), Some(client_info)) = (creds, Self::extract_oauth_client()) {
+            match Self::refresh_token_if_expired(&creds, &client_info).await {
+                Ok(access_token) => {
+                    let client = reqwest::Client::new();
+                    let project = Self::load_code_assist(&client, &access_token)
+                        .await
+                        .unwrap_or_default();
+                    match Self::retrieve_user_quota(&client, &access_token, &project).await {
+                        Ok(entries) => {
+                            let snap = Self::parse_quota_response(&entries);
+                            if Self::has_quota_data(&snap) {
+                                return Ok(snap);
+                            }
+                            notes.push("cloud quota response had no usable model quota".into());
+                        }
+                        Err(e) => notes.push(format!("cloud quota API failed: {e}")),
+                    }
+                }
+                Err(e) => notes.push(format!("oauth_creds token refresh failed: {e}")),
             }
-        };
+        }
 
-        // Refresh token if expired.
-        let access_token = match Self::refresh_token_if_expired(&creds, &client_info).await {
-            Ok(t) => t,
-            Err(_) => {
-                // Token refresh failed — try PTY fallback.
-                return Self::fetch_via_pty().await;
+        // Fallback shelling to CLI output.
+        if gemini_present {
+            match Self::fetch_via_cli_commands().await {
+                Ok(snap) if Self::has_quota_data(&snap) => return Ok(snap),
+                Ok(_) => notes.push("gemini CLI fallback produced no quota data".into()),
+                Err(e) => notes.push(format!("gemini CLI fallback failed: {e}")),
             }
-        };
 
-        let client = reqwest::Client::new();
-
-        // Step 1: loadCodeAssist — best-effort to get cloudaicompanionProject.
-        // If this fails, we pass an empty string to retrieveUserQuota.
-        let project = Self::load_code_assist(&client, &access_token)
-            .await
-            .unwrap_or_default();
-
-        // Step 2: retrieveUserQuota — fetch the actual quota entries.
-        let entries = match Self::retrieve_user_quota(&client, &access_token, &project).await {
-            Ok(e) => e,
-            Err(_) => {
-                // Quota API failed — try PTY fallback.
-                return Self::fetch_via_pty().await;
+            match Self::fetch_via_pty().await {
+                Ok(snap) if Self::has_quota_data(&snap) => return Ok(snap),
+                Ok(snap) => {
+                    if let Some(err) = snap.error {
+                        notes.push(format!("pty fallback: {err}"));
+                    } else {
+                        notes.push("pty fallback produced no quota data".into());
+                    }
+                }
+                Err(e) => notes.push(format!("pty fallback failed: {e}")),
             }
-        };
+        }
 
-        // Step 3: Parse the entries into a ProviderSnapshot.
-        Ok(Self::parse_quota_response(&entries))
+        let mut snap = Self::base_snapshot();
+        snap.source = "fallback".into();
+        snap.error = Some(if notes.is_empty() {
+            "quota unavailable".to_string()
+        } else {
+            format!("quota unavailable: {}", notes.join("; "))
+        });
+        Ok(snap)
     }
 }
 

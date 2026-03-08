@@ -1,12 +1,12 @@
 ---
 source: crates/bop-cli/src/ui/mod.rs
-assertion_line: 775
+assertion_line: 806
 expression: stable
 ---
 bop · HH:MM:SS · ▁▁▁▁▁▁▁▁ 0/hr
 
 ┌ · PENDING (2) ───────┐┌ ⚙ RUNNING (1/4) ──────┐┌ ✓ DONE (1) ──────────┐┌─┐┌ ~ MERGED (1) ────────┐
-│▸ · setup-deps        ││▸ ♠A Feature: build-ui ││▸ ✓ init-repo         ││✗││▸ ✓ landed-pr         │
+│▸ · setup-deps        ││▸ ♠A Feature: build-ui ││▸ ✓ init-repo         ││∅││▸ ✓ landed-pr         │
 │  · add-tests         ││    ██████░░░░░░ 50%  P││                      ││ ││                      │
 │                      ││                       ││                      ││ ││                      │
 │                      ││                       ││                      ││ ││                      │
@@ -22,4 +22,4 @@ bop · HH:MM:SS · ▁▁▁▁▁▁▁▁ 0/hr
 │                      ││                       ││                      ││ ││                      │
 │                      ││                       ││                      ││ ││                      │
 └──────────────────────┘└───────────────────────┘└──────────────────────┘└─┘└──────────────────────┘
-[h/l]col [j/k]card [↵]actions [Shift+H/L]move [/]filter [n]new [q]quit
+[h/l]col [j/k]card [↵]actions [H/>]move [L]logs [/]filter [Ctrl+O]shell [n]new [q]quit

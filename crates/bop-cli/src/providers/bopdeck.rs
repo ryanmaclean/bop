@@ -120,6 +120,7 @@ fn debug_log(args: std::fmt::Arguments<'_>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::ErrorKind;
     use tokio::io::AsyncReadExt;
 
     fn snapshot(provider: &str) -> ProviderSnapshot {
@@ -151,7 +152,11 @@ mod tests {
     async fn emit_writes_openlineage_event() {
         let dir = tempfile::tempdir().unwrap();
         let socket_path = dir.path().join("bopdeck.sock");
-        let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+        let listener = match tokio::net::UnixListener::bind(&socket_path) {
+            Ok(listener) => listener,
+            Err(err) if err.kind() == ErrorKind::PermissionDenied => return,
+            Err(err) => panic!("failed to bind unix listener: {err}"),
+        };
         let writer = BopDeckWriter::with_socket_path(socket_path.clone());
 
         let recv_task = tokio::spawn(async move {

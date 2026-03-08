@@ -10,9 +10,11 @@ mod acplan;
 mod bridge;
 mod cards;
 mod colors;
+mod diff;
 mod dispatcher;
 mod doctor;
 mod events;
+mod export;
 mod factory;
 mod gantt;
 mod icons;
@@ -31,10 +33,13 @@ mod providers;
 mod quicklook;
 mod reaper;
 mod render;
+mod replay;
 mod serve;
+mod stats;
 mod termcaps;
 mod ui;
 mod util;
+mod watch;
 mod workspace;
 
 #[derive(Parser, Debug)]
@@ -51,8 +56,8 @@ struct Cli {
 enum Command {
     Init,
     New {
-        template: String,
-        id: String,
+        template: Option<String>,
+        id: Option<String>,
         /// Team for glyph suit assignment (cli, arch, quality, platform).
         /// Auto-detected from card directory if omitted.
         #[arg(long)]
@@ -148,6 +153,36 @@ enum Command {
         #[arg(short, long)]
         follow: bool,
     },
+    /// Show what a card changed (git diff, output, or open its worktree).
+    Diff {
+        id: String,
+        /// Show one-line summary (files changed/insertions/deletions).
+        #[arg(long, conflicts_with_all = ["output", "worktree"])]
+        stat: bool,
+        /// Show output/result.md instead of git diff.
+        #[arg(long, conflicts_with = "worktree")]
+        output: bool,
+        /// Open the card worktree in $EDITOR.
+        #[arg(long, conflicts_with = "output")]
+        worktree: bool,
+    },
+    /// Reconstruct card timeline from logs/events.jsonl.
+    Replay {
+        /// Card ID to replay.
+        id: Option<String>,
+        /// Emit machine-readable JSON array.
+        #[arg(long)]
+        json: bool,
+        /// Show only error/retry events.
+        #[arg(long)]
+        errors: bool,
+        /// Show relative timestamps (0s, +1m 43s, ...).
+        #[arg(long)]
+        relative: bool,
+        /// Merge all card event logs from last 24h.
+        #[arg(long, conflicts_with = "id")]
+        all: bool,
+    },
     /// Show meta, spec, and a log summary for a card.
     Inspect {
         id: String,
@@ -178,6 +213,9 @@ enum Command {
         /// Skip time-consuming checks (e.g. make check).
         #[arg(long)]
         fast: bool,
+        /// Auto-repair safe issues (missing state dirs, missing providers.json).
+        #[arg(long)]
+        fix: bool,
     },
     /// Generate shell completion script.
     Completions {
@@ -206,11 +244,28 @@ enum Command {
     },
     /// Import cards from a JSON file into drafts/ (or pending/ with --immediate).
     Import {
-        /// Path to JSON file with card definitions (a JSON array of card objects).
+        /// Path to tarball (`.tar.gz`) or legacy JSON cards file.
         source: String,
-        /// Import directly to pending/ instead of drafts/.
+        /// Legacy JSON mode only: import directly to pending/ instead of drafts/.
         #[arg(long)]
         immediate: bool,
+        /// Overwrite existing card without interactive confirmation.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Export a card bundle tarball for sharing/replay/import.
+    Export {
+        /// Card ID to export.
+        id: String,
+        /// Output tarball path (default: ./bop-export-<id>-<timestamp>.tar.gz).
+        #[arg(long)]
+        out: Option<String>,
+        /// Exclude logs/ from archive.
+        #[arg(long)]
+        strip_logs: bool,
+        /// Exclude worktree/ from archive (default behavior).
+        #[arg(long)]
+        strip_worktree: bool,
     },
     /// Generate a concise codebase map at .cards/CODEBASE.md for agent orientation.
     Index {
@@ -290,7 +345,7 @@ enum Command {
         /// Refresh every --interval seconds (default 60).
         #[arg(short, long)]
         watch: bool,
-        /// Emit a JSON array of ProviderSnapshot instead of ANSI table.
+        /// Emit machine-parseable JSON object instead of ANSI table.
         #[arg(long)]
         json: bool,
         /// Poll interval in seconds for --watch mode.
@@ -303,6 +358,20 @@ enum Command {
         #[command(subcommand)]
         sub: bridge::BridgeSubcommand,
     },
+    /// Historical cost/token report across completed cards.
+    Stats {
+        /// Group rows by provider or by day.
+        #[arg(long, value_enum)]
+        by: Option<stats::StatsBy>,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+        /// Show detail for a single card id.
+        #[arg(long)]
+        card: Option<String>,
+    },
+    /// Unified live dashboard for running + done cards with log tail.
+    Watch,
 }
 
 #[derive(Subcommand, Debug)]
@@ -454,6 +523,7 @@ async fn main() -> anyhow::Result<()> {
                     cooldown_seconds: Some(300),
                     log_retention_days: Some(30),
                     default_template: Some("implement".to_string()),
+                    dispatch: None,
                 };
                 bop_core::config::write_config_file(&config_path, &defaults).with_context(
                     || {
@@ -516,11 +586,17 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::New { template, id, team } => {
-            cards::create_card(&root, &template, &id, None, team.as_deref())?;
+            let created = cards::cmd_new(
+                &root,
+                template.as_deref(),
+                id.as_deref(),
+                team.as_deref(),
+                &cfg,
+            )?;
             println!(
                 "{}✓ Card created → bop dispatch {} to run it{}",
                 colors::state_ansi("done"),
-                id,
+                created.id,
                 colors::RESET
             );
             Ok(())
@@ -629,6 +705,28 @@ async fn main() -> anyhow::Result<()> {
         Command::Kill { id } => cards::cmd_kill(&root, &id).await,
         Command::Approve { id } => cards::cmd_approve(&root, &id),
         Command::Logs { id, follow } => logs::cmd_logs(&root, &id, follow).await,
+        Command::Diff {
+            id,
+            stat,
+            output,
+            worktree,
+        } => diff::cmd_diff(&root, &id, stat, output, worktree),
+        Command::Replay {
+            id,
+            json,
+            errors,
+            relative,
+            all,
+        } => replay::cmd_replay(
+            &root,
+            id.as_deref(),
+            replay::ReplayOptions {
+                json,
+                errors,
+                relative,
+                all,
+            },
+        ),
         Command::Inspect { id } => inspect::cmd_inspect(&root, &id),
         Command::List { state, json } => {
             if json {
@@ -658,7 +756,7 @@ async fn main() -> anyhow::Result<()> {
                 policy::cmd_policy_check(&root, id.as_deref(), staged, json)
             }
         },
-        Command::Doctor { fast } => doctor::cmd_doctor(&root, fast),
+        Command::Doctor { fast, fix } => doctor::cmd_doctor(&root, fast, fix),
         Command::Completions { shell } => {
             use clap::CommandFactory;
             clap_complete::generate(shell, &mut Cli::command(), "bop", &mut std::io::stdout());
@@ -687,7 +785,30 @@ async fn main() -> anyhow::Result<()> {
             IconsAction::Uninstall => icons::cmd_icons_uninstall(),
         },
         Command::Promote { id } => cards::cmd_promote(&root, &id),
-        Command::Import { source, immediate } => cards::cmd_import(&root, &source, immediate),
+        Command::Import {
+            source,
+            immediate,
+            force,
+        } => {
+            let source_path = PathBuf::from(&source);
+            if export::is_tarball_path(&source_path) {
+                export::cmd_import_bundle(&root, &source_path, force)
+            } else {
+                if force {
+                    anyhow::bail!("--force is only supported when importing a tarball");
+                }
+                cards::cmd_import(&root, &source, immediate)
+            }
+        }
+        Command::Export {
+            id,
+            out,
+            strip_logs,
+            strip_worktree,
+        } => {
+            let out_path = out.as_deref().map(PathBuf::from);
+            export::cmd_export(&root, &id, out_path.as_deref(), strip_logs, strip_worktree)
+        }
         Command::Index { print } => index::cmd_index(&root, print),
         Command::Bstorm { topic, team } => cards::cmd_bstorm(&root, topic, team),
         Command::Gantt { html, open, width } => gantt::cmd_gantt(&root, html || open, open, width),
@@ -768,5 +889,7 @@ async fn main() -> anyhow::Result<()> {
             interval,
         } => providers::cmd_providers(watch, json, interval).await,
         Command::Bridge { sub } => bridge::cmd_bridge(sub).await,
+        Command::Stats { by, json, card } => stats::cmd_stats(&root, by, json, card.as_deref()),
+        Command::Watch => watch::cmd_watch(&root).await,
     }
 }

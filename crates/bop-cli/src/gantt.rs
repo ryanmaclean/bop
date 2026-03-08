@@ -135,6 +135,76 @@ fn dur_label(s: f64) -> String {
     }
 }
 
+fn dur_label_precise(s: f64) -> String {
+    let total = s.max(0.0).round() as u64;
+    let h = total / 3600;
+    let m = (total % 3600) / 60;
+    let sec = total % 60;
+    if h > 0 {
+        format!("{h}h {m}m {sec}s")
+    } else if m > 0 {
+        format!("{m}m {sec}s")
+    } else {
+        format!("{sec}s")
+    }
+}
+
+fn format_u64_commas(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::with_capacity(s.len() + (s.len() / 3));
+    for (i, ch) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out.chars().rev().collect()
+}
+
+fn escape_html_attr(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+fn percentile_threshold(durations: &[f64], p: f64) -> f64 {
+    if durations.is_empty() {
+        return 0.0;
+    }
+    let mut sorted = durations.to_vec();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    let idx = ((sorted.len().saturating_sub(1)) as f64 * p).round() as usize;
+    sorted[idx.min(sorted.len() - 1)]
+}
+
+fn peak_parallelism(bars: &[Bar]) -> usize {
+    let mut events: Vec<(DateTime<Utc>, i32)> = Vec::with_capacity(bars.len() * 2);
+    for b in bars {
+        events.push((b.start, 1));
+        events.push((b.end, -1));
+    }
+    events.sort_by(|(ta, da), (tb, db)| ta.cmp(tb).then_with(|| da.cmp(db)));
+
+    let mut cur = 0_i32;
+    let mut peak = 0_i32;
+    for (_, delta) in events {
+        cur += delta;
+        if cur > peak {
+            peak = cur;
+        }
+    }
+    peak.max(0) as usize
+}
+
 // ── ANSI terminal rendering ─────────────────────────────────────────────────
 
 fn render_ansi(bars: &[Bar], term_width: usize) {
@@ -303,6 +373,19 @@ fn render_ansi(bars: &[Bar], term_width: usize) {
 fn generate_html(bars: &[Bar]) -> String {
     let clusters = cluster(bars);
     let total_bars = bars.len();
+    let completed = bars
+        .iter()
+        .filter(|b| matches!(b.state.as_str(), "done" | "merged"))
+        .count();
+    let failed = bars.iter().filter(|b| b.state == "failed").count();
+    let total_dur: f64 = bars.iter().map(|b| b.dur_s).sum();
+    let avg_dur = if total_bars > 0 {
+        total_dur / total_bars as f64
+    } else {
+        0.0
+    };
+    let total_cost: f64 = bars.iter().filter_map(|b| b.cost).sum();
+    let peak = peak_parallelism(bars);
 
     let mut html = String::with_capacity(8192);
     let _ = write!(
@@ -323,22 +406,25 @@ h1 {{ font-size:13px; font-weight:500; letter-spacing:.08em; text-transform:uppe
 h1 span {{ color:#999; font-weight:400 }}
 .cluster {{ margin-bottom:28px }}
 .cluster-hdr {{ font-size:10px; color:#444; text-transform:uppercase; letter-spacing:.1em; margin-bottom:8px; padding-left:2px }}
-.chart {{ display:flex }}
+.chart-wrap {{ max-width:100%; overflow-x:auto; }}
+.chart {{ display:flex; min-width:0 }}
 .labels {{ flex-shrink:0; width:190px; padding-top:26px }}
 .label {{ height:24px; display:flex; align-items:center; font-size:11px; color:#666; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:1px }}
 .label .g {{ margin-right:4px }}
-.bars-area {{ flex:1; overflow:visible; position:relative }}
+.bars-area {{ flex:1; min-width:0; overflow:visible; position:relative }}
 .axis {{ height:22px; border-bottom:1px solid #1F1F1F; position:relative; margin-bottom:2px }}
 .axis-label {{ position:absolute; top:2px; font-size:10px; color:#444; transform:translateX(-50%); white-space:nowrap }}
 .grid {{ position:absolute; top:24px; bottom:0; width:1px; background:#151515; pointer-events:none }}
 .row {{ height:24px; position:relative; margin-bottom:1px }}
 .bar {{ position:absolute; height:16px; top:4px; border-radius:3px; min-width:4px; cursor:default; opacity:.85 }}
 .bar:hover {{ opacity:1; filter:brightness(1.3) }}
-.dur {{ position:absolute; left:calc(100% + 5px); top:50%; transform:translateY(-50%); font-size:10px; color:#555; white-space:nowrap }}
-.legend {{ display:flex; gap:16px; margin-top:16px; padding-top:10px; border-top:1px solid #1A1A1A }}
+.legend {{ display:flex; gap:16px; margin-top:16px; padding-top:10px; border-top:1px solid #1A1A1A; flex-wrap:wrap }}
 .legend-item {{ display:flex; align-items:center; gap:5px; font-size:10px; color:#555; text-transform:uppercase; letter-spacing:.05em }}
 .sw {{ width:10px; height:10px; border-radius:2px }}
-.stats {{ margin-top:10px; font-size:10px; color:#444 }}
+.summary {{ margin-top:14px; width:100%; max-width:640px; border-collapse:collapse; font-size:11px; }}
+.summary th, .summary td {{ border:1px solid #1F1F1F; padding:6px 8px; text-align:left; }}
+.summary th {{ color:#777; font-weight:500; width:190px; }}
+.summary td {{ color:#B0B0B0; }}
 </style>
 </head>
 <body>
@@ -374,7 +460,7 @@ h1 span {{ color:#999; font-weight:400 }}
             c_max.format("%H:%M"),
             indices.len()
         );
-        html.push_str("<div class=\"chart\">\n<div class=\"labels\">\n");
+        html.push_str("<div class=\"chart-wrap\"><div class=\"chart\">\n<div class=\"labels\">\n");
 
         for &i in indices {
             let g = if bars[i].glyph.is_empty() {
@@ -416,59 +502,89 @@ h1 span {{ color:#999; font-weight:400 }}
         }
 
         // Bars
+        let cluster_durations: Vec<f64> = indices.iter().map(|&i| bars[i].dur_s).collect();
+        let p50 = percentile_threshold(&cluster_durations, 0.50);
+        let p80 = percentile_threshold(&cluster_durations, 0.80);
         for &i in indices {
             let b = &bars[i];
             let lp = pct(b.start);
             let wp = (pct(b.end) - lp).max(0.5);
-            let dl = dur_label(b.dur_s);
+            let duration = dur_label_precise(b.dur_s);
+            let tokens = b
+                .tokens
+                .map(format_u64_commas)
+                .unwrap_or_else(|| "n/a".to_string());
+            let cost = b
+                .cost
+                .map(|v| format!("${v:.2}"))
+                .unwrap_or_else(|| "n/a".to_string());
             let tip = format!(
-                "{}&#10;{} · {}&#10;{} · {}",
-                b.id, b.state, b.stage, b.provider, dl
+                "id: {}&#10;stage: {}&#10;provider: {}&#10;duration: {}&#10;tokens: {}&#10;cost: {}",
+                escape_html_attr(&b.id),
+                escape_html_attr(&b.stage),
+                escape_html_attr(&b.provider),
+                duration,
+                tokens,
+                cost
             );
+            let heat_color = if b.dur_s <= p50 {
+                "#4caf50"
+            } else if b.dur_s <= p80 {
+                "#ff9800"
+            } else {
+                "#f44336"
+            };
             let _ = writeln!(
                 html,
-                "<div class=\"row\"><div class=\"bar\" style=\"left:{:.1}%;width:{:.1}%;background:{}\" title=\"{}\"><span class=\"dur\">{}</span></div></div>",
-                lp, wp, state_color(&b.state), tip, dl,
+                "<div class=\"row\"><div class=\"bar\" style=\"left:{:.1}%;width:{:.1}%;background:{}\" title=\"{}\"></div></div>",
+                lp, wp, heat_color, tip,
             );
         }
 
-        html.push_str("</div>\n</div>\n</div>\n");
+        html.push_str("</div>\n</div></div>\n</div>\n");
     }
 
     // Legend
     html.push_str("<div class=\"legend\">\n");
-    for (st, col) in [
-        ("pending", "#3A5A8A"),
-        ("running", "#B8690F"),
-        ("done", "#1E8A45"),
-        ("failed", "#C43030"),
-        ("merged", "#6B3DB8"),
+    for (label, col) in [
+        ("fast (p0-p50)", "#4caf50"),
+        ("medium (p50-p80)", "#ff9800"),
+        ("slow (p80-p100)", "#f44336"),
     ] {
         let _ = writeln!(
             html,
             "  <div class=\"legend-item\"><div class=\"sw\" style=\"background:{}\"></div>{}</div>",
-            col, st
+            col, label
+        );
+    }
+    for st in ["pending", "running", "done", "failed", "merged"] {
+        let _ = writeln!(
+            html,
+            "  <div class=\"legend-item\"><div class=\"sw\" style=\"background:{}\"></div>{}</div>",
+            state_color(st),
+            st
         );
     }
     html.push_str("</div>\n");
 
-    // Stats
-    let total_dur: f64 = bars.iter().map(|b| b.dur_s).sum();
-    let total_tok: u64 = bars.iter().filter_map(|b| b.tokens).sum();
-    let total_cost: f64 = bars.iter().filter_map(|b| b.cost).sum();
     let _ = write!(
         html,
-        "<div class=\"stats\">{} runs · {:.0} min compute",
+        "<table class=\"summary\">
+<tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Total cards</td><td>{}</td></tr>
+<tr><td>Completed</td><td>{}</td></tr>
+<tr><td>Failed</td><td>{}</td></tr>
+<tr><td>Avg duration</td><td>{}</td></tr>
+<tr><td>Total cost</td><td>${:.2}</td></tr>
+<tr><td>Parallelism peak</td><td>{} concurrent</td></tr>
+</table>\n</body></html>\n",
         total_bars,
-        total_dur / 60.0
+        completed,
+        failed,
+        dur_label_precise(avg_dur),
+        total_cost,
+        peak
     );
-    if total_tok > 0 {
-        let _ = write!(html, " · {:.1}k tokens", total_tok as f64 / 1000.0);
-    }
-    if total_cost > 0.0 {
-        let _ = write!(html, " · ${:.2}", total_cost);
-    }
-    html.push_str("</div>\n</body></html>\n");
 
     html
 }
@@ -562,7 +678,8 @@ mod tests {
         assert!(html.contains("2 runs"));
         assert!(html.contains("test-1"));
         assert!(html.contains("test-2"));
-        assert!(html.contains("#1E8A45")); // done color
-        assert!(html.contains("#B8690F")); // running color
+        assert!(html.contains("id: test-1"));
+        assert!(html.contains("#4caf50") || html.contains("#ff9800") || html.contains("#f44336"));
+        assert!(html.contains("Parallelism peak"));
     }
 }

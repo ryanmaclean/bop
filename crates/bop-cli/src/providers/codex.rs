@@ -1,14 +1,15 @@
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
 use super::{Provider, ProviderSnapshot};
 
-/// Base URL for the Codex OAuth usage endpoint.
-const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
+/// Base URL for the Codex usage endpoint.
+const USAGE_URL: &str = "https://api.openai.com/v1/usage";
 
 /// Number of days after which a stale `last_refresh` triggers a warning.
 const REFRESH_WARN_DAYS: i64 = 8;
@@ -70,10 +71,19 @@ pub(crate) struct RpcRateLimitsResult {
     pub windows: Vec<RpcRateLimitWindow>,
 }
 
-/// OAuth credentials as stored by Codex CLI at `~/.codex/auth.json`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// OAuth/session credentials as stored by Codex CLI at `~/.codex/auth.json`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CodexCredentials {
-    pub access_token: String,
+    #[serde(
+        default,
+        alias = "session_token",
+        alias = "sessionToken",
+        alias = "accessToken",
+        alias = "token",
+        alias = "id_token",
+        alias = "idToken"
+    )]
+    pub access_token: Option<String>,
     #[serde(default)]
     pub refresh_token: Option<String>,
     #[serde(default)]
@@ -92,6 +102,11 @@ impl CodexProvider {
     /// Path to the Codex credentials file: `~/.codex/auth.json`.
     fn credentials_path() -> Option<PathBuf> {
         dirs::home_dir().map(|h| h.join(".codex").join("auth.json"))
+    }
+
+    /// Path to local Codex quota cache: `~/.codex/quota.json`.
+    fn quota_path() -> Option<PathBuf> {
+        dirs::home_dir().map(|h| h.join(".codex").join("quota.json"))
     }
 
     /// Check if the `codex` binary is on PATH.
@@ -142,6 +157,145 @@ impl CodexProvider {
         }
     }
 
+    fn make_snapshot(
+        source: &str,
+        primary_pct: Option<u8>,
+        secondary_pct: Option<u8>,
+        reset_at: Option<DateTime<Utc>>,
+        error: Option<String>,
+    ) -> ProviderSnapshot {
+        ProviderSnapshot {
+            provider: "codex".into(),
+            display_name: "Codex CLI".into(),
+            primary_pct,
+            secondary_pct,
+            primary_label: Some("session".into()),
+            secondary_label: Some("weekly".into()),
+            tokens_used: None,
+            cost_usd: None,
+            reset_at,
+            source: source.to_string(),
+            error,
+            loaded_models: None,
+        }
+    }
+
+    fn has_quota_data(snapshot: &ProviderSnapshot) -> bool {
+        snapshot.primary_pct.is_some()
+            || snapshot.secondary_pct.is_some()
+            || snapshot.reset_at.is_some()
+    }
+
+    fn unavailable_snapshot(message: impl Into<String>) -> ProviderSnapshot {
+        Self::make_snapshot("fallback", Some(0), None, None, Some(message.into()))
+    }
+
+    fn parse_json_number(value: &Value) -> Option<f64> {
+        match value {
+            Value::Number(n) => n.as_f64(),
+            Value::String(s) => s.trim().parse::<f64>().ok(),
+            _ => None,
+        }
+    }
+
+    fn parse_pct_value(value: &Value) -> Option<u8> {
+        let raw = Self::parse_json_number(value)?;
+        let pct = if (0.0..=1.0).contains(&raw) {
+            raw * 100.0
+        } else {
+            raw
+        };
+        Some(pct.round().clamp(0.0, 100.0) as u8)
+    }
+
+    fn parse_pct_from_window(window: &Value) -> Option<u8> {
+        let pct_keys = [
+            "percent_used",
+            "percentUsed",
+            "utilization",
+            "usage_percent",
+            "usagePercent",
+            "usage_pct",
+            "session_utilization",
+            "sessionUtilization",
+        ];
+        for key in pct_keys {
+            if let Some(v) = window.get(key) {
+                if let Some(pct) = Self::parse_pct_value(v) {
+                    return Some(pct);
+                }
+            }
+        }
+
+        for key in ["remaining_fraction", "remainingFraction"] {
+            if let Some(v) = window.get(key) {
+                if let Some(remaining) = Self::parse_json_number(v) {
+                    let used = (1.0 - remaining).clamp(0.0, 1.0) * 100.0;
+                    return Some(used.round().clamp(0.0, 100.0) as u8);
+                }
+            }
+        }
+
+        None
+    }
+
+    fn parse_reset_from_window(window: &Value) -> Option<DateTime<Utc>> {
+        for key in ["reset_at", "resetAt", "resets_at", "resetTime"] {
+            if let Some(value) = window.get(key).and_then(Value::as_str) {
+                if let Ok(dt) = DateTime::parse_from_rfc3339(value) {
+                    return Some(dt.with_timezone(&Utc));
+                }
+            }
+        }
+        None
+    }
+
+    fn parse_windows_array(windows: &[Value]) -> (Option<u8>, Option<u8>, Option<DateTime<Utc>>) {
+        let mut session_pct: Option<u8> = None;
+        let mut weekly_pct: Option<u8> = None;
+        let mut reset_at: Option<DateTime<Utc>> = None;
+
+        for window in windows {
+            let name = window
+                .get("type")
+                .or_else(|| window.get("window"))
+                .or_else(|| window.get("name"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_lowercase();
+
+            let pct = Self::parse_pct_from_window(window);
+            let reset = Self::parse_reset_from_window(window);
+            if reset_at.is_none() {
+                reset_at = reset;
+            }
+
+            if session_pct.is_none()
+                && (name.contains("session") || name.contains("5h") || name.contains("five"))
+            {
+                session_pct = pct;
+            }
+            if weekly_pct.is_none()
+                && (name.contains("week") || name.contains("7d") || name.contains("seven"))
+            {
+                weekly_pct = pct;
+            }
+        }
+
+        (session_pct, weekly_pct, reset_at)
+    }
+
+    fn extract_token(creds: &CodexCredentials) -> Option<&str> {
+        creds.access_token.as_deref().and_then(|t| {
+            let trimmed = t.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        })
+    }
+
     /// Parse a JSON-RPC `account/rateLimits/read` result into a `ProviderSnapshot`.
     /// Separated from `fetch_via_rpc()` so it can be unit-tested without spawning
     /// a real `codex` process.
@@ -149,77 +303,49 @@ impl CodexProvider {
         let rpc: RpcResponse = match serde_json::from_str(body) {
             Ok(r) => r,
             Err(e) => {
-                return Ok(ProviderSnapshot {
-                    provider: "codex".into(),
-                    display_name: "Codex CLI".into(),
-                    primary_pct: None,
-                    secondary_pct: None,
-                    primary_label: Some("session".into()),
-                    secondary_label: Some("weekly".into()),
-                    tokens_used: None,
-                    cost_usd: None,
-                    reset_at: None,
-                    source: "rpc".into(),
-                    error: Some(format!("failed to parse RPC JSON: {e}")),
-                    loaded_models: None,
-                });
+                return Ok(Self::make_snapshot(
+                    "rpc",
+                    None,
+                    None,
+                    None,
+                    Some(format!("failed to parse RPC JSON: {e}")),
+                ));
             }
         };
 
         if let Some(ref err) = rpc.error {
-            return Ok(ProviderSnapshot {
-                provider: "codex".into(),
-                display_name: "Codex CLI".into(),
-                primary_pct: None,
-                secondary_pct: None,
-                primary_label: Some("session".into()),
-                secondary_label: Some("weekly".into()),
-                tokens_used: None,
-                cost_usd: None,
-                reset_at: None,
-                source: "rpc".into(),
-                error: Some(format!("RPC error: {err}")),
-                loaded_models: None,
-            });
+            return Ok(Self::make_snapshot(
+                "rpc",
+                None,
+                None,
+                None,
+                Some(format!("RPC error: {err}")),
+            ));
         }
 
         let result_val = match rpc.result {
             Some(v) => v,
             None => {
-                return Ok(ProviderSnapshot {
-                    provider: "codex".into(),
-                    display_name: "Codex CLI".into(),
-                    primary_pct: None,
-                    secondary_pct: None,
-                    primary_label: Some("session".into()),
-                    secondary_label: Some("weekly".into()),
-                    tokens_used: None,
-                    cost_usd: None,
-                    reset_at: None,
-                    source: "rpc".into(),
-                    error: Some("RPC response missing result field".into()),
-                    loaded_models: None,
-                });
+                return Ok(Self::make_snapshot(
+                    "rpc",
+                    None,
+                    None,
+                    None,
+                    Some("RPC response missing result field".into()),
+                ));
             }
         };
 
         let limits: RpcRateLimitsResult = match serde_json::from_value(result_val) {
             Ok(l) => l,
             Err(e) => {
-                return Ok(ProviderSnapshot {
-                    provider: "codex".into(),
-                    display_name: "Codex CLI".into(),
-                    primary_pct: None,
-                    secondary_pct: None,
-                    primary_label: Some("session".into()),
-                    secondary_label: Some("weekly".into()),
-                    tokens_used: None,
-                    cost_usd: None,
-                    reset_at: None,
-                    source: "rpc".into(),
-                    error: Some(format!("failed to parse RPC result: {e}")),
-                    loaded_models: None,
-                });
+                return Ok(Self::make_snapshot(
+                    "rpc",
+                    None,
+                    None,
+                    None,
+                    Some(format!("failed to parse RPC result: {e}")),
+                ));
             }
         };
 
@@ -246,20 +372,13 @@ impl CodexProvider {
             .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| dt.with_timezone(&Utc));
 
-        Ok(ProviderSnapshot {
-            provider: "codex".into(),
-            display_name: "Codex CLI".into(),
+        Ok(Self::make_snapshot(
+            "rpc",
             primary_pct,
             secondary_pct,
-            primary_label: Some("session".into()),
-            secondary_label: Some("weekly".into()),
-            tokens_used: None,
-            cost_usd: None,
             reset_at,
-            source: "rpc".into(),
-            error: None,
-            loaded_models: None,
-        })
+            None,
+        ))
     }
 
     /// Extract a percentage number after a given anchor string.
@@ -298,20 +417,7 @@ impl CodexProvider {
             None
         };
 
-        ProviderSnapshot {
-            provider: "codex".into(),
-            display_name: "Codex CLI".into(),
-            primary_pct,
-            secondary_pct,
-            primary_label: Some("session".into()),
-            secondary_label: Some("weekly".into()),
-            tokens_used: None,
-            cost_usd: None,
-            reset_at: None,
-            source: "pty".into(),
-            error,
-            loaded_models: None,
-        }
+        Self::make_snapshot("pty", primary_pct, secondary_pct, None, error)
     }
 
     /// Spawn `codex -s read-only -a untrusted app-server` and perform JSON-RPC
@@ -329,34 +435,20 @@ impl CodexProvider {
 
         match rpc_result {
             Ok(Ok(snap)) => Ok(snap),
-            Ok(Err(e)) => Ok(ProviderSnapshot {
-                provider: "codex".into(),
-                display_name: "Codex CLI".into(),
-                primary_pct: None,
-                secondary_pct: None,
-                primary_label: Some("session".into()),
-                secondary_label: Some("weekly".into()),
-                tokens_used: None,
-                cost_usd: None,
-                reset_at: None,
-                source: "rpc".into(),
-                error: Some(format!("RPC exchange failed: {e}")),
-                loaded_models: None,
-            }),
-            Err(_) => Ok(ProviderSnapshot {
-                provider: "codex".into(),
-                display_name: "Codex CLI".into(),
-                primary_pct: None,
-                secondary_pct: None,
-                primary_label: Some("session".into()),
-                secondary_label: Some("weekly".into()),
-                tokens_used: None,
-                cost_usd: None,
-                reset_at: None,
-                source: "rpc".into(),
-                error: Some("RPC timed out (5s)".into()),
-                loaded_models: None,
-            }),
+            Ok(Err(e)) => Ok(Self::make_snapshot(
+                "rpc",
+                None,
+                None,
+                None,
+                Some(format!("RPC exchange failed: {e}")),
+            )),
+            Err(_) => Ok(Self::make_snapshot(
+                "rpc",
+                None,
+                None,
+                None,
+                Some("RPC timed out (5s)".into()),
+            )),
         }
     }
 
@@ -462,34 +554,20 @@ impl CodexProvider {
 
         match pty_result {
             Ok(Ok(snap)) => Ok(snap),
-            Ok(Err(e)) => Ok(ProviderSnapshot {
-                provider: "codex".into(),
-                display_name: "Codex CLI".into(),
-                primary_pct: None,
-                secondary_pct: None,
-                primary_label: Some("session".into()),
-                secondary_label: Some("weekly".into()),
-                tokens_used: None,
-                cost_usd: None,
-                reset_at: None,
-                source: "pty".into(),
-                error: Some(format!("PTY exchange failed: {e}")),
-                loaded_models: None,
-            }),
-            Err(_) => Ok(ProviderSnapshot {
-                provider: "codex".into(),
-                display_name: "Codex CLI".into(),
-                primary_pct: None,
-                secondary_pct: None,
-                primary_label: Some("session".into()),
-                secondary_label: Some("weekly".into()),
-                tokens_used: None,
-                cost_usd: None,
-                reset_at: None,
-                source: "pty".into(),
-                error: Some("PTY timed out (3s)".into()),
-                loaded_models: None,
-            }),
+            Ok(Err(e)) => Ok(Self::make_snapshot(
+                "pty",
+                None,
+                None,
+                None,
+                Some(format!("PTY exchange failed: {e}")),
+            )),
+            Err(_) => Ok(Self::make_snapshot(
+                "pty",
+                None,
+                None,
+                None,
+                Some("PTY timed out (3s)".into()),
+            )),
         }
     }
 
@@ -570,62 +648,198 @@ impl CodexProvider {
     /// `ProviderSnapshot`. Separated from `fetch()` so it can be unit-tested
     /// without making network calls.
     fn parse_usage_response(body: &str) -> anyhow::Result<ProviderSnapshot> {
-        let usage: UsageResponse = match serde_json::from_str(body) {
-            Ok(u) => u,
+        let value: Value = match serde_json::from_str(body) {
+            Ok(v) => v,
             Err(e) => {
-                return Ok(ProviderSnapshot {
-                    provider: "codex".into(),
-                    display_name: "Codex CLI".into(),
-                    primary_pct: None,
-                    secondary_pct: None,
-                    primary_label: Some("session".into()),
-                    secondary_label: Some("weekly".into()),
-                    tokens_used: None,
-                    cost_usd: None,
-                    reset_at: None,
-                    source: "oauth".into(),
-                    error: Some(format!("failed to parse usage JSON: {e}")),
-                    loaded_models: None,
-                });
+                return Ok(Self::make_snapshot(
+                    "oauth",
+                    None,
+                    None,
+                    None,
+                    Some(format!("failed to parse usage JSON: {e}")),
+                ));
             }
         };
 
-        // Map session.percent_used -> primary_pct (clamped to 0-100).
-        let primary_pct = usage
-            .session
+        let usage: Option<UsageResponse> = serde_json::from_value(value.clone()).ok();
+        let mut primary_pct = usage
             .as_ref()
+            .and_then(|u| u.session.as_ref())
             .and_then(|w| w.percent_used)
             .map(|p| p.round().clamp(0.0, 100.0) as u8);
-
-        // Map weekly.percent_used -> secondary_pct (clamped to 0-100).
-        let secondary_pct = usage
-            .weekly
+        let mut secondary_pct = usage
             .as_ref()
+            .and_then(|u| u.weekly.as_ref())
             .and_then(|w| w.percent_used)
             .map(|p| p.round().clamp(0.0, 100.0) as u8);
-
-        // Parse session.reset_at if present.
-        let reset_at: Option<DateTime<Utc>> = usage
-            .session
+        let mut reset_at: Option<DateTime<Utc>> = usage
             .as_ref()
+            .and_then(|u| u.session.as_ref())
             .and_then(|w| w.reset_at.as_deref())
             .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| dt.with_timezone(&Utc));
 
-        Ok(ProviderSnapshot {
-            provider: "codex".into(),
-            display_name: "Codex CLI".into(),
+        if primary_pct.is_none() {
+            primary_pct = value.get("session").and_then(Self::parse_pct_from_window);
+        }
+        if secondary_pct.is_none() {
+            secondary_pct = value.get("weekly").and_then(Self::parse_pct_from_window);
+        }
+        if reset_at.is_none() {
+            reset_at = value.get("session").and_then(Self::parse_reset_from_window);
+        }
+
+        if let Some(windows) = value.get("windows").and_then(Value::as_array) {
+            let (session, weekly, reset) = Self::parse_windows_array(windows);
+            if primary_pct.is_none() {
+                primary_pct = session;
+            }
+            if secondary_pct.is_none() {
+                secondary_pct = weekly;
+            }
+            if reset_at.is_none() {
+                reset_at = reset;
+            }
+        }
+        if let Some(data) = value.get("data").and_then(Value::as_array) {
+            let (session, weekly, reset) = Self::parse_windows_array(data);
+            if primary_pct.is_none() {
+                primary_pct = session;
+            }
+            if secondary_pct.is_none() {
+                secondary_pct = weekly;
+            }
+            if reset_at.is_none() {
+                reset_at = reset;
+            }
+        }
+
+        if primary_pct.is_none() {
+            primary_pct = value
+                .get("utilization_session")
+                .and_then(Self::parse_pct_value)
+                .or_else(|| {
+                    value
+                        .get("session_utilization")
+                        .and_then(Self::parse_pct_value)
+                });
+        }
+        if secondary_pct.is_none() {
+            secondary_pct = value
+                .get("utilization_weekly")
+                .and_then(Self::parse_pct_value)
+                .or_else(|| {
+                    value
+                        .get("weekly_utilization")
+                        .and_then(Self::parse_pct_value)
+                });
+        }
+
+        Ok(Self::make_snapshot(
+            "oauth",
             primary_pct,
             secondary_pct,
-            primary_label: Some("session".into()),
-            secondary_label: Some("weekly".into()),
-            tokens_used: None,
-            cost_usd: None,
             reset_at,
-            source: "oauth".into(),
-            error: None,
-            loaded_models: None,
-        })
+            None,
+        ))
+    }
+
+    async fn fetch_via_usage_api(token: &str) -> anyhow::Result<ProviderSnapshot> {
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(USAGE_URL)
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .context("failed to call OpenAI usage endpoint")?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("usage endpoint returned HTTP {status}: {body}");
+        }
+
+        let body = resp.text().await.context("failed to read usage body")?;
+        Self::parse_usage_response(&body)
+    }
+
+    fn fetch_via_local_quota_file() -> anyhow::Result<ProviderSnapshot> {
+        let path = Self::quota_path().context("cannot determine Codex quota path")?;
+        if !path.exists() {
+            anyhow::bail!("no local Codex quota file at {}", path.display());
+        }
+        let body = std::fs::read_to_string(&path)
+            .with_context(|| format!("cannot read local Codex quota file: {}", path.display()))?;
+        let mut snap = Self::parse_usage_response(&body)?;
+        snap.source = "file".into();
+        Ok(snap)
+    }
+
+    async fn run_codex_command(args: &[&str]) -> anyhow::Result<String> {
+        let output = tokio::process::Command::new("codex")
+            .args(args)
+            .output()
+            .await
+            .with_context(|| format!("failed to run `codex {}`", args.join(" ")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            anyhow::bail!(
+                "`codex {}` exited with {}{}",
+                args.join(" "),
+                output.status,
+                if stderr.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(": {stderr}")
+                }
+            );
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        if !stdout.trim().is_empty() {
+            return Ok(stdout);
+        }
+        if !stderr.trim().is_empty() {
+            return Ok(stderr);
+        }
+        anyhow::bail!("`codex {}` produced no output", args.join(" "))
+    }
+
+    async fn fetch_via_cli_commands() -> anyhow::Result<ProviderSnapshot> {
+        let attempts: &[&[&str]] = &[&["usage", "--json"], &["usage"], &["status"]];
+        let mut errors: Vec<String> = Vec::new();
+
+        for args in attempts {
+            let output = match Self::run_codex_command(args).await {
+                Ok(out) => out,
+                Err(e) => {
+                    errors.push(format!("`codex {}` failed: {e}", args.join(" ")));
+                    continue;
+                }
+            };
+
+            if let Ok(mut snap) = Self::parse_usage_response(&output) {
+                snap.source = "cli".into();
+                if Self::has_quota_data(&snap) {
+                    return Ok(snap);
+                }
+            }
+
+            let mut pty_like = Self::parse_pty_output(&output);
+            pty_like.source = "cli".into();
+            if Self::has_quota_data(&pty_like) {
+                return Ok(pty_like);
+            }
+
+            errors.push(format!(
+                "`codex {}` output had no parseable quota fields",
+                args.join(" ")
+            ));
+        }
+
+        anyhow::bail!("{}", errors.join("; "))
     }
 }
 
@@ -648,95 +862,88 @@ impl Provider for CodexProvider {
     /// or token rejected), tries JSON-RPC via `codex app-server`. On failure,
     /// returns a snapshot with the `error` field set rather than propagating.
     async fn fetch(&self) -> anyhow::Result<ProviderSnapshot> {
+        let mut notes: Vec<String> = Vec::new();
+
+        // Step 1: confirm CLI install with `codex --version` for local fallbacks.
+        let codex_present = match Self::run_codex_command(&["--version"]).await {
+            Ok(_) => true,
+            Err(e) => {
+                notes.push(format!("codex --version failed: {e}"));
+                false
+            }
+        };
+
+        // Step 2/3: read ~/.codex/auth.json and try live API.
         let creds = match Self::read_credentials() {
-            Ok(c) => c,
-            Err(_) => {
-                // No OAuth credentials — try JSON-RPC, then PTY fallback.
-                return Self::fetch_via_rpc_or_pty().await;
-            }
-        };
-
-        // Check if token refresh is stale (>8 days).
-        let stale_warning = Self::check_refresh_staleness(&creds);
-
-        // Fetch usage data from the Codex OAuth API.
-        let client = reqwest::Client::new();
-        let resp = match client
-            .get(USAGE_URL)
-            .header("Authorization", format!("Bearer {}", creds.access_token))
-            .send()
-            .await
-        {
-            Ok(r) => r,
+            Ok(c) => Some(c),
             Err(e) => {
-                return Ok(ProviderSnapshot {
-                    provider: "codex".into(),
-                    display_name: "Codex CLI".into(),
-                    primary_pct: None,
-                    secondary_pct: None,
-                    primary_label: Some("session".into()),
-                    secondary_label: Some("weekly".into()),
-                    tokens_used: None,
-                    cost_usd: None,
-                    reset_at: None,
-                    source: "oauth".into(),
-                    error: Some(format!("HTTP request failed: {e}")),
-                    loaded_models: None,
-                });
+                notes.push(format!("auth unavailable: {e}"));
+                None
             }
         };
+        let stale_warning = creds.as_ref().and_then(Self::check_refresh_staleness);
 
-        let status = resp.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-            // Token rejected — try JSON-RPC, then PTY fallback.
-            return Self::fetch_via_rpc_or_pty().await;
-        }
-
-        if !status.is_success() {
-            return Ok(ProviderSnapshot {
-                provider: "codex".into(),
-                display_name: "Codex CLI".into(),
-                primary_pct: None,
-                secondary_pct: None,
-                primary_label: Some("session".into()),
-                secondary_label: Some("weekly".into()),
-                tokens_used: None,
-                cost_usd: None,
-                reset_at: None,
-                source: "oauth".into(),
-                error: Some(format!("API returned HTTP {status}")),
-                loaded_models: None,
-            });
-        }
-
-        let body = match resp.text().await {
-            Ok(t) => t,
-            Err(e) => {
-                return Ok(ProviderSnapshot {
-                    provider: "codex".into(),
-                    display_name: "Codex CLI".into(),
-                    primary_pct: None,
-                    secondary_pct: None,
-                    primary_label: Some("session".into()),
-                    secondary_label: Some("weekly".into()),
-                    tokens_used: None,
-                    cost_usd: None,
-                    reset_at: None,
-                    source: "oauth".into(),
-                    error: Some(format!("failed to read response body: {e}")),
-                    loaded_models: None,
-                });
+        if let Some(ref creds) = creds {
+            if let Some(token) = Self::extract_token(creds) {
+                match Self::fetch_via_usage_api(token).await {
+                    Ok(mut snap) => {
+                        if snap.error.is_none() && Self::has_quota_data(&snap) {
+                            if stale_warning.is_some() {
+                                snap.error = stale_warning;
+                            }
+                            return Ok(snap);
+                        }
+                        notes.push("usage endpoint returned no parseable quota fields".into());
+                    }
+                    Err(e) => notes.push(format!("usage API failed: {e}")),
+                }
+            } else {
+                notes.push("no usable token found in ~/.codex/auth.json".into());
             }
-        };
-
-        let mut snap = Self::parse_usage_response(&body)?;
-
-        // Attach stale-refresh warning if applicable (non-fatal).
-        if snap.error.is_none() {
-            snap.error = stale_warning;
         }
 
-        Ok(snap)
+        // Step 3 fallback: local ~/.codex/quota.json cache.
+        match Self::fetch_via_local_quota_file() {
+            Ok(mut snap) => {
+                if Self::has_quota_data(&snap) {
+                    if stale_warning.is_some() && snap.error.is_none() {
+                        snap.error = stale_warning;
+                    }
+                    return Ok(snap);
+                }
+                notes.push("local quota file found but missing quota fields".into());
+            }
+            Err(e) => notes.push(format!("local quota file unavailable: {e}")),
+        }
+
+        // Step 4 fallback: parse `codex usage` / `codex status` output.
+        if codex_present {
+            match Self::fetch_via_cli_commands().await {
+                Ok(snap) if Self::has_quota_data(&snap) => return Ok(snap),
+                Ok(_) => notes.push("codex CLI output had no quota data".into()),
+                Err(e) => notes.push(format!("codex CLI quota fallback failed: {e}")),
+            }
+
+            // Keep pre-existing deep fallback (app-server JSON-RPC / PTY).
+            match Self::fetch_via_rpc_or_pty().await {
+                Ok(snap) if Self::has_quota_data(&snap) => return Ok(snap),
+                Ok(snap) => {
+                    if let Some(err) = snap.error {
+                        notes.push(format!("rpc/pty fallback: {err}"));
+                    } else {
+                        notes.push("rpc/pty fallback returned no quota data".into());
+                    }
+                }
+                Err(e) => notes.push(format!("rpc/pty fallback failed: {e}")),
+            }
+        }
+
+        let error = if notes.is_empty() {
+            "quota unavailable".to_string()
+        } else {
+            format!("quota unavailable: {}", notes.join("; "))
+        };
+        Ok(Self::unavailable_snapshot(error))
     }
 }
 
@@ -752,7 +959,7 @@ mod tests {
             "last_refresh": "2026-03-01T12:00:00Z"
         }"#;
         let creds: CodexCredentials = serde_json::from_str(json).unwrap();
-        assert_eq!(creds.access_token, "test-codex-token-123");
+        assert_eq!(creds.access_token.as_deref(), Some("test-codex-token-123"));
         assert_eq!(creds.refresh_token, Some("refresh-codex-456".to_string()));
         assert_eq!(creds.last_refresh, Some("2026-03-01T12:00:00Z".to_string()));
     }
@@ -761,16 +968,17 @@ mod tests {
     fn parse_minimal_credentials() {
         let json = r#"{"access_token": "tok"}"#;
         let creds: CodexCredentials = serde_json::from_str(json).unwrap();
-        assert_eq!(creds.access_token, "tok");
+        assert_eq!(creds.access_token.as_deref(), Some("tok"));
         assert!(creds.refresh_token.is_none());
         assert!(creds.last_refresh.is_none());
     }
 
     #[test]
-    fn parse_credentials_missing_token_fails() {
+    fn parse_credentials_missing_token_is_supported() {
         let json = r#"{"refresh_token": "ref"}"#;
-        let result: Result<CodexCredentials, _> = serde_json::from_str(json);
-        assert!(result.is_err(), "should fail without access_token");
+        let creds: CodexCredentials = serde_json::from_str(json).unwrap();
+        assert!(creds.access_token.is_none());
+        assert_eq!(creds.refresh_token.as_deref(), Some("ref"));
     }
 
     /// Tests `parse_usage_response` with a realistic mock JSON response,
@@ -878,7 +1086,7 @@ mod tests {
     #[test]
     fn test_refresh_staleness_fresh() {
         let creds = CodexCredentials {
-            access_token: "tok".into(),
+            access_token: Some("tok".into()),
             refresh_token: None,
             last_refresh: Some(Utc::now().to_rfc3339()),
         };
@@ -892,7 +1100,7 @@ mod tests {
     fn test_refresh_staleness_stale() {
         let old = Utc::now() - chrono::Duration::days(10);
         let creds = CodexCredentials {
-            access_token: "tok".into(),
+            access_token: Some("tok".into()),
             refresh_token: None,
             last_refresh: Some(old.to_rfc3339()),
         };
@@ -904,7 +1112,7 @@ mod tests {
     #[test]
     fn test_refresh_staleness_no_field() {
         let creds = CodexCredentials {
-            access_token: "tok".into(),
+            access_token: Some("tok".into()),
             refresh_token: None,
             last_refresh: None,
         };

@@ -1,10 +1,10 @@
 ---
 source: crates/bop-cli/src/ui/mod.rs
-assertion_line: 704
+assertion_line: 721
 expression: content
 ---
 ┌ · PENDING (3) ───────────────────┐┌ ⚙ RUNNING (1/4) ────────────────┐┌─┐┌─┐┌─┐
-│▸ · fix-build                     ││▸ ▶ build-ui                     ││✓││✗││~│
+│▸ · fix-build                     ││▸ ▶ build-ui                     ││∅││∅││∅│
 │                                  ││                                 ││ ││ ││ │
 │                                  ││                                 ││ ││ ││ │
 │                                  ││                                 ││ ││ ││ │

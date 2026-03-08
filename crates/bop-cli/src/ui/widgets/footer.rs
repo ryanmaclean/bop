@@ -5,7 +5,8 @@
 /// on a second line (mc-style function key legend).
 ///
 /// Mode-specific legends:
-/// - **Normal**: `[h/l]col [j/k]card [↵]actions [Shift+H/L]move [/]filter [n]new [q]quit`
+/// - **Normal**: `[h/l]col [j/k]card [↵]actions [H/>]move [L]logs [/]filter [Ctrl+O]shell [n]new [q]quit`
+/// - **Log tab**: `[j/k]scroll [f]follow [Tab]next [L/Esc]close`
 /// - **Detail**: `[j/k]scroll [F3]logs [p]pause [r]retry [Esc]close`
 /// - **LogTail**: `[↑↓]scroll [f]follow [c]clear [Esc]close`
 /// - **Filter**: `Filter: {query}█  [Esc]clear [↵]confirm`
@@ -39,15 +40,38 @@ fn normal_legend() -> Vec<Span<'static>> {
         Span::styled("card ", Style::default().fg(Color::DarkGray)),
         Span::styled("[↵]", Style::default().fg(Color::Cyan)),
         Span::styled("actions ", Style::default().fg(Color::DarkGray)),
-        Span::styled("[Shift+H/L]", Style::default().fg(Color::Cyan)),
+        Span::styled("[H/>]", Style::default().fg(Color::Cyan)),
         Span::styled("move ", Style::default().fg(Color::DarkGray)),
+        Span::styled("[L]", Style::default().fg(Color::Cyan)),
+        Span::styled("logs ", Style::default().fg(Color::DarkGray)),
         Span::styled("[/]", Style::default().fg(Color::Cyan)),
         Span::styled("filter ", Style::default().fg(Color::DarkGray)),
+        Span::styled("[Ctrl+O]", Style::default().fg(Color::Cyan)),
+        Span::styled("shell ", Style::default().fg(Color::DarkGray)),
         Span::styled("[n]", Style::default().fg(Color::Cyan)),
         Span::styled("new ", Style::default().fg(Color::DarkGray)),
         Span::styled("[q]", Style::default().fg(Color::Cyan)),
         Span::styled("quit", Style::default().fg(Color::DarkGray)),
     ]
+}
+
+/// Build keybinding hint spans for integrated Log tab.
+fn log_pane_legend(follow: bool) -> Vec<Span<'static>> {
+    let mut spans = vec![
+        Span::styled("[j/k]", Style::default().fg(Color::Cyan)),
+        Span::styled("scroll ", Style::default().fg(Color::DarkGray)),
+        Span::styled("[f]", Style::default().fg(Color::Cyan)),
+        Span::styled("follow ", Style::default().fg(Color::DarkGray)),
+        Span::styled("[Tab]", Style::default().fg(Color::Cyan)),
+        Span::styled("next running ", Style::default().fg(Color::DarkGray)),
+        Span::styled("[L/Esc]", Style::default().fg(Color::Cyan)),
+        Span::styled("close", Style::default().fg(Color::DarkGray)),
+    ];
+    if !follow {
+        spans.push(Span::styled("  ", Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled("↓ paused", Style::default().fg(Color::Yellow)));
+    }
+    spans
 }
 
 /// Build keybinding hint spans for Detail mode.
@@ -93,6 +117,19 @@ fn filter_legend(query: &str) -> Vec<Span<'static>> {
         Span::styled("clear ", Style::default().fg(Color::DarkGray)),
         Span::styled("[↵]", Style::default().fg(Color::Cyan)),
         Span::styled("confirm", Style::default().fg(Color::DarkGray)),
+    ]
+}
+
+/// Build keybinding hint spans for an active (confirmed) filter.
+fn filter_active_legend(query: &str) -> Vec<Span<'static>> {
+    vec![
+        Span::styled("Filter: ", Style::default().fg(Color::Yellow)),
+        Span::styled(query.to_string(), Style::default().fg(Color::White)),
+        Span::styled("  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("[/]", Style::default().fg(Color::Cyan)),
+        Span::styled("edit ", Style::default().fg(Color::DarkGray)),
+        Span::styled("[Esc]", Style::default().fg(Color::Cyan)),
+        Span::styled("clear", Style::default().fg(Color::DarkGray)),
     ]
 }
 
@@ -178,27 +215,52 @@ pub fn render_footer(frame: &mut Frame, area: Rect, app: &App, terminal_height: 
     }
 
     // Build the primary legend line based on current mode.
-    let mut legend_spans = if app.tab == AppTab::Factory {
-        factory_legend()
-    } else {
-        match app.mode {
-            Mode::Normal => normal_legend(),
+    let active_filter_query = app
+        .filter_state
+        .as_ref()
+        .map(|s| s.query.as_str())
+        .or(app.filter.as_deref())
+        .filter(|q| !q.is_empty());
+
+    let mut legend_spans = match &app.tab {
+        AppTab::Factory => factory_legend(),
+        AppTab::Log(_) => log_pane_legend(app.log_pane_follow),
+        AppTab::Kanban => match app.mode {
+            Mode::Normal => {
+                if let Some(query) = active_filter_query {
+                    filter_active_legend(query)
+                } else {
+                    normal_legend()
+                }
+            }
             Mode::Detail => detail_legend(),
             Mode::LogTail => logtail_legend(),
             Mode::Filter => {
-                let query = app.filter.as_deref().unwrap_or("");
+                let query = app
+                    .filter_state
+                    .as_ref()
+                    .map(|s| s.query.as_str())
+                    .or(app.filter.as_deref())
+                    .unwrap_or("");
                 filter_legend(query)
             }
             Mode::ActionPopup => action_popup_legend(),
             Mode::NewCard => new_card_legend(&app.newcard_input),
             Mode::Subshell => subshell_legend(),
-        }
+        },
     };
 
     // Prepend transient status message if present.
-    if let Some(ref msg) = app.status_message {
+    let toast_msg = app.toast_message.as_ref();
+    let status_msg = app.status_message.as_ref();
+    if let Some(msg) = toast_msg.or(status_msg) {
+        let msg_color = if toast_msg.is_some() {
+            Color::Red
+        } else {
+            Color::Yellow
+        };
         let mut with_status = vec![
-            Span::styled(format!("{} ", msg), Style::default().fg(Color::Yellow)),
+            Span::styled(format!("{} ", msg), Style::default().fg(msg_color)),
             Span::styled("│ ", Style::default().fg(Color::DarkGray)),
         ];
         with_status.extend(legend_spans);
@@ -232,8 +294,10 @@ mod tests {
         assert!(text.contains("[h/l]"));
         assert!(text.contains("[j/k]"));
         assert!(text.contains("[↵]"));
-        assert!(text.contains("[Shift+H/L]"));
+        assert!(text.contains("[H/>]"));
+        assert!(text.contains("[L]"));
         assert!(text.contains("[/]"));
+        assert!(text.contains("[Ctrl+O]"));
         assert!(text.contains("[n]"));
         assert!(text.contains("[q]"));
     }
