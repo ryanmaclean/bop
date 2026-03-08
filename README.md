@@ -1,6 +1,6 @@
 # bop — Heterogeneous Agent Orchestrator
 
-A pluggable job system for parallel AI coding agents. The filesystem IS the state machine: directory bundles (`.card`) are navigable in Finder with Quick Look previews. No database. `mv` = state transition.
+A pluggable job system for parallel AI coding agents. The filesystem IS the state machine: directory bundles (`.bop`) are navigable in Finder with Quick Look previews. No database. `mv` = state transition.
 
 Reliability guards:
 - single-dispatcher lock: `.cards/.locks/dispatcher.lock`
