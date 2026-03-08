@@ -194,6 +194,10 @@ pub fn compress_card(card_dir: &Path) {
         return;
     }
     let _ = fs::remove_dir_all(&backup);
+
+    // The rename replaced the original with the compressed copy. The new
+    // meta.json was created by ditto (no immutable flag). Re-protect it.
+    bop_core::meta_protect(&card_dir.join("meta.json"));
 }
 
 #[cfg(test)]
