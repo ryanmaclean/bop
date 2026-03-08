@@ -336,6 +336,9 @@ pub async fn run_merge_gate(
                                     }
                                 }
 
+                                // Delete target/ first — 1.8 GB typically — so disk is freed
+                                // even if git worktree remove subsequently fails.
+                                let _ = fs::remove_dir_all(ws_path.join("target"));
                                 let _ = workspace::remove_worktree(&ws_path, Some(&git_root));
                             }
                             VcsEngine::Jj => {
@@ -367,6 +370,14 @@ pub async fn run_merge_gate(
                                     // gh pr create is best-effort; no remote = skip silently
                                     let _ = pr_result;
                                 }
+                                // Delete workspace directory after forget. `jj workspace forget`
+                                // only deregisters — it does NOT remove files. target/ alone is
+                                // ~1.8 GB per job and would accumulate indefinitely without this.
+                                // Remove target/ first (largest, easiest to recreate) then the
+                                // full workspace. Both are best-effort: the workspace has served
+                                // its purpose once the change is squashed into the main repo.
+                                let _ = fs::remove_dir_all(ws_path.join("target"));
+                                let _ = fs::remove_dir_all(&ws_path);
                             }
                         }
 
