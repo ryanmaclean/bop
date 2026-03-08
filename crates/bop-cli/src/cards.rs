@@ -1572,8 +1572,20 @@ pub fn retry_card(root: &Path, id: &str) -> anyhow::Result<String> {
         anyhow::bail!("card '{}' is already pending", id);
     }
 
-    // Update meta before rename so the write is in the stable card location
-    if let Ok(mut meta) = bop_core::read_meta(&card) {
+    // Update meta before rename so the write is in the stable card location.
+    // If read_meta fails (e.g. checksum mismatch from manual edits), strip the
+    // bad checksum from the raw JSON and retry — bop retry is a repair path.
+    let meta_result = bop_core::read_meta(&card).or_else(|_| {
+        let meta_path = card.join("meta.json");
+        let raw = std::fs::read_to_string(&meta_path)?;
+        let mut val: serde_json::Value = serde_json::from_str(&raw)?;
+        if let Some(obj) = val.as_object_mut() {
+            obj.remove("checksum");
+        }
+        std::fs::write(&meta_path, serde_json::to_vec_pretty(&val)?)?;
+        bop_core::read_meta(&card)
+    });
+    if let Ok(mut meta) = meta_result {
         meta.retry_count = Some(meta.retry_count.unwrap_or(0).saturating_add(1));
         meta.failure_reason = None;
         for stage in meta.stages.values_mut() {
