@@ -434,6 +434,8 @@ mod tests {
     fn merge_ref_prefers_merge_commit_field() {
         let td = tempdir().unwrap();
         let card = write_card(td.path(), "merged", "x", "x");
+        // Clear immutable flag set by write_card before overwriting with raw JSON.
+        bop_core::meta_unprotect(&card.join("meta.json"));
         fs::write(
             card.join("meta.json"),
             r#"{"id":"x","stage":"implement","created":"2026-01-01T00:00:00Z","merge_commit":"abc123"}"#,

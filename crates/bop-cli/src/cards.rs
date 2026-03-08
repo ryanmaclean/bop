@@ -192,7 +192,7 @@ pub fn perform_cleanup(scan_result: &ScanResult, dry_run: bool) -> anyhow::Resul
                 card_path.display()
             );
         } else {
-            fs::remove_dir_all(card_path).with_context(|| {
+            bop_core::remove_card_dir(card_path).with_context(|| {
                 format!("Failed to remove corrupt card: {}", card_path.display())
             })?;
             println!("Removed corrupt card: {}", card_path.display());
@@ -210,7 +210,7 @@ pub fn perform_cleanup(scan_result: &ScanResult, dry_run: bool) -> anyhow::Resul
                 card_path.display()
             );
         } else {
-            fs::remove_dir_all(card_path).with_context(|| {
+            bop_core::remove_card_dir(card_path).with_context(|| {
                 format!("Failed to remove old failed card: {}", card_path.display())
             })?;
             println!("Removed old failed card: {}", card_path.display());
@@ -228,7 +228,7 @@ pub fn perform_cleanup(scan_result: &ScanResult, dry_run: bool) -> anyhow::Resul
                 card_path.display()
             );
         } else {
-            fs::remove_dir_all(card_path).with_context(|| {
+            bop_core::remove_card_dir(card_path).with_context(|| {
                 format!(
                     "Failed to remove orphan running card: {}",
                     card_path.display()

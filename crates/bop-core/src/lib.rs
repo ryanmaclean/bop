@@ -673,6 +673,12 @@ pub fn read_meta(card_dir: &Path) -> anyhow::Result<Meta> {
     Ok(meta)
 }
 
+/// Returns true when `card_dir` is inside a `templates/` parent directory.
+/// Templates are user-editable config files and should not be locked.
+fn is_template_dir(card_dir: &Path) -> bool {
+    card_dir.components().any(|c| c.as_os_str() == "templates")
+}
+
 /// Clear the macOS user-immutable flag on a file so it can be overwritten.
 /// No-op on non-macOS platforms. Called before writing meta.json.
 pub fn meta_unprotect(path: &Path) {
@@ -703,6 +709,13 @@ pub fn meta_protect(path: &Path) {
     }
     #[cfg(not(target_os = "macos"))]
     let _ = path;
+}
+
+/// Remove a card directory, clearing the immutable flag on meta.json first.
+/// `fs::remove_dir_all` fails on macOS if any file inside has UF_IMMUTABLE set.
+pub fn remove_card_dir(card_dir: &Path) -> std::io::Result<()> {
+    meta_unprotect(&meta_path(card_dir));
+    std::fs::remove_dir_all(card_dir)
 }
 
 pub fn write_meta(card_dir: &Path, meta: &Meta) -> anyhow::Result<()> {
@@ -744,8 +757,11 @@ pub fn write_meta(card_dir: &Path, meta: &Meta) -> anyhow::Result<()> {
         .persist(&target)
         .map_err(|e| anyhow::anyhow!("failed to persist meta.json: {}", e))?;
 
-    // Lock the file: any process that doesn't go through write_meta gets EPERM
-    meta_protect(&target);
+    // Lock the file: any process that doesn't go through write_meta gets EPERM.
+    // Templates are config files that users customize — skip protection for them.
+    if !is_template_dir(card_dir) {
+        meta_protect(&target);
+    }
 
     // Best-effort: log the meta_written event to JSONL audit log
     let _ = append_event(
