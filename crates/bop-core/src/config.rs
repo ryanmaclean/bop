@@ -12,6 +12,8 @@ pub struct Config {
     pub default_template: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dispatch: Option<DispatchConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhooks: Option<Vec<WebhookConfig>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -19,6 +21,45 @@ pub struct DispatchConfig {
     pub auto_select_provider: Option<bool>,
     pub quota_block_threshold: Option<f64>,
     pub prefer_cheap_provider: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WebhookConfig {
+    pub url: String,
+    #[serde(default)]
+    pub on: Vec<WebhookEvent>,
+    #[serde(default)]
+    pub format: WebhookFormat,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum WebhookEvent {
+    Pending,
+    Running,
+    Done,
+    Failed,
+    Merged,
+}
+
+impl WebhookEvent {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Running => "running",
+            Self::Done => "done",
+            Self::Failed => "failed",
+            Self::Merged => "merged",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum WebhookFormat {
+    #[default]
+    Json,
+    Slack,
 }
 
 fn merge_dispatch(
@@ -48,6 +89,7 @@ pub fn merge_configs(base: Config, overlay: Config) -> Config {
         log_retention_days: overlay.log_retention_days.or(base.log_retention_days),
         default_template: overlay.default_template.or(base.default_template),
         dispatch: merge_dispatch(base.dispatch, overlay.dispatch),
+        webhooks: overlay.webhooks.or(base.webhooks),
     }
 }
 
@@ -59,7 +101,7 @@ pub fn parse_config(json: &str) -> anyhow::Result<Config> {
     serde_json::from_str(json).context(
         "malformed config: expected schema with optional fields: \
         default_provider_chain, max_concurrent, cooldown_seconds, \
-        log_retention_days, default_template, dispatch",
+        log_retention_days, default_template, dispatch, webhooks",
     )
 }
 
@@ -246,6 +288,38 @@ mod tests {
         let overlay = Config::default();
         let merged = merge_configs(base, overlay);
         assert_eq!(merged.max_concurrent, Some(4));
+    }
+
+    #[test]
+    fn parse_webhooks_json() {
+        let json = r#"{
+  "webhooks": [
+    {
+      "url": "https://example.com/hook",
+      "on": ["done", "failed", "merged"],
+      "format": "json"
+    },
+    {
+      "url": "https://hooks.slack.com/services/x",
+      "on": ["running"],
+      "format": "slack"
+    }
+  ]
+}"#;
+        let cfg = parse_config(json).unwrap();
+        let hooks = cfg.webhooks.unwrap();
+        assert_eq!(hooks.len(), 2);
+        assert_eq!(
+            hooks[0].on,
+            vec![
+                WebhookEvent::Done,
+                WebhookEvent::Failed,
+                WebhookEvent::Merged
+            ]
+        );
+        assert_eq!(hooks[0].format, WebhookFormat::Json);
+        assert_eq!(hooks[1].on, vec![WebhookEvent::Running]);
+        assert_eq!(hooks[1].format, WebhookFormat::Slack);
     }
 
     #[test]

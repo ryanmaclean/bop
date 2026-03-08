@@ -1,4 +1,5 @@
 pub mod app;
+pub mod detail_panel;
 pub mod event;
 pub mod factory_tab;
 pub mod input;
@@ -23,10 +24,11 @@ use ratatui::Terminal;
 
 use crate::paths;
 use app::{App, AppEvent, AppTab, Mode};
+use detail_panel::render_detail_panel;
 use event::{EventLoop, TerminalGuard};
 use factory_tab::FactoryTabWidget;
 use log_pane::render_log_pane;
-use widgets::{render_detail, render_footer, render_header, render_kanban, render_logtail};
+use widgets::{render_footer, render_header, render_kanban, render_logtail};
 
 /// Launch the interactive TUI kanban board.
 ///
@@ -157,25 +159,23 @@ fn draw(
             AppTab::Factory => {
                 frame.render_widget(FactoryTabWidget::new(&app.factory_tab), zones[1]);
             }
+            AppTab::Detail(card_id) => {
+                let card = app.card_by_id(card_id).cloned();
+                let card_dir = paths::find_card(&app.cards_root, card_id);
+                render_detail_panel(
+                    frame,
+                    zones[1],
+                    app,
+                    card_id,
+                    card.as_ref(),
+                    card_dir.as_deref(),
+                );
+            }
             AppTab::Log(card_id) => {
                 render_log_pane(frame, zones[1], app, card_id);
             }
             AppTab::Kanban => {
                 render_kanban(frame, zones[1], app);
-
-                // ── Detail overlay (right 50% of body) ────────────────
-                if app.mode == Mode::Detail {
-                    if let Some(card) = app.selected_card().cloned() {
-                        let card_dir = paths::find_card(&app.cards_root, &card.id);
-                        render_detail(
-                            frame,
-                            zones[1],
-                            &card,
-                            app.detail_scroll,
-                            card_dir.as_deref(),
-                        );
-                    }
-                }
 
                 // ── LogTail overlay (full body zone) ───────────────────
                 if app.mode == Mode::LogTail {
@@ -244,6 +244,7 @@ fn render_minimal_status(frame: &mut ratatui::Frame, area: ratatui::layout::Rect
 
     let mode_str = match &app.tab {
         AppTab::Factory => "factory",
+        AppTab::Detail(_) => "detail",
         AppTab::Log(_) => "log",
         AppTab::Kanban => match app.mode {
             Mode::Normal => "normal",
@@ -286,12 +287,11 @@ mod snapshot_tests {
     use ratatui::Terminal;
 
     use crate::render::CardView;
-    use crate::ui::app::{App, AppTab, KanbanColumn, Mode};
+    use crate::ui::app::{App, AppTab, DetailTab, KanbanColumn, Mode};
+    use crate::ui::detail_panel::render_detail_panel;
     use crate::ui::factory_tab::FactoryTabState;
     use crate::ui::widgets::header::{ProviderMeter, ProviderStatus};
-    use crate::ui::widgets::{
-        render_detail, render_footer, render_header, render_kanban, render_logtail,
-    };
+    use crate::ui::widgets::{render_footer, render_header, render_kanban, render_logtail};
 
     // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -363,6 +363,8 @@ mod snapshot_tests {
             tick_count: 0,
             prev_done_count: 0,
             detail_scroll: 0,
+            detail_tab: DetailTab::Meta,
+            detail_log_follow: true,
             action_list_state: ratatui::widgets::ListState::default(),
             log_scroll: 0,
             log_follow: false,
@@ -478,19 +480,24 @@ mod snapshot_tests {
         insta::assert_snapshot!("kanban_collapsed_empty_columns", content);
     }
 
-    // ── Detail overlay ──────────────────────────────────────────────────
+    // ── Detail panel ────────────────────────────────────────────────────
 
     #[test]
     fn snapshot_detail_overlay() {
-        let mut card = rich_card("build-ui", "running", "claude", 300, 75);
-        card.priority = Some(1);
+        let mut running = rich_card("build-ui", "running", "claude", 300, 75);
+        running.priority = Some(1);
+        let columns = build_test_columns(vec![], vec![running], vec![], vec![], vec![]);
+        let mut app = test_app(columns);
+        app.tab = AppTab::Detail("build-ui".to_string());
+        app.mode = Mode::Detail;
 
         let backend = TestBackend::new(80, 20);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|frame| {
                 let area = frame.area();
-                render_detail(frame, area, &card, 0, None);
+                let card = app.card_by_id("build-ui").cloned();
+                render_detail_panel(frame, area, &app, "build-ui", card.as_ref(), None);
             })
             .unwrap();
 

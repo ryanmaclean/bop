@@ -1,3 +1,4 @@
+use bop_core::config::WebhookEvent;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -19,6 +20,7 @@ pub async fn run_merge_gate(
     vcs_engine: VcsEngine,
 ) -> anyhow::Result<()> {
     paths::ensure_cards_layout(cards_dir)?;
+    let webhook_client = crate::webhook::WebhookClient::from_cards_dir(cards_dir)?;
 
     let merged_dir = cards_dir.join("merged");
     let failed_dir = cards_dir.join("failed");
@@ -226,6 +228,11 @@ pub async fn run_merge_gate(
                         let _ = fs::rename(&card_dir, &failed_path);
                         mg_record(&meta, "done", "failed", Some(&failed_path));
                         quicklook::render_card_thumbnail(&failed_path);
+                        webhook_client.emit_transition(
+                            WebhookEvent::Failed,
+                            Some(&meta),
+                            &failed_path,
+                        );
                         continue;
                     }
 
@@ -241,6 +248,11 @@ pub async fn run_merge_gate(
                         let _ = fs::rename(&card_dir, &failed_path);
                         mg_record(&meta, "done", "failed", Some(&failed_path));
                         quicklook::render_card_thumbnail(&failed_path);
+                        webhook_client.emit_transition(
+                            WebhookEvent::Failed,
+                            Some(&meta),
+                            &failed_path,
+                        );
                         continue;
                     }
                     meta.policy_result = Some("pass".to_string());
@@ -263,6 +275,11 @@ pub async fn run_merge_gate(
                                     let _ = fs::rename(&card_dir, &failed_path);
                                     mg_record(&meta, "done", "failed", Some(&failed_path));
                                     quicklook::render_card_thumbnail(&failed_path);
+                                    webhook_client.emit_transition(
+                                        WebhookEvent::Failed,
+                                        Some(&meta),
+                                        &failed_path,
+                                    );
                                     continue;
                                 };
 
@@ -366,6 +383,11 @@ pub async fn run_merge_gate(
                             let _ = fs::rename(&card_dir, &failed_path);
                             mg_record(&meta, "done", "failed", Some(&failed_path));
                             quicklook::render_card_thumbnail(&failed_path);
+                            webhook_client.emit_transition(
+                                WebhookEvent::Failed,
+                                Some(&meta),
+                                &failed_path,
+                            );
                             continue;
                         }
                     }
@@ -380,6 +402,7 @@ pub async fn run_merge_gate(
                     mg_record(&meta, "done", "merged", Some(&merged_path));
                     quicklook::compress_card(&merged_path);
                     quicklook::render_card_thumbnail(&merged_path);
+                    webhook_client.emit_transition(WebhookEvent::Merged, Some(&meta), &merged_path);
                 }
             }
         } // end for done_dir

@@ -14,6 +14,8 @@ use crossterm::terminal::{
     LeaveAlternateScreen,
 };
 
+use crate::project;
+
 const REFRESH_MS: u64 = 500;
 const LOG_LINES: usize = 8;
 const LOG_READ_BYTES: i64 = 4096;
@@ -25,8 +27,16 @@ enum CardState {
 }
 
 #[derive(Debug, Clone)]
+struct WatchSource {
+    project_name: Option<String>,
+    cards_root: PathBuf,
+}
+
+#[derive(Debug, Clone)]
 struct CardEntry {
+    key: String,
     id: String,
+    project_name: Option<String>,
     provider: String,
     state: CardState,
     card_dir: PathBuf,
@@ -46,8 +56,8 @@ struct Snapshot {
 #[derive(Debug, Default)]
 struct UiState {
     selected_idx: usize,
-    selected_card_id: Option<String>,
-    log_card_id: Option<String>,
+    selected_card_key: Option<String>,
+    log_card_key: Option<String>,
     status_msg: Option<String>,
 }
 
@@ -70,11 +80,34 @@ impl Drop for TerminalGuard {
     }
 }
 
-pub async fn cmd_watch(root: &Path) -> anyhow::Result<()> {
-    run_watch(root)
+pub async fn cmd_watch(root: &Path, all: bool) -> anyhow::Result<()> {
+    let (sources, all_mode) = if all {
+        let projects = project::registered_watch_projects()?;
+        if projects.is_empty() {
+            anyhow::bail!("no registered projects (run: bop project add <path> --alias <alias>)");
+        }
+        let sources = projects
+            .into_iter()
+            .map(|p| WatchSource {
+                project_name: Some(p.name),
+                cards_root: p.cards_root,
+            })
+            .collect();
+        (sources, true)
+    } else {
+        (
+            vec![WatchSource {
+                project_name: None,
+                cards_root: root.to_path_buf(),
+            }],
+            false,
+        )
+    };
+
+    run_watch(&sources, all_mode)
 }
 
-fn run_watch(root: &Path) -> anyhow::Result<()> {
+fn run_watch(sources: &[WatchSource], all_mode: bool) -> anyhow::Result<()> {
     let _guard = TerminalGuard::new()?;
     let mut stdout = io::stdout();
     let mut state = UiState::default();
@@ -84,15 +117,15 @@ fn run_watch(root: &Path) -> anyhow::Result<()> {
         let width = term_width as usize;
         let height = term_height as usize;
 
-        let snapshot = collect_snapshot(root);
+        let snapshot = collect_snapshot(sources);
         let rows = rows_for_render(&snapshot, height);
         reconcile_selection(&mut state, &rows);
 
         let log_card = resolve_log_card(&snapshot, &state, &rows);
         let log_title = log_card
             .as_ref()
-            .map(|c| c.id.as_str())
-            .unwrap_or("(no card selected)");
+            .map(display_card_label)
+            .unwrap_or_else(|| "(no card selected)".to_string());
         let log_lines = log_card
             .as_ref()
             .map(|c| read_log_tail(&c.log_path, LOG_LINES))
@@ -104,8 +137,9 @@ fn run_watch(root: &Path) -> anyhow::Result<()> {
             &snapshot,
             &rows,
             &state,
-            log_title,
+            &log_title,
             &log_lines,
+            all_mode,
         )?;
 
         if !event::poll(Duration::from_millis(REFRESH_MS))? {
@@ -115,18 +149,10 @@ fn run_watch(root: &Path) -> anyhow::Result<()> {
         match event::read()? {
             Event::Key(key) => match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => break,
-                KeyCode::Char('j') | KeyCode::Down => {
-                    move_selection(&rows, &mut state, 1);
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    move_selection(&rows, &mut state, -1);
-                }
-                KeyCode::Char('l') => {
-                    cycle_log_running(&snapshot.running, &mut state);
-                }
-                KeyCode::Char('p') => {
-                    handle_pane_jump(&rows, &mut state);
-                }
+                KeyCode::Char('j') | KeyCode::Down => move_selection(&rows, &mut state, 1),
+                KeyCode::Char('k') | KeyCode::Up => move_selection(&rows, &mut state, -1),
+                KeyCode::Char('l') => cycle_log_running(&snapshot.running, &mut state),
+                KeyCode::Char('p') => handle_pane_jump(&rows, &mut state),
                 _ => {}
             },
             Event::Resize(_, _) => {}
@@ -145,17 +171,23 @@ fn render_frame(
     state: &UiState,
     log_title: &str,
     log_lines: &[String],
+    all_mode: bool,
 ) -> anyhow::Result<()> {
     execute!(stdout, cursor::MoveTo(0, 0), Clear(ClearType::All))?;
 
     let hline = "━".repeat(width.max(1));
     writeln!(stdout, "{hline}")?;
+    let title = if all_mode {
+        "bop watch --all"
+    } else {
+        "bop watch"
+    };
     writeln!(
         stdout,
         "{}",
         trim_to_width(
             &format!(
-                "  bop watch  •  {} running  •  {} done  •  ${:.2} today",
+                "  {title}  •  {} running  •  {} done  •  ${:.2} today",
                 snapshot.running.len(),
                 snapshot.done.len(),
                 snapshot.today_cost_usd
@@ -174,10 +206,9 @@ fn render_frame(
     } else {
         for card in rows {
             let is_selected = state
-                .selected_card_id
+                .selected_card_key
                 .as_deref()
-                .map(|id| id == card.id)
-                .unwrap_or(false);
+                .is_some_and(|key| key == card.key);
             let prefix = if is_selected { ">" } else { " " };
             writeln!(
                 stdout,
@@ -211,6 +242,13 @@ fn render_frame(
     Ok(())
 }
 
+fn display_card_label(card: &CardEntry) -> String {
+    card.project_name
+        .as_deref()
+        .map(|name| format!("[{name}] {}", card.id))
+        .unwrap_or_else(|| card.id.clone())
+}
+
 fn format_row(prefix: &str, card: &CardEntry, width: usize) -> String {
     let id_width = width.saturating_sub(46).clamp(20, 52);
     let provider = pad_or_trim(&card.provider, 8);
@@ -218,11 +256,12 @@ fn format_row(prefix: &str, card: &CardEntry, width: usize) -> String {
         .elapsed_s
         .map(format_duration)
         .unwrap_or_else(|| "-".to_string());
+    let label = display_card_label(card);
 
     match card.state {
         CardState::Running => format!(
             "{prefix} ● {:id_width$} {provider} {:7} {:>8}   ↳ [p]ane",
-            pad_or_trim(&card.id, id_width),
+            pad_or_trim(&label, id_width),
             "running",
             elapsed
         ),
@@ -233,7 +272,7 @@ fn format_row(prefix: &str, card: &CardEntry, width: usize) -> String {
                 .unwrap_or_else(|| "-".to_string());
             format!(
                 "{prefix} ✓ {:id_width$} {provider} {:7} {:>8}   {cost}",
-                pad_or_trim(&card.id, id_width),
+                pad_or_trim(&label, id_width),
                 "done",
                 elapsed
             )
@@ -282,25 +321,25 @@ fn pad_or_trim(input: &str, width: usize) -> String {
 fn reconcile_selection(state: &mut UiState, rows: &[CardEntry]) {
     if rows.is_empty() {
         state.selected_idx = 0;
-        state.selected_card_id = None;
-        state.log_card_id = None;
+        state.selected_card_key = None;
+        state.log_card_key = None;
         return;
     }
 
-    if let Some(ref selected_id) = state.selected_card_id {
-        if let Some(idx) = rows.iter().position(|c| &c.id == selected_id) {
+    if let Some(ref selected_key) = state.selected_card_key {
+        if let Some(idx) = rows.iter().position(|c| &c.key == selected_key) {
             state.selected_idx = idx;
         } else {
             state.selected_idx = state.selected_idx.min(rows.len() - 1);
-            state.selected_card_id = Some(rows[state.selected_idx].id.clone());
+            state.selected_card_key = Some(rows[state.selected_idx].key.clone());
         }
     } else {
         state.selected_idx = state.selected_idx.min(rows.len() - 1);
-        state.selected_card_id = Some(rows[state.selected_idx].id.clone());
+        state.selected_card_key = Some(rows[state.selected_idx].key.clone());
     }
 
-    if state.log_card_id.is_none() {
-        state.log_card_id = state.selected_card_id.clone();
+    if state.log_card_key.is_none() {
+        state.log_card_key = state.selected_card_key.clone();
     }
 }
 
@@ -317,9 +356,9 @@ fn move_selection(rows: &[CardEntry], state: &mut UiState, step: i32) {
         state.selected_idx = state.selected_idx.saturating_sub(1);
     }
 
-    let selected_id = rows[state.selected_idx].id.clone();
-    state.selected_card_id = Some(selected_id.clone());
-    state.log_card_id = Some(selected_id);
+    let selected_key = rows[state.selected_idx].key.clone();
+    state.selected_card_key = Some(selected_key.clone());
+    state.log_card_key = Some(selected_key);
     state.status_msg = None;
 }
 
@@ -330,23 +369,23 @@ fn cycle_log_running(running: &[CardEntry], state: &mut UiState) {
     }
 
     let next_idx = state
-        .log_card_id
+        .log_card_key
         .as_ref()
-        .and_then(|id| running.iter().position(|c| &c.id == id))
+        .and_then(|key| running.iter().position(|c| &c.key == key))
         .map(|idx| (idx + 1) % running.len())
         .unwrap_or(0);
 
-    let next_id = running[next_idx].id.clone();
-    state.log_card_id = Some(next_id.clone());
-    state.status_msg = Some(format!("log: {next_id}"));
+    let next = &running[next_idx];
+    state.log_card_key = Some(next.key.clone());
+    state.status_msg = Some(format!("log: {}", display_card_label(next)));
 }
 
 fn handle_pane_jump(rows: &[CardEntry], state: &mut UiState) {
-    let Some(selected_id) = state.selected_card_id.as_ref() else {
+    let Some(selected_key) = state.selected_card_key.as_ref() else {
         state.status_msg = Some("no selected card".to_string());
         return;
     };
-    let Some(card) = rows.iter().find(|c| &c.id == selected_id) else {
+    let Some(card) = rows.iter().find(|c| &c.key == selected_key) else {
         state.status_msg = Some("selected card not visible".to_string());
         return;
     };
@@ -383,25 +422,25 @@ fn handle_pane_jump(rows: &[CardEntry], state: &mut UiState) {
 }
 
 fn resolve_log_card(snapshot: &Snapshot, state: &UiState, rows: &[CardEntry]) -> Option<CardEntry> {
-    if let Some(id) = state.log_card_id.as_deref() {
-        if let Some(card) = find_card_by_id(snapshot, id) {
+    if let Some(key) = state.log_card_key.as_deref() {
+        if let Some(card) = find_card_by_key(snapshot, key) {
             return Some(card.clone());
         }
     }
-    if let Some(id) = state.selected_card_id.as_deref() {
-        if let Some(card) = find_card_by_id(snapshot, id) {
+    if let Some(key) = state.selected_card_key.as_deref() {
+        if let Some(card) = find_card_by_key(snapshot, key) {
             return Some(card.clone());
         }
     }
     rows.first().cloned()
 }
 
-fn find_card_by_id<'a>(snapshot: &'a Snapshot, id: &str) -> Option<&'a CardEntry> {
+fn find_card_by_key<'a>(snapshot: &'a Snapshot, key: &str) -> Option<&'a CardEntry> {
     snapshot
         .running
         .iter()
         .chain(snapshot.done.iter())
-        .find(|c| c.id == id)
+        .find(|c| c.key == key)
 }
 
 fn rows_for_render(snapshot: &Snapshot, term_height: usize) -> Vec<CardEntry> {
@@ -414,17 +453,32 @@ fn rows_for_render(snapshot: &Snapshot, term_height: usize) -> Vec<CardEntry> {
     rows
 }
 
-fn collect_snapshot(root: &Path) -> Snapshot {
+fn collect_snapshot(sources: &[WatchSource]) -> Snapshot {
     let now = Utc::now();
-    let mut running = collect_state_cards(root, CardState::Running, now);
-    let mut done = collect_state_cards(root, CardState::Done, now);
+    let mut running = Vec::new();
+    let mut done = Vec::new();
 
-    running.sort_by(|a, b| a.id.cmp(&b.id));
+    for source in sources {
+        running.extend(collect_state_cards(source, CardState::Running, now));
+        done.extend(collect_state_cards(source, CardState::Done, now));
+    }
+
+    running.sort_by(|a, b| {
+        a.project_name
+            .cmp(&b.project_name)
+            .then_with(|| a.id.cmp(&b.id))
+    });
     done.sort_by(|a, b| match (a.sort_ts, b.sort_ts) {
-        (Some(at), Some(bt)) => bt.cmp(&at),
+        (Some(at), Some(bt)) => bt
+            .cmp(&at)
+            .then_with(|| a.project_name.cmp(&b.project_name))
+            .then_with(|| a.id.cmp(&b.id)),
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
-        (None, None) => a.id.cmp(&b.id),
+        (None, None) => a
+            .project_name
+            .cmp(&b.project_name)
+            .then_with(|| a.id.cmp(&b.id)),
     });
 
     let today = Local::now().date_naive();
@@ -453,14 +507,18 @@ fn collect_snapshot(root: &Path) -> Snapshot {
     }
 }
 
-fn collect_state_cards(root: &Path, state: CardState, now: DateTime<Utc>) -> Vec<CardEntry> {
+fn collect_state_cards(
+    source: &WatchSource,
+    state: CardState,
+    now: DateTime<Utc>,
+) -> Vec<CardEntry> {
     let state_name = match state {
         CardState::Running => "running",
         CardState::Done => "done",
     };
 
     let mut out = Vec::new();
-    for state_dir in state_dirs(root, state_name) {
+    for state_dir in state_dirs(&source.cards_root, state_name) {
         let Ok(entries) = fs::read_dir(&state_dir) else {
             continue;
         };
@@ -498,9 +556,16 @@ fn collect_state_cards(root: &Path, state: CardState, now: DateTime<Utc>) -> Vec
                 .filter(|s| !s.is_empty())
                 .or_else(|| meta.provider_chain.first().cloned())
                 .unwrap_or_else(|| "-".to_string());
+            let key = source
+                .project_name
+                .as_deref()
+                .map(|name| format!("{name}:{}", meta.id))
+                .unwrap_or_else(|| meta.id.clone());
 
             out.push(CardEntry {
+                key,
                 id: meta.id,
+                project_name: source.project_name.clone(),
                 provider,
                 state,
                 card_dir: card_dir.clone(),
@@ -665,7 +730,9 @@ mod tests {
     #[test]
     fn rows_for_render_limits_done_rows() {
         let mk = |id: &str, state: CardState| CardEntry {
+            key: id.to_string(),
             id: id.to_string(),
+            project_name: None,
             provider: "codex".to_string(),
             state,
             card_dir: PathBuf::from("/tmp"),

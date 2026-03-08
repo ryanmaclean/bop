@@ -1,6 +1,6 @@
 ---
 source: crates/bop-cli/src/ui/mod.rs
-assertion_line: 806
+assertion_line: 813
 expression: stable
 ---
 bop · HH:MM:SS · ▁▁▁▁▁▁▁▁ 0/hr
@@ -22,4 +22,4 @@ bop · HH:MM:SS · ▁▁▁▁▁▁▁▁ 0/hr
 │                      ││                       ││                      ││ ││                      │
 │                      ││                       ││                      ││ ││                      │
 └──────────────────────┘└───────────────────────┘└──────────────────────┘└─┘└──────────────────────┘
-[h/l]col [j/k]card [↵]actions [H/>]move [L]logs [/]filter [Ctrl+O]shell [n]new [q]quit
+[h/l]col [j/k]card [↵]detail [a]actions [H/>]move [L]logs [/]filter [Ctrl+O]shell [n]new [q]quit

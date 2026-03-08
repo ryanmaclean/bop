@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 
 use crate::icons::{cmd_icons_install, cmd_icons_uninstall, ICONS_LABEL};
+use crate::pool;
 
 pub const FACTORY_LABELS: [(&str, &str); 2] = [
     ("sh.bop.dispatcher", "dispatcher"),
@@ -734,4 +735,39 @@ pub fn factory_status_one(label: &str, name: &str) {
         (false, _) => "□ not installed",
     };
     println!("  {} {}: {}", name, label, status_str);
+}
+
+// ── factory pool (QEMU prewarm) ──────────────────────────────────────────────
+
+pub fn cmd_factory_pool_size(cards_root: &Path, size: usize) -> anyhow::Result<()> {
+    pool::cmd_pool_set_size(cards_root, size)
+}
+
+pub fn cmd_factory_pool_status(cards_root: &Path) -> anyhow::Result<()> {
+    pool::cmd_pool_status(cards_root)
+}
+
+pub fn cmd_factory_pool_stop(cards_root: &Path) -> anyhow::Result<()> {
+    pool::cmd_pool_stop(cards_root)
+}
+
+pub fn cmd_factory_pool_monitor(cards_root: &Path) -> anyhow::Result<()> {
+    pool::cmd_pool_monitor(cards_root)
+}
+
+pub fn cmd_factory_pool_lease(
+    cards_root: &Path,
+    card_id: &str,
+    timeout_s: u64,
+) -> anyhow::Result<()> {
+    pool::cmd_pool_lease(cards_root, card_id, timeout_s)
+}
+
+pub fn cmd_factory_pool_release(
+    cards_root: &Path,
+    slot: usize,
+    card_id: Option<&str>,
+    exit_code: i32,
+) -> anyhow::Result<()> {
+    pool::cmd_pool_release(cards_root, slot, card_id, exit_code)
 }

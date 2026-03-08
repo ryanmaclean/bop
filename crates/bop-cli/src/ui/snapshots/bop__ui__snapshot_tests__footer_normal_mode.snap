@@ -1,6 +1,6 @@
 ---
 source: crates/bop-cli/src/ui/mod.rs
-assertion_line: 562
+assertion_line: 569
 expression: content
 ---
-[h/l]col [j/k]card [↵]actions [H/>]move [L]logs [/]filter [Ctrl+O]shell [n]new [
+[h/l]col [j/k]card [↵]detail [a]actions [H/>]move [L]logs [/]filter [Ctrl+O]shel

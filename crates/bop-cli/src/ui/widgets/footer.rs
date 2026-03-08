@@ -5,9 +5,9 @@
 /// on a second line (mc-style function key legend).
 ///
 /// Mode-specific legends:
-/// - **Normal**: `[h/l]col [j/k]card [↵]actions [H/>]move [L]logs [/]filter [Ctrl+O]shell [n]new [q]quit`
+/// - **Normal**: `[h/l]col [j/k]card [↵]detail [a]actions [H/>]move [L]logs [/]filter [Ctrl+O]shell [n]new [q]quit`
 /// - **Log tab**: `[j/k]scroll [f]follow [Tab]next [L/Esc]close`
-/// - **Detail**: `[j/k]scroll [F3]logs [p]pause [r]retry [Esc]close`
+/// - **Detail**: `[M/D/R/O/L]tabs [j/k]scroll [G]end [f]follow [Esc/↵]close`
 /// - **LogTail**: `[↑↓]scroll [f]follow [c]clear [Esc]close`
 /// - **Filter**: `Filter: {query}█  [Esc]clear [↵]confirm`
 /// - **ActionPopup**: `[↑↓]select [↵]run [Esc]cancel`
@@ -19,7 +19,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use crate::ui::app::{App, AppTab, Mode};
+use crate::ui::app::{App, AppTab, DetailTab, Mode};
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -39,6 +39,8 @@ fn normal_legend() -> Vec<Span<'static>> {
         Span::styled("[j/k]", Style::default().fg(Color::Cyan)),
         Span::styled("card ", Style::default().fg(Color::DarkGray)),
         Span::styled("[↵]", Style::default().fg(Color::Cyan)),
+        Span::styled("detail ", Style::default().fg(Color::DarkGray)),
+        Span::styled("[a]", Style::default().fg(Color::Cyan)),
         Span::styled("actions ", Style::default().fg(Color::DarkGray)),
         Span::styled("[H/>]", Style::default().fg(Color::Cyan)),
         Span::styled("move ", Style::default().fg(Color::DarkGray)),
@@ -75,19 +77,38 @@ fn log_pane_legend(follow: bool) -> Vec<Span<'static>> {
 }
 
 /// Build keybinding hint spans for Detail mode.
-fn detail_legend() -> Vec<Span<'static>> {
-    vec![
+fn detail_legend(tab: DetailTab, follow: bool) -> Vec<Span<'static>> {
+    let tab_name = match tab {
+        DetailTab::Meta => "meta",
+        DetailTab::Diff => "diff",
+        DetailTab::Replay => "replay",
+        DetailTab::Output => "output",
+        DetailTab::Log => "log",
+    };
+
+    let mut spans = vec![
+        Span::styled("[M/D/R/O/L]", Style::default().fg(Color::Cyan)),
+        Span::styled("tabs ", Style::default().fg(Color::DarkGray)),
+        Span::styled(format!("({tab_name}) "), Style::default().fg(Color::Yellow)),
         Span::styled("[j/k]", Style::default().fg(Color::Cyan)),
         Span::styled("scroll ", Style::default().fg(Color::DarkGray)),
-        Span::styled("[F3]", Style::default().fg(Color::Cyan)),
-        Span::styled("logs ", Style::default().fg(Color::DarkGray)),
-        Span::styled("[p]", Style::default().fg(Color::Cyan)),
-        Span::styled("pause ", Style::default().fg(Color::DarkGray)),
-        Span::styled("[r]", Style::default().fg(Color::Cyan)),
-        Span::styled("retry ", Style::default().fg(Color::DarkGray)),
-        Span::styled("[Esc]", Style::default().fg(Color::Cyan)),
+        Span::styled("[G]", Style::default().fg(Color::Cyan)),
+        Span::styled("end ", Style::default().fg(Color::DarkGray)),
+        Span::styled("[f]", Style::default().fg(Color::Cyan)),
+        Span::styled("follow ", Style::default().fg(Color::DarkGray)),
+        Span::styled("[Esc/↵]", Style::default().fg(Color::Cyan)),
         Span::styled("close", Style::default().fg(Color::DarkGray)),
-    ]
+    ];
+
+    if tab == DetailTab::Log {
+        spans.push(Span::styled("  ", Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(
+            if follow { "FOLLOW" } else { "PAUSED" },
+            Style::default().fg(if follow { Color::Green } else { Color::Yellow }),
+        ));
+    }
+
+    spans
 }
 
 /// Build keybinding hint spans for LogTail mode.
@@ -191,7 +212,7 @@ fn fkey_bar() -> Vec<Span<'static>> {
         Span::styled("F3", Style::default().fg(Color::Black).bg(Color::Cyan)),
         Span::styled("=logs  ", Style::default().fg(Color::DarkGray)),
         Span::styled("F4", Style::default().fg(Color::Black).bg(Color::Cyan)),
-        Span::styled("=inspect  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("=detail  ", Style::default().fg(Color::DarkGray)),
         Span::styled("F5", Style::default().fg(Color::Black).bg(Color::Cyan)),
         Span::styled("=pause  ", Style::default().fg(Color::DarkGray)),
         Span::styled("F8", Style::default().fg(Color::Black).bg(Color::Cyan)),
@@ -224,6 +245,7 @@ pub fn render_footer(frame: &mut Frame, area: Rect, app: &App, terminal_height: 
 
     let mut legend_spans = match &app.tab {
         AppTab::Factory => factory_legend(),
+        AppTab::Detail(_) => detail_legend(app.detail_tab, app.detail_log_follow),
         AppTab::Log(_) => log_pane_legend(app.log_pane_follow),
         AppTab::Kanban => match app.mode {
             Mode::Normal => {
@@ -233,7 +255,7 @@ pub fn render_footer(frame: &mut Frame, area: Rect, app: &App, terminal_height: 
                     normal_legend()
                 }
             }
-            Mode::Detail => detail_legend(),
+            Mode::Detail => detail_legend(app.detail_tab, app.detail_log_follow),
             Mode::LogTail => logtail_legend(),
             Mode::Filter => {
                 let query = app
@@ -294,6 +316,7 @@ mod tests {
         assert!(text.contains("[h/l]"));
         assert!(text.contains("[j/k]"));
         assert!(text.contains("[↵]"));
+        assert!(text.contains("[a]"));
         assert!(text.contains("[H/>]"));
         assert!(text.contains("[L]"));
         assert!(text.contains("[/]"));
@@ -304,13 +327,13 @@ mod tests {
 
     #[test]
     fn detail_legend_contains_all_keys() {
-        let spans = detail_legend();
+        let spans = detail_legend(DetailTab::Meta, true);
         let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("[M/D/R/O/L]"));
         assert!(text.contains("[j/k]"));
-        assert!(text.contains("[F3]"));
-        assert!(text.contains("[p]"));
-        assert!(text.contains("[r]"));
-        assert!(text.contains("[Esc]"));
+        assert!(text.contains("[G]"));
+        assert!(text.contains("[f]"));
+        assert!(text.contains("[Esc/↵]"));
     }
 
     #[test]
@@ -396,7 +419,7 @@ mod tests {
         let spans = fkey_bar();
         let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("=logs"));
-        assert!(text.contains("=inspect"));
+        assert!(text.contains("=detail"));
         assert!(text.contains("=pause"));
         assert!(text.contains("=kill"));
         assert!(text.contains("=quit"));

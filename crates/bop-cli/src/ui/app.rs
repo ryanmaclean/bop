@@ -169,7 +169,7 @@ pub struct App {
     pub filter_state: Option<FilterState>,
     /// Current interaction mode.
     pub mode: Mode,
-    /// Active body tab (`Kanban`, `Factory`, or `Log(card_id)`).
+    /// Active body tab (`Kanban`, `Factory`, `Detail(card_id)`, or `Log(card_id)`).
     pub tab: AppTab,
     /// Factory services panel state.
     pub factory_tab: FactoryTabState,
@@ -282,6 +282,8 @@ impl App {
             tick_count: 0,
             prev_done_count: done_count,
             detail_scroll: 0,
+            detail_tab: DetailTab::Meta,
+            detail_log_follow: true,
             action_list_state: ListState::default(),
             log_scroll: 0,
             log_follow: false,
@@ -351,12 +353,32 @@ impl App {
         col.cards.get(idx)
     }
 
+    /// Return the card ID when the detail panel is active.
+    pub fn detail_card_id(&self) -> Option<&str> {
+        match &self.tab {
+            AppTab::Detail(card_id) => Some(card_id.as_str()),
+            _ => None,
+        }
+    }
+
     /// Return a card by ID from any column.
     pub fn card_by_id(&self, card_id: &str) -> Option<&CardView> {
         self.columns
             .iter()
             .flat_map(|column| column.cards.iter())
             .find(|card| card.id == card_id)
+    }
+
+    /// Focus and select a card by ID, returning true if found.
+    pub fn select_card_by_id(&mut self, card_id: &str) -> bool {
+        for (col_idx, column) in self.columns.iter_mut().enumerate() {
+            if let Some(row_idx) = column.cards.iter().position(|card| card.id == card_id) {
+                self.col_focus = col_idx;
+                column.list_state.select(Some(row_idx));
+                return true;
+            }
+        }
+        false
     }
 
     /// Total card count across all columns.
@@ -379,6 +401,33 @@ impl App {
             }
             self.action_list_state = state;
             self.mode = Mode::ActionPopup;
+        }
+    }
+
+    /// Open detail panel for the currently selected card.
+    pub fn open_detail_for_selected(&mut self) {
+        let Some(card) = self.selected_card() else {
+            return;
+        };
+        self.open_detail_for_card(card.id.clone());
+    }
+
+    /// Open detail panel for a specific card.
+    pub fn open_detail_for_card(&mut self, card_id: String) {
+        self.tab = AppTab::Detail(card_id);
+        self.mode = Mode::Detail;
+        self.detail_tab = DetailTab::Meta;
+        self.detail_scroll = 0;
+        self.detail_log_follow = true;
+    }
+
+    /// Close detail panel and restore kanban selection on the same card.
+    pub fn close_detail_panel(&mut self) {
+        let card_id = self.detail_card_id().map(str::to_owned);
+        self.tab = AppTab::Kanban;
+        self.mode = Mode::Normal;
+        if let Some(card_id) = card_id {
+            let _ = self.select_card_by_id(&card_id);
         }
     }
 
@@ -823,6 +872,11 @@ impl App {
             if let Some(idx) = self.columns.iter().position(|c| !c.collapsed) {
                 self.col_focus = idx;
             }
+        }
+
+        // Keep selection anchored to the detail card while panel is open.
+        if let Some(card_id) = self.detail_card_id().map(str::to_owned) {
+            let _ = self.select_card_by_id(&card_id);
         }
 
         // Detect new completions for the event ticker.

@@ -3,6 +3,7 @@ use bop_core::VcsEngine as CoreVcsEngine;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 
 #[allow(dead_code)]
@@ -28,7 +29,9 @@ mod merge_gate;
 mod paths;
 mod poker;
 mod policy;
+mod pool;
 mod power;
+mod project;
 mod providers;
 mod quicklook;
 mod reaper;
@@ -40,13 +43,19 @@ mod termcaps;
 mod ui;
 mod util;
 mod watch;
+mod webhook;
 mod workspace;
 
 #[derive(Parser, Debug)]
 #[command(name = "bop")]
 struct Cli {
-    #[arg(long, default_value = ".cards")]
-    cards_dir: String,
+    /// Project root path or registered alias (sets cards root to <project>/.cards).
+    #[arg(short = 'p', long, global = true)]
+    project: Option<String>,
+
+    /// Legacy explicit cards directory override (hidden; kept for compatibility/tests).
+    #[arg(long, hide = true, global = true)]
+    cards_dir: Option<String>,
 
     #[command(subcommand)]
     cmd: Command,
@@ -237,6 +246,11 @@ enum Command {
         #[command(subcommand)]
         action: IconsAction,
     },
+    /// Send test payloads to configured outbound webhooks.
+    Webhook {
+        #[command(subcommand)]
+        action: WebhookAction,
+    },
     /// Promote cards from drafts/ to pending/, making them eligible for dispatch.
     Promote {
         /// Card ID, or "all" to promote every draft.
@@ -371,7 +385,16 @@ enum Command {
         card: Option<String>,
     },
     /// Unified live dashboard for running + done cards with log tail.
-    Watch,
+    Watch {
+        /// Aggregate running/done cards across all registered projects.
+        #[arg(long)]
+        all: bool,
+    },
+    /// Manage the multi-project registry (~/.bop/projects.json).
+    Project {
+        #[command(subcommand)]
+        action: ProjectAction,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -406,6 +429,26 @@ enum FactoryAction {
     Stop,
     /// Show whether dispatcher + merge-gate services are loaded/running.
     Status,
+    /// Manage a pre-warmed QEMU VM pool for low-latency dispatch.
+    Pool {
+        /// Start or resize pool to this number of idle VMs.
+        #[arg(long)]
+        size: Option<usize>,
+        /// Optional action: status, stop, monitor, lease, release.
+        action: Option<String>,
+        /// Card id for internal lease/release actions.
+        #[arg(long)]
+        card_id: Option<String>,
+        /// Lease timeout (seconds) for internal lease action.
+        #[arg(long, default_value_t = 300)]
+        timeout_s: u64,
+        /// Slot id for internal release action.
+        #[arg(long)]
+        slot: Option<usize>,
+        /// Exit code metadata for internal release action.
+        #[arg(long, default_value_t = 0)]
+        exit_code: i32,
+    },
     /// Unload and remove the launchd plist files.
     Uninstall,
 }
@@ -420,6 +463,12 @@ enum IconsAction {
     Install,
     /// Unload and remove the icon-watcher launchd agent.
     Uninstall,
+}
+
+#[derive(Subcommand, Debug)]
+enum WebhookAction {
+    /// Send a test payload to every configured webhook endpoint.
+    Test,
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, ValueEnum, PartialEq, Eq)]
@@ -475,11 +524,81 @@ enum MetaAction {
     },
 }
 
-fn resolve_config_path() -> PathBuf {
+#[derive(Subcommand, Debug)]
+enum ProjectAction {
+    /// Register a project root for alias-based selection.
+    Add {
+        /// Path to the project root (contains .cards/).
+        path: String,
+        /// Optional short alias (e.g. "b", "e", "z").
+        #[arg(long)]
+        alias: Option<String>,
+    },
+    /// Show all registered projects.
+    List,
+    /// Unregister a project by name, alias, or path.
+    Remove {
+        /// Project name (or alias/path) to remove.
+        target: String,
+    },
+}
+
+fn resolve_config_path(project_root: &Path) -> PathBuf {
     if let Ok(p) = std::env::var("BOP_CONFIG") {
         return PathBuf::from(p);
     }
-    bop_core::config::project_config_path()
+    project_root.join(".bop").join("config.json")
+}
+
+fn project_root_from_cards_root(cards_root: &Path) -> PathBuf {
+    if cards_root
+        .file_name()
+        .is_some_and(|name| name == std::ffi::OsStr::new(".cards"))
+    {
+        return cards_root
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+    }
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+fn load_config_for_cards_root(cards_root: &Path) -> anyhow::Result<bop_core::Config> {
+    use bop_core::config::{merge_configs, read_config_file, Config};
+
+    let global = match bop_core::config::global_config_path() {
+        Some(path) if path.exists() => read_config_file(&path)
+            .with_context(|| format!("global config error: {}", path.display()))?,
+        _ => Config::default(),
+    };
+
+    let project_path = project_root_from_cards_root(cards_root)
+        .join(".bop")
+        .join("config.json");
+    let project = if project_path.exists() {
+        read_config_file(&project_path)
+            .with_context(|| format!("project config error: {}", project_path.display()))?
+    } else {
+        Config::default()
+    };
+
+    Ok(merge_configs(global, project))
+}
+
+fn resolve_cards_root(
+    project_arg: Option<&str>,
+    cards_dir_arg: Option<&str>,
+) -> anyhow::Result<PathBuf> {
+    if let Some(cards_dir) = cards_dir_arg {
+        return Ok(PathBuf::from(cards_dir));
+    }
+
+    if let Some(project) = project_arg {
+        let project_root = project::find_project(project)?;
+        return Ok(project_root.join(".cards"));
+    }
+
+    Ok(PathBuf::from(".cards"))
 }
 
 #[cfg(target_os = "macos")]
@@ -503,19 +622,39 @@ fn install_hooks_linux(cards_root: &std::path::Path, uninstall: bool) -> anyhow:
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let root = PathBuf::from(&cli.cards_dir);
+    let Cli {
+        project: project_arg,
+        cards_dir: cards_dir_arg,
+        cmd,
+    } = cli;
+
+    let cmd = match cmd {
+        Command::Project { action } => {
+            return match action {
+                ProjectAction::Add { path, alias } => {
+                    project::cmd_project_add(&path, alias.as_deref())
+                }
+                ProjectAction::List => project::cmd_project_list(),
+                ProjectAction::Remove { target } => project::cmd_project_remove(&target),
+            };
+        }
+        other => other,
+    };
+
+    let root = resolve_cards_root(project_arg.as_deref(), cards_dir_arg.as_deref())?;
+    let project_root = project_root_from_cards_root(&root);
 
     // Load merged global+project config (missing files silently skipped)
-    let cfg = bop_core::load_config().unwrap_or_default();
+    let cfg = load_config_for_cards_root(&root).unwrap_or_default();
 
-    match cli.cmd {
+    match cmd {
         Command::Init => {
             paths::ensure_cards_layout(&root)?;
             cards::seed_default_templates(&root)?;
             providers::seed_providers(&root)?;
 
             // Create config with sensible defaults if it doesn't exist
-            let config_path = resolve_config_path();
+            let config_path = resolve_config_path(&project_root);
             if !config_path.exists() {
                 let defaults = bop_core::Config {
                     default_provider_chain: Some(vec!["mock".to_string()]),
@@ -524,6 +663,7 @@ async fn main() -> anyhow::Result<()> {
                     log_retention_days: Some(30),
                     default_template: Some("implement".to_string()),
                     dispatch: None,
+                    webhooks: None,
                 };
                 bop_core::config::write_config_file(&config_path, &defaults).with_context(
                     || {
@@ -776,6 +916,39 @@ async fn main() -> anyhow::Result<()> {
             FactoryAction::Start => factory::cmd_factory_start(),
             FactoryAction::Stop => factory::cmd_factory_stop(),
             FactoryAction::Status => factory::cmd_factory_status(),
+            FactoryAction::Pool {
+                size,
+                action,
+                card_id,
+                timeout_s,
+                slot,
+                exit_code,
+            } => match action.as_deref() {
+                None => {
+                    if let Some(pool_size) = size {
+                        factory::cmd_factory_pool_size(&root, pool_size)
+                    } else {
+                        factory::cmd_factory_pool_status(&root)
+                    }
+                }
+                Some("status") => factory::cmd_factory_pool_status(&root),
+                Some("stop") => factory::cmd_factory_pool_stop(&root),
+                Some("monitor") => factory::cmd_factory_pool_monitor(&root),
+                Some("lease") => {
+                    let cid = card_id
+                        .as_deref()
+                        .context("--card-id is required for `bop factory pool lease`")?;
+                    factory::cmd_factory_pool_lease(&root, cid, timeout_s)
+                }
+                Some("release") => {
+                    let slot = slot.context("--slot is required for `bop factory pool release`")?;
+                    factory::cmd_factory_pool_release(&root, slot, card_id.as_deref(), exit_code)
+                }
+                Some(other) => anyhow::bail!(
+                    "unknown pool action '{}'; expected one of: status, stop, lease, release, monitor",
+                    other
+                ),
+            },
             FactoryAction::Uninstall => factory::cmd_factory_uninstall(),
         },
         Command::Icons { action } => match action {
@@ -783,6 +956,9 @@ async fn main() -> anyhow::Result<()> {
             IconsAction::Watch => icons::cmd_icons_watch(&root),
             IconsAction::Install => icons::cmd_icons_install(&root),
             IconsAction::Uninstall => icons::cmd_icons_uninstall(),
+        },
+        Command::Webhook { action } => match action {
+            WebhookAction::Test => webhook::cmd_webhook_test(&root).await,
         },
         Command::Promote { id } => cards::cmd_promote(&root, &id),
         Command::Import {
@@ -890,6 +1066,7 @@ async fn main() -> anyhow::Result<()> {
         } => providers::cmd_providers(watch, json, interval).await,
         Command::Bridge { sub } => bridge::cmd_bridge(sub).await,
         Command::Stats { by, json, card } => stats::cmd_stats(&root, by, json, card.as_deref()),
-        Command::Watch => watch::cmd_watch(&root).await,
+        Command::Watch { all } => watch::cmd_watch(&root, all).await,
+        Command::Project { .. } => unreachable!("project command handled before cards root resolution"),
     }
 }

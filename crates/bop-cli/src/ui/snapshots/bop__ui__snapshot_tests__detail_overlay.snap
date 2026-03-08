@@ -1,25 +1,25 @@
 ---
 source: crates/bop-cli/src/ui/mod.rs
-assertion_line: 470
+assertion_line: 505
 expression: content
 ---
-                                        ┌ build-ui — detail ───────────────────┐
-                                        │Card: build-ui                        │
-                                        │State: running                        │
-                                        │Stage: implement                      │
-                                        │Provider: claude                      │
-                                        │Elapsed: 5m00s                        │
-                                        │Priority: Urgent                      │
-                                        │                                      │
-                                        │Progress                              │
-                                        │██████████████████████░░░░░░░░  75%   │
-                                        │                                      │
-                                        │                                      │
-                                        │                                      │
-                                        │                                      │
-                                        │                                      │
-                                        │                                      │
-                                        │                                      │
-                                        │                                      │
-                                        │                                      │
-                                        └──────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│build-ui  •  running  •  claude  •  5m00s  •  -                               │
+│[M]eta  [D]iff  [R]eplay  [O]utput  [L]og   Esc/Enter close                   │
+│glyph: -   token: ♠A   provider: claude   cost: -                             │
+│tokens: -   retries: -   stage: implement                                     │
+│worktree: -                                                                   │
+│merge_commit: -                                                               │
+│ Meta ────────────────────────────────────────────────────────────────────────│
+│meta not yet available                                                        │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘

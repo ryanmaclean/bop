@@ -1,4 +1,5 @@
 use anyhow::Context;
+use bop_core::config::WebhookEvent;
 use bop_core::{append_event, write_meta, Event, Meta, RunRecord};
 use chrono::Utc;
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
@@ -15,6 +16,30 @@ use super::VcsEngine;
 use crate::{
     cards, inspect, lock, memory, paths, power, providers, quicklook, reaper, util, workspace,
 };
+
+#[derive(Clone)]
+struct Dispatcher {
+    webhook_client: crate::webhook::WebhookClient,
+}
+
+impl Dispatcher {
+    fn from_cards_dir(cards_dir: &Path) -> anyhow::Result<Self> {
+        Ok(Self {
+            webhook_client: crate::webhook::WebhookClient::from_cards_dir(cards_dir)?,
+        })
+    }
+}
+
+fn emit_webhook_transition(
+    dispatcher: &Dispatcher,
+    event: WebhookEvent,
+    meta: Option<&Meta>,
+    card_dir: &Path,
+) {
+    dispatcher
+        .webhook_client
+        .emit_transition(event, meta, card_dir);
+}
 
 /// Pauses all running cards before system sleep.
 /// This stub will be implemented with actual pause logic in a future subtask.
@@ -126,6 +151,7 @@ pub async fn run_dispatcher(
     validation_fail_threshold: f64,
 ) -> anyhow::Result<()> {
     paths::ensure_cards_layout(cards_dir)?;
+    let dispatcher = Dispatcher::from_cards_dir(cards_dir)?;
     providers::seed_providers(cards_dir)?;
     providers::ensure_mock_provider_command(cards_dir, global_adapter)?;
     let dispatch_provider_cfg = providers::load_dispatch_provider_config(cards_dir)?;
@@ -380,6 +406,12 @@ pub async fn run_dispatcher(
                         record(m, "pending", "running", Some(&running_path));
                     }
                     quicklook::render_card_thumbnail(&running_path);
+                    emit_webhook_transition(
+                        &dispatcher,
+                        WebhookEvent::Running,
+                        meta.as_ref(),
+                        &running_path,
+                    );
 
                     let card_id = meta
                         .as_ref()
@@ -423,6 +455,12 @@ pub async fn run_dispatcher(
                                 record(m, "running", "failed", Some(&failed_path));
                             }
                             quicklook::render_card_thumbnail(&failed_path);
+                            emit_webhook_transition(
+                                &dispatcher,
+                                WebhookEvent::Failed,
+                                meta.as_ref(),
+                                &failed_path,
+                            );
                             continue;
                         }
                     };
@@ -667,6 +705,16 @@ pub async fn run_dispatcher(
                     }
                     quicklook::render_card_thumbnail(&target);
                     quicklook::compress_card(&target);
+                    let webhook_event = if to_state == "done" {
+                        Some(WebhookEvent::Done)
+                    } else if to_state == "failed" {
+                        Some(WebhookEvent::Failed)
+                    } else {
+                        None
+                    };
+                    if let Some(event) = webhook_event {
+                        emit_webhook_transition(&dispatcher, event, meta.as_ref(), &target);
+                    }
                     if exit_code == 0 && !validation_triggered_fail {
                         maybe_advance_stage(cards_dir, &target);
                         cards::spawn_child_cards(cards_dir, &target);

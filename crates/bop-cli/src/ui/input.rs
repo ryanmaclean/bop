@@ -13,7 +13,7 @@ use std::fs;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::app::{find_card_dir, App, AppTab, Mode};
+use super::app::{find_card_dir, App, AppTab, DetailTab, Mode};
 use crate::cards;
 use crate::ui::widgets::action::{actions_for_state, ActionKind};
 use crate::ui::widgets::newcard::create_card;
@@ -32,6 +32,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
     match &app.tab {
         AppTab::Factory => {
             handle_factory(app, key);
+            return;
+        }
+        AppTab::Detail(_) => {
+            handle_detail(app, key);
             return;
         }
         AppTab::Log(_) => {
@@ -63,6 +67,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
 /// - `l` — move focus to next column (wrapping, skipping collapsed)
 /// - `j` — select next card in current column
 /// - `k` — select previous card in current column
+/// - `Enter` — open full-screen detail panel for selected card
 fn handle_normal(app: &mut App, key: KeyEvent) {
     // Clear any transient status message on new keypress.
     app.status_message = None;
@@ -81,16 +86,16 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
             move_card_selection(app, Direction::Up);
         }
         KeyCode::Char('d') => {
-            // Only enter Detail mode if a card is selected.
-            if app.selected_card().is_some() {
-                app.detail_scroll = 0;
-                app.mode = Mode::Detail;
-            }
+            // Back-compat alias for opening detail panel.
+            app.open_detail_for_selected();
         }
         KeyCode::Char('/') => {
             app.enter_filter_mode();
         }
         KeyCode::Enter => {
+            app.open_detail_for_selected();
+        }
+        KeyCode::Char('a') => {
             // Open action popup for the selected card.
             app.open_action_popup();
         }
@@ -270,22 +275,63 @@ fn handle_filter(app: &mut App, key: KeyEvent) {
 /// Navigation:
 /// - `j` / `Down` — scroll detail content down one line
 /// - `k` / `Up` — scroll detail content up one line
-/// - `Esc` — return to Normal mode
+/// - `M` / `D` / `R` / `O` / `L` — switch detail tab
+/// - `G` — jump to bottom of current tab
+/// - `f` — toggle follow mode (Log tab only)
+/// - `Esc` / `Enter` — return to kanban
 fn handle_detail(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('j') | KeyCode::Down => {
             app.detail_scroll = app.detail_scroll.saturating_add(1);
+            if app.detail_tab == DetailTab::Log {
+                app.detail_log_follow = false;
+            }
         }
         KeyCode::Char('k') | KeyCode::Up => {
             app.detail_scroll = app.detail_scroll.saturating_sub(1);
+            if app.detail_tab == DetailTab::Log {
+                app.detail_log_follow = false;
+            }
         }
-        KeyCode::Esc => {
-            app.mode = Mode::Normal;
+        KeyCode::Char('G') => {
+            app.detail_scroll = usize::MAX;
+            if app.detail_tab == DetailTab::Log {
+                app.detail_log_follow = false;
+            }
         }
-        _ => {
-            // Other Detail-mode keys (F3, p, r) will trigger actions
-            // in subsequent subtasks.
+        KeyCode::Char('f') => {
+            if app.detail_tab == DetailTab::Log {
+                app.detail_log_follow = !app.detail_log_follow;
+                if app.detail_log_follow {
+                    app.detail_scroll = usize::MAX;
+                }
+            }
         }
+        KeyCode::Char('m') | KeyCode::Char('M') => {
+            app.detail_tab = DetailTab::Meta;
+            app.detail_scroll = 0;
+        }
+        KeyCode::Char('d') | KeyCode::Char('D') => {
+            app.detail_tab = DetailTab::Diff;
+            app.detail_scroll = 0;
+        }
+        KeyCode::Char('r') | KeyCode::Char('R') => {
+            app.detail_tab = DetailTab::Replay;
+            app.detail_scroll = 0;
+        }
+        KeyCode::Char('o') | KeyCode::Char('O') => {
+            app.detail_tab = DetailTab::Output;
+            app.detail_scroll = 0;
+        }
+        KeyCode::Char('l') | KeyCode::Char('L') => {
+            app.detail_tab = DetailTab::Log;
+            app.detail_scroll = 0;
+            app.detail_log_follow = true;
+        }
+        KeyCode::Esc | KeyCode::Enter => {
+            app.close_detail_panel();
+        }
+        _ => {}
     }
 }
 
@@ -710,7 +756,7 @@ fn dispatch_action_retry(app: &App, card_id: &str) {
 mod tests {
     use super::*;
     use crate::render::CardView;
-    use crate::ui::app::{AppTab, KanbanColumn};
+    use crate::ui::app::{AppTab, DetailTab, KanbanColumn};
     use crate::ui::factory_tab::FactoryTabState;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use ratatui::widgets::ListState;
@@ -768,6 +814,8 @@ mod tests {
             tick_count: 0,
             prev_done_count: 0,
             detail_scroll: 0,
+            detail_tab: DetailTab::Meta,
+            detail_log_follow: true,
             action_list_state: ListState::default(),
             log_scroll: 0,
             log_follow: false,
@@ -1028,7 +1076,24 @@ mod tests {
 
         handle_key(&mut app, key(KeyCode::Char('d')));
         assert_eq!(app.mode, Mode::Detail);
+        assert_eq!(app.tab, AppTab::Detail("a".to_string()));
+        assert_eq!(app.detail_tab, DetailTab::Meta);
         assert_eq!(app.detail_scroll, 0);
+    }
+
+    #[test]
+    fn enter_enters_detail_mode_when_card_selected() {
+        let columns = vec![KanbanColumn::new(
+            "pending",
+            vec![test_card("a", "pending")],
+            None,
+        )];
+        let mut app = test_app(columns);
+
+        handle_key(&mut app, key(KeyCode::Enter));
+        assert_eq!(app.mode, Mode::Detail);
+        assert_eq!(app.tab, AppTab::Detail("a".to_string()));
+        assert_eq!(app.detail_tab, DetailTab::Meta);
     }
 
     #[test]
@@ -1049,10 +1114,11 @@ mod tests {
             None,
         )];
         let mut app = test_app(columns);
-        app.mode = Mode::Detail;
+        app.open_detail_for_card("a".to_string());
 
         handle_key(&mut app, key(KeyCode::Esc));
         assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.tab, AppTab::Kanban);
     }
 
     #[test]
@@ -1063,7 +1129,7 @@ mod tests {
             None,
         )];
         let mut app = test_app(columns);
-        app.mode = Mode::Detail;
+        app.open_detail_for_card("a".to_string());
         app.detail_scroll = 0;
 
         handle_key(&mut app, key(KeyCode::Char('j')));
@@ -1081,7 +1147,7 @@ mod tests {
             None,
         )];
         let mut app = test_app(columns);
-        app.mode = Mode::Detail;
+        app.open_detail_for_card("a".to_string());
         app.detail_scroll = 5;
 
         handle_key(&mut app, key(KeyCode::Char('k')));
@@ -1096,7 +1162,7 @@ mod tests {
             None,
         )];
         let mut app = test_app(columns);
-        app.mode = Mode::Detail;
+        app.open_detail_for_card("a".to_string());
         app.detail_scroll = 0;
 
         handle_key(&mut app, key(KeyCode::Char('k')));
@@ -1110,11 +1176,60 @@ mod tests {
             KanbanColumn::new("running", vec![test_card("b", "running")], None),
         ];
         let mut app = test_app(columns);
-        app.mode = Mode::Detail;
+        app.open_detail_for_card("a".to_string());
 
         handle_key(&mut app, key(KeyCode::Char('l')));
-        // Should NOT have moved column focus — 'l' is not bound in Detail mode.
+        // Should NOT have moved column focus.
         assert_eq!(app.col_focus, 0);
+        assert_eq!(app.detail_tab, DetailTab::Log);
+    }
+
+    #[test]
+    fn detail_tab_keys_switch_tabs() {
+        let columns = vec![KanbanColumn::new(
+            "pending",
+            vec![test_card("a", "pending")],
+            None,
+        )];
+        let mut app = test_app(columns);
+        app.open_detail_for_card("a".to_string());
+
+        handle_key(&mut app, key(KeyCode::Char('D')));
+        assert_eq!(app.detail_tab, DetailTab::Diff);
+
+        handle_key(&mut app, key(KeyCode::Char('R')));
+        assert_eq!(app.detail_tab, DetailTab::Replay);
+
+        handle_key(&mut app, key(KeyCode::Char('O')));
+        assert_eq!(app.detail_tab, DetailTab::Output);
+
+        handle_key(&mut app, key(KeyCode::Char('M')));
+        assert_eq!(app.detail_tab, DetailTab::Meta);
+    }
+
+    #[test]
+    fn detail_log_follow_toggle() {
+        let columns = vec![KanbanColumn::new(
+            "pending",
+            vec![test_card("a", "pending")],
+            None,
+        )];
+        let mut app = test_app(columns);
+        app.open_detail_for_card("a".to_string());
+
+        handle_key(&mut app, key(KeyCode::Char('L')));
+        assert_eq!(app.detail_tab, DetailTab::Log);
+        assert!(app.detail_log_follow);
+
+        handle_key(&mut app, key(KeyCode::Char('f')));
+        assert!(!app.detail_log_follow);
+
+        handle_key(&mut app, key(KeyCode::Char('f')));
+        assert!(app.detail_log_follow);
+
+        handle_key(&mut app, key(KeyCode::Char('G')));
+        assert_eq!(app.detail_scroll, usize::MAX);
+        assert!(!app.detail_log_follow);
     }
 
     #[test]
