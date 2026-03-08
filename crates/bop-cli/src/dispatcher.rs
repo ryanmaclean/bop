@@ -994,8 +994,15 @@ pub async fn run_card(
         TokioCommand::new(adapter)
     };
 
-    // Per-workspace target dir eliminates cargo lock contention across parallel agents
-    let target_dir = workdir.join("target");
+    // Per-job target dir in /tmp — outside the workspace so it doesn't accumulate
+    // inside worktrees. Deleted immediately after the adapter exits regardless of
+    // outcome. /tmp is cleaned by the OS on reboot as a backstop.
+    let run_id = meta
+        .as_ref()
+        .map(|m| m.id.as_str())
+        .or_else(|| card_dir.file_name().and_then(|n| n.to_str()))
+        .unwrap_or("unknown");
+    let target_dir = std::env::temp_dir().join(format!("bop-target-{}", run_id));
 
     let mut child = cmd
         .arg(&workdir)
@@ -1072,6 +1079,10 @@ pub async fn run_card(
     } else {
         status.and_then(|s| s.code()).unwrap_or(1)
     };
+
+    // Adapter has exited — delete the ephemeral target dir immediately.
+    // Nothing else needs it: build artifacts are only useful during the run.
+    let _ = fs::remove_dir_all(&target_dir);
 
     if let Err(err) = memory::merge_memory_output(cards_dir, &memory_namespace, &memory_out_file) {
         let _ = util::append_log_line(

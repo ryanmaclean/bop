@@ -183,7 +183,11 @@ pub async fn run_merge_gate(
                             .arg("-lc")
                             .arg(criterion)
                             .current_dir(&workdir)
-                            .env("CARGO_TARGET_DIR", workdir.join("target"))
+                            .env(
+                                "CARGO_TARGET_DIR",
+                                std::env::temp_dir()
+                                    .join(format!("bop-target-ac-{}", meta.id)),
+                            )
                             .output()
                             .await;
 
@@ -235,6 +239,11 @@ pub async fn run_merge_gate(
                         );
                         continue;
                     }
+
+                    // Clean up AC build artifacts — they lived in /tmp, not the workspace.
+                    let _ = fs::remove_dir_all(
+                        std::env::temp_dir().join(format!("bop-target-ac-{}", meta.id)),
+                    );
 
                     if let Err(err) = policy::policy_check_card(cards_dir, &card_dir, &meta.id) {
                         meta.failure_reason = Some("policy_violation".to_string());
