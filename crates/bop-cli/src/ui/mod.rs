@@ -160,6 +160,18 @@ fn draw(
             AppTab::Log(card_id) => {
                 render_log_pane(frame, zones[1], app, card_id);
             }
+            AppTab::Detail(card_id) => {
+                let card = app
+                    .columns
+                    .iter()
+                    .flat_map(|c| c.cards.iter())
+                    .find(|c| &c.id == card_id)
+                    .cloned();
+                if let Some(card) = card {
+                    let card_dir = paths::find_card(&app.cards_root, &card.id);
+                    render_detail(frame, zones[1], &card, app.detail_scroll, card_dir.as_deref());
+                }
+            }
             AppTab::Kanban => {
                 render_kanban(frame, zones[1], app);
 
@@ -245,6 +257,7 @@ fn render_minimal_status(frame: &mut ratatui::Frame, area: ratatui::layout::Rect
     let mode_str = match &app.tab {
         AppTab::Factory => "factory",
         AppTab::Log(_) => "log",
+        AppTab::Detail(_) => "detail",
         AppTab::Kanban => match app.mode {
             Mode::Normal => "normal",
             Mode::Filter => "filter",
@@ -363,6 +376,8 @@ mod snapshot_tests {
             tick_count: 0,
             prev_done_count: 0,
             detail_scroll: 0,
+            detail_tab: crate::ui::app::DetailTab::Meta,
+            detail_log_follow: false,
             action_list_state: ratatui::widgets::ListState::default(),
             log_scroll: 0,
             log_follow: false,

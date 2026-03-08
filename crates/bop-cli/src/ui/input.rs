@@ -38,6 +38,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             handle_log_tab(app, key);
             return;
         }
+        AppTab::Detail(_) => {
+            handle_detail(app, key);
+            return;
+        }
         AppTab::Kanban => {}
     }
 
@@ -710,7 +714,7 @@ fn dispatch_action_retry(app: &App, card_id: &str) {
 mod tests {
     use super::*;
     use crate::render::CardView;
-    use crate::ui::app::{AppTab, KanbanColumn};
+    use crate::ui::app::{AppTab, DetailTab, KanbanColumn};
     use crate::ui::factory_tab::FactoryTabState;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use ratatui::widgets::ListState;
@@ -768,6 +772,8 @@ mod tests {
             tick_count: 0,
             prev_done_count: 0,
             detail_scroll: 0,
+            detail_tab: DetailTab::Meta,
+            detail_log_follow: false,
             action_list_state: ListState::default(),
             log_scroll: 0,
             log_follow: false,

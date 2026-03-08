@@ -707,8 +707,20 @@ pub fn maybe_advance_stage(cards_dir: &Path, done_card_dir: &Path) {
         None => return,
     };
 
-    // If this is the final stage, nothing to advance
+    // If this is the final stage, emit a pipeline success message and return
     if current_idx + 1 >= meta.stage_chain.len() {
+        let pipeline = meta.stage_chain.join(" → ");
+        let msg = format!(
+            "[stage-advance] {} — pipeline complete ({}) ✓",
+            meta.id, pipeline
+        );
+        eprintln!("{msg}");
+        // Write success marker so tests and Quick Look can surface it
+        let success_path = done_card_dir.join("output").join("pipeline_success.md");
+        let _ = fs::write(
+            &success_path,
+            format!("# Pipeline Complete\n\n{}\n\nAll {} stage(s) passed.\n", msg, meta.stage_chain.len()),
+        );
         return;
     }
 
@@ -749,7 +761,7 @@ pub fn maybe_advance_stage(cards_dir: &Path, done_card_dir: &Path) {
         created: Utc::now(),
         stage: next_stage.clone(),
         workflow_mode: meta.workflow_mode.clone(),
-        step_index: Some((current_idx + 2) as u32),
+        step_index: meta.workflow_mode.as_ref().map(|_| (current_idx + 2) as u32),
         glyph: meta.glyph.clone(),
         token: meta.token.clone(),
         title: meta.title.clone(),
@@ -1339,6 +1351,105 @@ pub fn load_feed_config(card_dir: &Path) -> bop_core::realtime::FeedConfig {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    // ── maybe_advance_stage ───────────────────────────────────────────────────
+
+    fn make_card(dir: &Path, id: &str, stage: &str, chain: &[&str]) {
+        fs::create_dir_all(dir.join("logs")).unwrap();
+        fs::create_dir_all(dir.join("output")).unwrap();
+        let mut meta = Meta::default();
+        meta.id = id.to_string();
+        meta.stage = stage.to_string();
+        meta.stage_chain = chain.iter().map(|s| s.to_string()).collect();
+        // workflow_mode required when stage_chain is non-empty (step_index will be set)
+        if !chain.is_empty() {
+            meta.workflow_mode = Some("default-feature".to_string());
+        }
+        write_meta(dir, &meta).unwrap();
+    }
+
+    #[test]
+    fn maybe_advance_stage_noop_for_empty_chain() {
+        let td = tempdir().unwrap();
+        let cards = td.path();
+        let done_dir = cards.join("done");
+        let card_dir = done_dir.join("solo.bop");
+        make_card(&card_dir, "solo", "implement", &[]);
+
+        maybe_advance_stage(cards, &card_dir);
+
+        // No pending card created
+        assert!(!cards.join("pending").exists() || fs::read_dir(cards.join("pending")).unwrap().count() == 0);
+        // No success file for empty chain
+        assert!(!card_dir.join("output").join("pipeline_success.md").exists());
+    }
+
+    #[test]
+    fn maybe_advance_stage_creates_next_stage_card() {
+        let td = tempdir().unwrap();
+        let cards = td.path();
+        let done_dir = cards.join("done");
+        let card_dir = done_dir.join("myjob.bop");
+        make_card(&card_dir, "myjob", "implement", &["implement", "qa"]);
+
+        maybe_advance_stage(cards, &card_dir);
+
+        // Next stage card should appear in pending/
+        let next = cards.join("pending").join("myjob-qa.bop");
+        assert!(next.exists(), "expected pending/myjob-qa.bop to be created");
+
+        // meta.json should have stage = "qa"
+        let meta_raw = fs::read_to_string(next.join("meta.json")).unwrap();
+        assert!(meta_raw.contains("\"qa\""), "next card should be in qa stage");
+
+        // No pipeline_success.md yet (implement is not the final stage)
+        assert!(!card_dir.join("output").join("pipeline_success.md").exists());
+    }
+
+    #[test]
+    fn maybe_advance_stage_writes_pipeline_success_for_final_stage() {
+        let td = tempdir().unwrap();
+        let cards = td.path();
+        let done_dir = cards.join("done");
+        let card_dir = done_dir.join("myjob-qa.bop");
+        make_card(&card_dir, "myjob-qa", "qa", &["implement", "qa"]);
+
+        maybe_advance_stage(cards, &card_dir);
+
+        // No further card created (qa is the final stage)
+        let further = cards.join("pending");
+        if further.exists() {
+            assert_eq!(fs::read_dir(&further).unwrap().count(), 0, "no further card should be created after final stage");
+        }
+
+        // pipeline_success.md must exist in output/
+        let success = card_dir.join("output").join("pipeline_success.md");
+        assert!(success.exists(), "expected output/pipeline_success.md after final stage");
+        let content = fs::read_to_string(&success).unwrap();
+        assert!(content.contains("Pipeline Complete"), "success file should mention Pipeline Complete");
+        assert!(content.contains("implement → qa"), "success file should list the full pipeline");
+    }
+
+    #[test]
+    fn maybe_advance_stage_skips_existing_next_card() {
+        let td = tempdir().unwrap();
+        let cards = td.path();
+        let done_dir = cards.join("done");
+        let card_dir = done_dir.join("myjob.bop");
+        make_card(&card_dir, "myjob", "implement", &["implement", "qa"]);
+
+        // Pre-create the next card so the function should not overwrite it
+        let next = cards.join("pending").join("myjob-qa.bop");
+        fs::create_dir_all(next.join("logs")).unwrap();
+        fs::create_dir_all(next.join("output")).unwrap();
+        fs::write(next.join("meta.json"), "{\"sentinel\":true}").unwrap();
+
+        maybe_advance_stage(cards, &card_dir);
+
+        // The pre-existing card should be untouched
+        let raw = fs::read_to_string(next.join("meta.json")).unwrap();
+        assert!(raw.contains("sentinel"), "existing next card should not be overwritten");
+    }
 
     // ── short_run_id ──────────────────────────────────────────────────────────
 
