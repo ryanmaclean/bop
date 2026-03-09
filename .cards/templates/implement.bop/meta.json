@@ -8,7 +8,10 @@
   "priority": null,
   "glyph": null,
   "token": null,
-  "stage_chain": ["implement", "qa"],
+  "stage_chain": [
+    "implement",
+    "qa"
+  ],
   "stage_models": {
     "implement": "opus",
     "qa": "sonnet"
@@ -21,7 +24,11 @@
     "implement": 32000,
     "qa": 8000
   },
-  "provider_chain": ["claude"],
+  "provider_chain": [
+    "claude",
+    "codex",
+    "mlx-local"
+  ],
   "acceptance_criteria": [
     "cargo test",
     "cargo clippy -- -D warnings"

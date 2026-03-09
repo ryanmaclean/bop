@@ -10,7 +10,12 @@
   "priority": null,
   "glyph": null,
   "token": null,
-  "stage_chain": ["analyze", "discover", "generate", "qa"],
+  "stage_chain": [
+    "analyze",
+    "discover",
+    "generate",
+    "qa"
+  ],
   "stage_models": {
     "analyze": "sonnet",
     "discover": "sonnet",
@@ -29,7 +34,11 @@
     "generate": 12000,
     "qa": 4000
   },
-  "provider_chain": ["claude", "codex", "ollama-local"],
+  "provider_chain": [
+    "claude",
+    "codex",
+    "mlx-local"
+  ],
   "acceptance_criteria": [],
   "worktree_branch": "job/REPLACE_ID",
   "timeout_seconds": 1800,

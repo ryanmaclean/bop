@@ -8,7 +8,9 @@
   "priority": null,
   "glyph": null,
   "token": null,
-  "stage_chain": ["qa"],
+  "stage_chain": [
+    "qa"
+  ],
   "stage_models": {
     "qa": "sonnet"
   },
@@ -18,7 +20,10 @@
   "stage_budgets": {
     "qa": 8000
   },
-  "provider_chain": ["claude", "codex"],
+  "provider_chain": [
+    "claude",
+    "codex"
+  ],
   "acceptance_criteria": [
     "cargo test",
     "cargo clippy -- -D warnings",

@@ -8,7 +8,10 @@
   "priority": null,
   "glyph": null,
   "token": null,
-  "stage_chain": ["pr-fix", "qa"],
+  "stage_chain": [
+    "pr-fix",
+    "qa"
+  ],
   "stage_models": {
     "pr-fix": "opus",
     "qa": "sonnet"
@@ -21,7 +24,11 @@
     "pr-fix": 32000,
     "qa": 8000
   },
-  "provider_chain": ["claude", "codex", "ollama-local"],
+  "provider_chain": [
+    "claude",
+    "codex",
+    "mlx-local"
+  ],
   "acceptance_criteria": [
     "cargo test",
     "cargo clippy -- -D warnings"
