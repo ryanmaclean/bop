@@ -1,11 +1,11 @@
 {
   "feature": "AC implementation plan progress in Quick Look + CLI",
   "workflow_type": "feature",
-  "workflow_rationale": "Multi-service feature touching bop-core (data model), bop-cli (CLI rendering + TUI), macOS Quick Look (Swift), and dispatch.nu (Nushell). Phases follow service dependency: core model \u2192 plan loader \u2192 CLI rendering \u2192 Quick Look \u2192 dispatch linkage \u2192 output.",
+  "workflow_rationale": "Multi-service feature touching bop-core (data model), bop-cli (CLI rendering + TUI), macOS Quick Look (Swift), and dispatch.nu (Nushell). Phases follow service dependency: core model → plan loader → CLI rendering → Quick Look → dispatch linkage → output.",
   "phases": [
     {
       "id": "phase-1-data-model",
-      "name": "Core Data Model \u2014 ac_spec_id field",
+      "name": "Core Data Model — ac_spec_id field",
       "type": "implementation",
       "description": "Add ac_spec_id: Option<String> to the Meta struct in bop-core, with serde annotations and round-trip tests.",
       "depends_on": [],
@@ -20,7 +20,7 @@
           ],
           "files_to_create": [],
           "patterns_from": [
-            "crates/bop-core/src/lib.rs \u2014 zellij_session field pattern"
+            "crates/bop-core/src/lib.rs — zellij_session field pattern"
           ],
           "verification": {
             "type": "command",
@@ -45,7 +45,7 @@
       "subtasks": [
         {
           "id": "subtask-2-1",
-          "description": "Create crates/bop-cli/src/acplan.rs with AcPlan/AcPhase/AcSubtask structs (serde Deserialize), parse_plan(path) function, and half_circle_glyph(frac) using spec thresholds (\u25cb=0%, \u25d4=1-33%, \u25d1=34-66%, \u25d5=67-99%, \u25cf=100%). Add mod acplan to main.rs.",
+          "description": "Create crates/bop-cli/src/acplan.rs with AcPlan/AcPhase/AcSubtask structs (serde Deserialize), parse_plan(path) function, and half_circle_glyph(frac) using spec thresholds (○=0%, ◔=1-33%, ◑=34-66%, ◕=67-99%, ●=100%). Add mod acplan to main.rs.",
           "service": "bop-cli",
           "files_to_modify": [
             "crates/bop-cli/src/main.rs"
@@ -54,7 +54,7 @@
             "crates/bop-cli/src/acplan.rs"
           ],
           "patterns_from": [
-            "crates/bop-cli/src/render/full.rs \u2014 moon_glyph function"
+            "crates/bop-cli/src/render/full.rs — moon_glyph function"
           ],
           "verification": {
             "type": "command",
@@ -62,7 +62,7 @@
             "expected": "test result: ok"
           },
           "status": "completed",
-          "notes": "Created crates/bop-cli/src/acplan.rs with AcPlan/AcPhase/AcSubtask structs (serde Deserialize), parse_plan(path) function, and half_circle_glyph(frac) using spec thresholds (\u25cb=0%, \u25d4=1-33%, \u25d1=34-66%, \u25d5=67-99%, \u25cf=100%). Added mod acplan to main.rs. Fixed missing ac_spec_id field in 10 Meta struct initializers in cards.rs. All 18 acplan tests pass.",
+          "notes": "Created crates/bop-cli/src/acplan.rs with AcPlan/AcPhase/AcSubtask structs (serde Deserialize), parse_plan(path) function, and half_circle_glyph(frac) using spec thresholds (○=0%, ◔=1-33%, ◑=34-66%, ◕=67-99%, ●=100%). Added mod acplan to main.rs. Fixed missing ac_spec_id field in 10 Meta struct initializers in cards.rs. All 18 acplan tests pass.",
           "updated_at": "2026-03-07T23:41:24.456249+00:00"
         },
         {
@@ -74,7 +74,7 @@
           ],
           "files_to_create": [],
           "patterns_from": [
-            "crates/bop-core/src/lib.rs \u2014 resolve_metadata_source pattern"
+            "crates/bop-core/src/lib.rs — resolve_metadata_source pattern"
           ],
           "verification": {
             "type": "command",
@@ -94,7 +94,7 @@
           ],
           "files_to_create": [],
           "patterns_from": [
-            "crates/bop-cli/src/render/mod.rs \u2014 from_meta enrichment pattern"
+            "crates/bop-cli/src/render/mod.rs — from_meta enrichment pattern"
           ],
           "verification": {
             "type": "command",
@@ -109,7 +109,7 @@
     },
     {
       "id": "phase-3-cli-rendering",
-      "name": "CLI Rendering \u2014 bop list + status --watch",
+      "name": "CLI Rendering — bop list + status --watch",
       "type": "implementation",
       "description": "Extend CardView with subtask counts, update all renderers to show N/T + half-circle, wire plan enrichment into collect_card_views, and update watch mode to reload plans.",
       "depends_on": [
@@ -133,7 +133,7 @@
           ],
           "files_to_create": [],
           "patterns_from": [
-            "crates/bop-cli/src/render/mod.rs \u2014 CardView struct"
+            "crates/bop-cli/src/render/mod.rs — CardView struct"
           ],
           "verification": {
             "type": "command",
@@ -146,7 +146,7 @@
         },
         {
           "id": "subtask-3-2",
-          "description": "Update render_progress() in full.rs (and other renderers that support it) to show 'N/T' count when ac_subtasks_done/total are set, and use half_circle_glyph from acplan.rs instead of moon_glyph when plan data is present. The format becomes: '\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2591\u2591\u2591\u2591  6/7   Phase 2: CLI + Docs  \u25d1'. Update kanban.rs build_progress_line similarly.",
+          "description": "Update render_progress() in full.rs (and other renderers that support it) to show 'N/T' count when ac_subtasks_done/total are set, and use half_circle_glyph from acplan.rs instead of moon_glyph when plan data is present. The format becomes: '████████████░░░░  6/7   Phase 2: CLI + Docs  ◑'. Update kanban.rs build_progress_line similarly.",
           "service": "bop-cli",
           "files_to_modify": [
             "crates/bop-cli/src/render/full.rs",
@@ -156,7 +156,7 @@
           ],
           "files_to_create": [],
           "patterns_from": [
-            "crates/bop-cli/src/render/full.rs \u2014 render_progress"
+            "crates/bop-cli/src/render/full.rs — render_progress"
           ],
           "verification": {
             "type": "command",
@@ -176,7 +176,7 @@
           ],
           "files_to_create": [],
           "patterns_from": [
-            "crates/bop-cli/src/list.rs \u2014 collect_card_views"
+            "crates/bop-cli/src/list.rs — collect_card_views"
           ],
           "verification": {
             "type": "command",
@@ -189,14 +189,14 @@
         },
         {
           "id": "subtask-3-4",
-          "description": "Update list_cards_watch() to also reload implementation_plan.json on change events. The fs watcher already watches .cards/ recursively \u2014 additionally watch .auto-claude/specs/ for plan changes. Or alternatively, reload plan data on every redraw (since redraw only happens on stats_changed). Ensure plan data changes trigger redraw.",
+          "description": "Update list_cards_watch() to also reload implementation_plan.json on change events. The fs watcher already watches .cards/ recursively — additionally watch .auto-claude/specs/ for plan changes. Or alternatively, reload plan data on every redraw (since redraw only happens on stats_changed). Ensure plan data changes trigger redraw.",
           "service": "bop-cli",
           "files_to_modify": [
             "crates/bop-cli/src/list.rs"
           ],
           "files_to_create": [],
           "patterns_from": [
-            "crates/bop-cli/src/list.rs \u2014 list_cards_watch"
+            "crates/bop-cli/src/list.rs — list_cards_watch"
           ],
           "verification": {
             "type": "command",
@@ -211,7 +211,7 @@
     },
     {
       "id": "phase-4-quicklook",
-      "name": "Quick Look \u2014 Plan Tab",
+      "name": "Quick Look — Plan Tab",
       "type": "implementation",
       "description": "Add Plan tab to Quick Look preview showing phase/subtask progress with SF Symbol icons. New Codable structs for AcPlan, git root discovery, lazy loading.",
       "depends_on": [
@@ -228,7 +228,7 @@
           ],
           "files_to_create": [],
           "patterns_from": [
-            "macos/bop/PreviewViewController.swift \u2014 BopCardMeta, MetaSubtask, CardTab"
+            "macos/bop/PreviewViewController.swift — BopCardMeta, MetaSubtask, CardTab"
           ],
           "verification": {
             "type": "command",
@@ -248,7 +248,7 @@
           ],
           "files_to_create": [],
           "patterns_from": [
-            "macos/bop/PreviewViewController.swift \u2014 preparePreviewOfFile"
+            "macos/bop/PreviewViewController.swift — preparePreviewOfFile"
           ],
           "verification": {
             "type": "command",
@@ -268,7 +268,7 @@
           ],
           "files_to_create": [],
           "patterns_from": [
-            "macos/bop/PreviewViewController.swift \u2014 subtasksTab"
+            "macos/bop/PreviewViewController.swift — subtasksTab"
           ],
           "verification": {
             "type": "command",
@@ -283,7 +283,7 @@
     },
     {
       "id": "phase-5-dispatch",
-      "name": "dispatch.nu \u2014 Card Linkage",
+      "name": "dispatch.nu — Card Linkage",
       "type": "implementation",
       "description": "Update dispatch.nu to write ac_spec_id to matching card's meta.json when dispatching a spec.",
       "depends_on": [
@@ -293,21 +293,21 @@
       "subtasks": [
         {
           "id": "subtask-5-1",
-          "description": "In dispatch.nu run_spec function (after write_approval), add logic to search .cards/ state dirs for a card whose meta.json id matches the spec slug or title contains the spec ID. If found, read meta.json, add/update ac_spec_id field, write back. Use nu's open/save json commands. This is the dogfood path \u2014 non-fatal if no matching card found.",
+          "description": "In dispatch.nu run_spec function (after write_approval), add logic to search .cards/ state dirs for a card whose meta.json id matches the spec slug or title contains the spec ID. If found, read meta.json, add/update ac_spec_id field, write back. Use nu's open/save json commands. This is the dogfood path — non-fatal if no matching card found.",
           "service": "scripts",
           "files_to_modify": [
             "dispatch.nu"
           ],
           "files_to_create": [],
           "patterns_from": [
-            "dispatch.nu \u2014 write_approval function"
+            "dispatch.nu — write_approval function"
           ],
           "verification": {
             "type": "manual",
             "instructions": "Verify dispatch.nu parses correctly: nu --no-config-file -c 'source dispatch.nu; echo ok'"
           },
           "status": "completed",
-          "notes": "Added link_card_to_spec function to dispatch.nu that searches .cards/ state dirs (pending, running, done, failed, merged) \u2014 both flat and team-prefixed \u2014 for a card whose meta.json id matches the spec slug or contains the spec ID. When found, reads meta.json, upserts ac_spec_id field, writes back with `to json --indent 2 | save --force`. Wired into run_spec after write_approval. Non-fatal: prints skip message if no matching card. Safe patterns: try/catch with null fallback (not continue in catch), mut found_meta with break on match. Nu command blocked in sandbox so manual syntax review only \u2014 no runtime parse test.",
+          "notes": "Added link_card_to_spec function to dispatch.nu that searches .cards/ state dirs (pending, running, done, failed, merged) — both flat and team-prefixed — for a card whose meta.json id matches the spec slug or contains the spec ID. When found, reads meta.json, upserts ac_spec_id field, writes back with `to json --indent 2 | save --force`. Wired into run_spec after write_approval. Non-fatal: prints skip message if no matching card. Safe patterns: try/catch with null fallback (not continue in catch), mut found_meta with break on match. Nu command blocked in sandbox so manual syntax review only — no runtime parse test.",
           "updated_at": "2026-03-08T00:51:45.547773+00:00"
         }
       ]
@@ -355,7 +355,7 @@
             "expected": "OK"
           },
           "status": "completed",
-          "notes": "Created output/result.md with: (1) ASCII screenshot of bop list showing the new AC progress bar with 16-cell block bar, N/T subtask count, current phase name, and half-circle glyph (\u25cb\u25d4\u25d1\u25d5\u25cf). (2) Detailed description of the Quick Look Plan tab including tab bar appearance, plan layout with overall progress bar + per-phase collapsible sections, SF Symbol icon table for phase status (circle.fill/circle.lefthalf.filled/circle) and subtask status (checkmark.circle.fill/arrow.triangle.2.circlepath/circle), interaction model (tap to collapse), and git root discovery mechanism. (3) Comprehensive summary of all changes across 5 services: bop-core (ac_spec_id field), bop-cli (new acplan.rs module, renderer updates, list wiring), macOS Quick Look (Plan tab, Codable structs, SF Symbol rendering), and dispatch.nu (link_card_to_spec function).",
+          "notes": "Created output/result.md with: (1) ASCII screenshot of bop list showing the new AC progress bar with 16-cell block bar, N/T subtask count, current phase name, and half-circle glyph (○◔◑◕●). (2) Detailed description of the Quick Look Plan tab including tab bar appearance, plan layout with overall progress bar + per-phase collapsible sections, SF Symbol icon table for phase status (circle.fill/circle.lefthalf.filled/circle) and subtask status (checkmark.circle.fill/arrow.triangle.2.circlepath/circle), interaction model (tap to collapse), and git root discovery mechanism. (3) Comprehensive summary of all changes across 5 services: bop-core (ac_spec_id field), bop-cli (new acplan.rs module, renderer updates, list wiring), macOS Quick Look (Plan tab, Codable structs, SF Symbol rendering), and dispatch.nu (link_card_to_spec function).",
           "updated_at": "2026-03-08T00:57:12.124177+00:00"
         }
       ]
@@ -384,7 +384,7 @@
         }
       ],
       "recommended_workers": 1,
-      "speedup_estimate": "Sequential is safest \u2014 phase-3 depends on phase-2 which is the heaviest Rust work. Quick Look and dispatch.nu changes are light."
+      "speedup_estimate": "Sequential is safest — phase-3 depends on phase-2 which is the heaviest Rust work. Quick Look and dispatch.nu changes are light."
     },
     "startup_command": "PYTHONPATH=$(python3 -c 'import site; print(site.getsitepackages()[0])') env -u CLAUDECODE python3 /Applications/Auto-Claude.app/Contents/Resources/backend/run.py --spec 027 --project-dir /Users/studio/bop --direct"
   },
@@ -442,7 +442,7 @@
         "blocking": true
       }
     ],
-    "reasoning": "Medium risk: adds new field to core data model (backward-compatible via serde defaults), new module in CLI, new tab in Quick Look. All changes are additive \u2014 no existing behavior is altered."
+    "reasoning": "Medium risk: adds new field to core data model (backward-compatible via serde defaults), new module in CLI, new tab in Quick Look. All changes are additive — no existing behavior is altered."
   },
   "qa_acceptance": {
     "unit_tests": {
@@ -501,5 +501,11 @@
     "last_iteration": 1,
     "last_status": "approved",
     "issues_by_type": {}
-  }
+  },
+  "status": "human_review",
+  "planStatus": "review",
+  "reviewReason": "completed",
+  "updated_at": "2026-03-09T20:22:54.201Z",
+  "xstateState": "human_review",
+  "executionPhase": "complete"
 }

@@ -1,7 +1,7 @@
 {
   "feature": "bop providers: scaffold Provider trait + Claude OAuth quota monitor",
   "workflow_type": "feature",
-  "workflow_rationale": "New feature adding a Provider trait, Claude OAuth credential reader, usage history, and a CLI subcommand. Single service (bop-cli crate), but multiple logical layers: types \u2192 provider impl \u2192 history \u2192 CLI wiring.",
+  "workflow_rationale": "New feature adding a Provider trait, Claude OAuth credential reader, usage history, and a CLI subcommand. Single service (bop-cli crate), but multiple logical layers: types → provider impl → history → CLI wiring.",
   "phases": [
     {
       "id": "phase-1-scaffold",
@@ -109,7 +109,7 @@
         },
         {
           "id": "subtask-2-2",
-          "description": "Implement async fetch() on ClaudeProvider: GET https://api.anthropic.com/api/oauth/usage with Authorization: Bearer <token> and anthropic-beta: oauth-2025-04-20 header. Parse response, map five_hour.percent_used \u2192 primary_pct, seven_day.percent_used \u2192 secondary_pct. Handle expired tokens (return snapshot with error field). Include unit test test_claude_snapshot_parse that tests parsing a mock JSON response without making network calls.",
+          "description": "Implement async fetch() on ClaudeProvider: GET https://api.anthropic.com/api/oauth/usage with Authorization: Bearer <token> and anthropic-beta: oauth-2025-04-20 header. Parse response, map five_hour.percent_used → primary_pct, seven_day.percent_used → secondary_pct. Handle expired tokens (return snapshot with error field). Include unit test test_claude_snapshot_parse that tests parsing a mock JSON response without making network calls.",
           "service": "bop-cli",
           "files_to_modify": [
             "crates/bop-cli/src/providers/claude.rs"
@@ -124,7 +124,7 @@
             "expected": "test result: ok"
           },
           "status": "completed",
-          "notes": "Implemented async fetch() on ClaudeProvider: GET /api/oauth/usage with Bearer token + anthropic-beta header. Added UsageResponse/UsageWindow types, parse_usage_response() helper. Maps five_hour.percent_used\u2192primary_pct, seven_day.percent_used\u2192secondary_pct, five_hour.reset_at\u2192reset_at. Handles expired/rejected tokens, malformed JSON, HTTP errors gracefully via error field. All 8 tests pass including test_claude_snapshot_parse + 3 bonus tests (empty, malformed, clamping). Implementation was already committed at HEAD (aa4b6b3).",
+          "notes": "Implemented async fetch() on ClaudeProvider: GET /api/oauth/usage with Bearer token + anthropic-beta header. Added UsageResponse/UsageWindow types, parse_usage_response() helper. Maps five_hour.percent_used→primary_pct, seven_day.percent_used→secondary_pct, five_hour.reset_at→reset_at. Handles expired/rejected tokens, malformed JSON, HTTP errors gracefully via error field. All 8 tests pass including test_claude_snapshot_parse + 3 bonus tests (empty, malformed, clamping). Implementation was already committed at HEAD (aa4b6b3).",
           "updated_at": "2026-03-08T00:33:44.464238+00:00"
         }
       ]
@@ -221,7 +221,7 @@
             "expected": "All pass with no errors or warnings"
           },
           "status": "completed",
-          "notes": "All acceptance criteria passed on first try. Results: (1) cargo build -p bop \u2014 Finished dev profile, no errors. (2) cargo test -p bop -- providers \u2014 34 tests passed (7 claude, 5 history, 21 existing providers, 1 UI snapshot). (3) cargo run -p bop -- providers --help \u2014 prints correct usage with --watch, --json, --interval flags. (4) cargo run -p bop -- providers --json \u2014 outputs valid JSON array with claude provider entry (error field correctly reports unreadable credentials when no real OAuth token present). (5) cargo clippy -- -D warnings \u2014 clean, no warnings. (6) cargo fmt --check \u2014 clean, no formatting issues. No code changes were needed; all implementation was completed in prior subtasks.",
+          "notes": "All acceptance criteria passed on first try. Results: (1) cargo build -p bop — Finished dev profile, no errors. (2) cargo test -p bop -- providers — 34 tests passed (7 claude, 5 history, 21 existing providers, 1 UI snapshot). (3) cargo run -p bop -- providers --help — prints correct usage with --watch, --json, --interval flags. (4) cargo run -p bop -- providers --json — outputs valid JSON array with claude provider entry (error field correctly reports unreadable credentials when no real OAuth token present). (5) cargo clippy -- -D warnings — clean, no warnings. (6) cargo fmt --check — clean, no formatting issues. No code changes were needed; all implementation was completed in prior subtasks.",
           "updated_at": "2026-03-08T00:42:17.354725+00:00"
         }
       ]
@@ -245,7 +245,7 @@
         }
       ],
       "recommended_workers": 1,
-      "speedup_estimate": "Minimal \u2014 phases 2 and 3 are small enough that parallelism overhead exceeds benefit"
+      "speedup_estimate": "Minimal — phases 2 and 3 are small enough that parallelism overhead exceeds benefit"
     },
     "startup_command": "PYTHONPATH=$(python3 -c 'import site; print(site.getsitepackages()[0])') env -u CLAUDECODE python3 /Applications/Auto-Claude.app/Contents/Resources/backend/run.py --spec 030 --project-dir /Users/studio/bop --direct"
   },
@@ -369,5 +369,11 @@
     "last_iteration": 1,
     "last_status": "approved",
     "issues_by_type": {}
-  }
+  },
+  "status": "human_review",
+  "planStatus": "review",
+  "reviewReason": "completed",
+  "updated_at": "2026-03-09T20:22:54.203Z",
+  "xstateState": "human_review",
+  "executionPhase": "complete"
 }

@@ -1,7 +1,7 @@
 {
   "feature": "Codex and Gemini provider implementations",
   "workflow_type": "feature",
-  "workflow_rationale": "Adding two new provider implementations (CodexProvider, GeminiProvider) following the established Provider trait pattern from spec 030. Each provider has multiple data source fallbacks, requiring ordered implementation of OAuth \u2192 RPC/API \u2192 PTY approaches.",
+  "workflow_rationale": "Adding two new provider implementations (CodexProvider, GeminiProvider) following the established Provider trait pattern from spec 030. Each provider has multiple data source fallbacks, requiring ordered implementation of OAuth → RPC/API → PTY approaches.",
   "phases": [
     {
       "id": "phase-1-codex",
@@ -13,7 +13,7 @@
       "subtasks": [
         {
           "id": "subtask-1-1",
-          "description": "Scaffold CodexProvider with detect() and OAuth API fetch path. Create codex.rs with: (1) CodexCredentials struct for ~/.codex/auth.json (access_token, refresh_token, last_refresh), (2) binary_on_path() helper using std::process::Command::new(\"which\"), (3) detect() checking auth.json OR codex on PATH, (4) OAuth fetch: read creds, check refresh (>8 days = warn), GET https://chatgpt.com/backend-api/wham/usage with Bearer token, (5) parse_usage_response() helper mapping session.percent_used \u2192 primary_pct and weekly.percent_used \u2192 secondary_pct, (6) unit tests for parse helper with mock JSON.",
+          "description": "Scaffold CodexProvider with detect() and OAuth API fetch path. Create codex.rs with: (1) CodexCredentials struct for ~/.codex/auth.json (access_token, refresh_token, last_refresh), (2) binary_on_path() helper using std::process::Command::new(\"which\"), (3) detect() checking auth.json OR codex on PATH, (4) OAuth fetch: read creds, check refresh (>8 days = warn), GET https://chatgpt.com/backend-api/wham/usage with Bearer token, (5) parse_usage_response() helper mapping session.percent_used → primary_pct and weekly.percent_used → secondary_pct, (6) unit tests for parse helper with mock JSON.",
           "service": "bop-cli",
           "files_to_modify": [],
           "files_to_create": [
@@ -28,7 +28,7 @@
             "expected": "test result: ok"
           },
           "status": "completed",
-          "notes": "CodexProvider scaffolded with: CodexCredentials struct, binary_on_path() helper, detect() checking auth.json OR codex on PATH, OAuth fetch with Bearer token to chatgpt.com/backend-api/wham/usage, parse_usage_response() mapping session.percent_used\u2192primary_pct and weekly.percent_used\u2192secondary_pct, check_refresh_staleness() warning if >8 days old, 14 unit tests all passing. Clippy clean, fmt clean.",
+          "notes": "CodexProvider scaffolded with: CodexCredentials struct, binary_on_path() helper, detect() checking auth.json OR codex on PATH, OAuth fetch with Bearer token to chatgpt.com/backend-api/wham/usage, parse_usage_response() mapping session.percent_used→primary_pct and weekly.percent_used→secondary_pct, check_refresh_staleness() warning if >8 days old, 14 unit tests all passing. Clippy clean, fmt clean.",
           "updated_at": "2026-03-08T03:00:31.836029+00:00"
         },
         {
@@ -66,7 +66,7 @@
             "expected": "test result: ok"
           },
           "status": "completed",
-          "notes": "PTY fallback added to CodexProvider fetch(). When both OAuth and JSON-RPC fail, spawns `codex` process, writes `/status\\n` to stdin, waits up to 3 seconds, reads stdout, and parses for '5h limit: NN%' and 'Weekly limit: NN%' patterns using string search (no regex dep needed). Added: parse_pty_output(), extract_pct_after(), fetch_via_pty(), pty_exchange(), fetch_via_rpc_or_pty() chaining method. fetch() now chains: OAuth \u2192 RPC \u2192 PTY. 10 new tests: valid output, session-only, weekly-only, no percentages, empty output, clamping, ANSI noise, extract_pct_after basic/missing/no-digits. All 33 codex tests pass. Clippy clean, fmt clean.",
+          "notes": "PTY fallback added to CodexProvider fetch(). When both OAuth and JSON-RPC fail, spawns `codex` process, writes `/status\\n` to stdin, waits up to 3 seconds, reads stdout, and parses for '5h limit: NN%' and 'Weekly limit: NN%' patterns using string search (no regex dep needed). Added: parse_pty_output(), extract_pct_after(), fetch_via_pty(), pty_exchange(), fetch_via_rpc_or_pty() chaining method. fetch() now chains: OAuth → RPC → PTY. 10 new tests: valid output, session-only, weekly-only, no percentages, empty output, clamping, ANSI noise, extract_pct_after basic/missing/no-digits. All 33 codex tests pass. Clippy clean, fmt clean.",
           "updated_at": "2026-03-08T03:08:29.260849+00:00"
         }
       ]
@@ -75,13 +75,13 @@
       "id": "phase-2-gemini",
       "name": "Gemini Provider",
       "type": "implementation",
-      "description": "Build GeminiProvider with OAuth quota API and PTY fallback. The OAuth path is more complex than Codex \u2014 requires extracting client ID/secret from the gemini npm package's oauth2.js, token refresh, and two Google API calls.",
+      "description": "Build GeminiProvider with OAuth quota API and PTY fallback. The OAuth path is more complex than Codex — requires extracting client ID/secret from the gemini npm package's oauth2.js, token refresh, and two Google API calls.",
       "depends_on": [],
       "parallel_safe": true,
       "subtasks": [
         {
           "id": "subtask-2-1",
-          "description": "Scaffold GeminiProvider with detect() and OAuth credential/token infrastructure. Create gemini.rs with: (1) GeminiCredentials struct for ~/.gemini/oauth_creds.json (access_token, refresh_token, expiry_date, id_token), (2) detect() checking oauth_creds.json OR gemini on PATH, (3) find_gemini_binary() \u2014 locate gemini on PATH, (4) extract_oauth_client() \u2014 find .../node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js relative to binary, regex-extract OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET, (5) refresh_token_if_expired() \u2014 POST https://oauth2.googleapis.com/token with client_id/secret/refresh_token, (6) unit tests for credential parsing and client ID extraction from sample JS.",
+          "description": "Scaffold GeminiProvider with detect() and OAuth credential/token infrastructure. Create gemini.rs with: (1) GeminiCredentials struct for ~/.gemini/oauth_creds.json (access_token, refresh_token, expiry_date, id_token), (2) detect() checking oauth_creds.json OR gemini on PATH, (3) find_gemini_binary() — locate gemini on PATH, (4) extract_oauth_client() — find .../node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js relative to binary, regex-extract OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET, (5) refresh_token_if_expired() — POST https://oauth2.googleapis.com/token with client_id/secret/refresh_token, (6) unit tests for credential parsing and client ID extraction from sample JS.",
           "service": "bop-cli",
           "files_to_modify": [],
           "files_to_create": [
@@ -136,7 +136,7 @@
             "expected": "test result: ok"
           },
           "status": "completed",
-          "notes": "PTY fallback added to GeminiProvider fetch(). When OAuth fails (missing creds, missing client ID/secret, token refresh failure, or quota API error), spawns `gemini` process, writes `/stats model\\n` to stdin, waits up to 3 seconds, reads stdout, and parses for model usage data. Parser handles fraction patterns (N/M \u2192 percentage), direct percentages (NN%), and model classification via case-insensitive \"pro\"/\"flash\" detection on each line. Added: extract_fraction_pct(), extract_direct_pct(), extract_line_pct(), parse_pty_output(), fetch_via_pty(), pty_exchange() methods. 22 new tests (12 PTY parse scenarios + 10 helper function tests). All 60 gemini tests pass. Clippy clean, fmt clean.",
+          "notes": "PTY fallback added to GeminiProvider fetch(). When OAuth fails (missing creds, missing client ID/secret, token refresh failure, or quota API error), spawns `gemini` process, writes `/stats model\\n` to stdin, waits up to 3 seconds, reads stdout, and parses for model usage data. Parser handles fraction patterns (N/M → percentage), direct percentages (NN%), and model classification via case-insensitive \"pro\"/\"flash\" detection on each line. Added: extract_fraction_pct(), extract_direct_pct(), extract_line_pct(), parse_pty_output(), fetch_via_pty(), pty_exchange() methods. 22 new tests (12 PTY parse scenarios + 10 helper function tests). All 60 gemini tests pass. Clippy clean, fmt clean.",
           "updated_at": "2026-03-08T03:23:08.832786+00:00"
         }
       ]
@@ -195,7 +195,7 @@
       "recommended_workers": 1,
       "speedup_estimate": "Phases 1 and 2 could run in parallel (2x speedup for those phases), but both are single-service Rust modules. Recommend 1 worker for simplicity since phase 3 integration depends on both."
     },
-    "startup_command": "No services to start \u2014 this is a Rust library implementation. Build and test with: cargo build -p bop && cargo test -p bop -- providers::"
+    "startup_command": "No services to start — this is a Rust library implementation. Build and test with: cargo build -p bop && cargo test -p bop -- providers::"
   },
   "verification_strategy": {
     "risk_level": "medium",
@@ -340,5 +340,11 @@
     "issues_by_type": {
       "unknown": 3
     }
-  }
+  },
+  "status": "human_review",
+  "planStatus": "review",
+  "reviewReason": "completed",
+  "updated_at": "2026-03-09T20:22:54.204Z",
+  "xstateState": "human_review",
+  "executionPhase": "complete"
 }
