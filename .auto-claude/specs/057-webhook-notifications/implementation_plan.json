@@ -1,0 +1,231 @@
+{
+  "feature": "Webhook notifications for card state transitions",
+  "workflow_type": "simple",
+  "workflow_rationale": "Feature is already fully implemented in commit 'feat: wave 16 + spec 060'. This plan documents verification of existing implementation against acceptance criteria.",
+  "phases": [
+    {
+      "id": "phase-1-verify",
+      "name": "Verification",
+      "type": "implementation",
+      "description": "Verify existing webhook implementation meets all acceptance criteria",
+      "depends_on": [],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Verify webhook module unit tests pass",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/webhook.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo test -p bop webhook",
+            "expected": "All webhook tests pass"
+          },
+          "status": "completed",
+          "notes": "Tests include: send_matching_honors_on_filter_and_json_payload, slack_payload_posts_block_kit_shape"
+        },
+        {
+          "id": "subtask-1-2",
+          "description": "Verify bop webhook test CLI command works",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/main.rs",
+            "crates/bop-cli/src/webhook.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo build && ./target/debug/bop webhook test --help",
+            "expected": "Command help displays without errors"
+          },
+          "status": "pending"
+        },
+        {
+          "id": "subtask-1-3",
+          "description": "Verify webhook config types are properly defined",
+          "service": "bop-core",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-core/src/config.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo test -p bop-core config::tests::parse_webhooks_json",
+            "expected": "Webhook config parsing test passes"
+          },
+          "status": "pending",
+          "notes": "Verifies WebhookConfig, WebhookEvent, WebhookFormat types work correctly"
+        },
+        {
+          "id": "subtask-1-4",
+          "description": "Verify dispatcher webhook integration exists",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/dispatcher.rs"
+          ],
+          "verification": {
+            "type": "manual",
+            "instructions": "Confirm dispatcher.rs contains: WebhookClient field in Dispatcher struct, emit_webhook_transition calls for Running/Done/Failed events"
+          },
+          "status": "pending"
+        },
+        {
+          "id": "subtask-1-5",
+          "description": "Verify merge gate webhook integration exists",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/merge_gate.rs"
+          ],
+          "verification": {
+            "type": "manual",
+            "instructions": "Confirm merge_gate.rs calls webhook_client.emit_transition(WebhookEvent::Merged, ...) after successful merge"
+          },
+          "status": "pending"
+        },
+        {
+          "id": "subtask-1-6",
+          "description": "Verify code quality: clippy and fmt",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cargo clippy -p bop -- -D warnings && cargo fmt --check",
+            "expected": "No clippy warnings, code is formatted"
+          },
+          "status": "pending"
+        },
+        {
+          "id": "subtask-1-7",
+          "description": "Verify all bop tests pass (full test suite)",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cargo test",
+            "expected": "All tests pass across the workspace"
+          },
+          "status": "pending",
+          "notes": "This is the final comprehensive test to ensure webhook feature doesn't break existing functionality"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_phases": 1,
+    "total_subtasks": 7,
+    "services_involved": [
+      "bop-core",
+      "bop-cli"
+    ],
+    "parallelism": {
+      "max_parallel_phases": 1,
+      "parallel_groups": [],
+      "recommended_workers": 1,
+      "speedup_estimate": "Sequential verification (1x)"
+    },
+    "startup_command": "cargo test && cargo clippy -- -D warnings && cargo fmt --check"
+  },
+  "verification_strategy": {
+    "risk_level": "trivial",
+    "skip_validation": false,
+    "test_creation_phase": "not_applicable",
+    "test_types_required": [
+      "unit"
+    ],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      "All webhook unit tests pass",
+      "bop webhook test command works",
+      "Webhook config parsing works",
+      "Dispatcher integration confirmed",
+      "Merge gate integration confirmed",
+      "Code passes clippy and fmt checks",
+      "Full test suite passes"
+    ],
+    "verification_steps": [
+      {
+        "name": "Unit Tests",
+        "command": "cargo test",
+        "expected_outcome": "All tests pass",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Clippy Lint",
+        "command": "cargo clippy -- -D warnings",
+        "expected_outcome": "No warnings",
+        "type": "lint",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Format Check",
+        "command": "cargo fmt --check",
+        "expected_outcome": "Code is formatted",
+        "type": "lint",
+        "required": true,
+        "blocking": true
+      }
+    ],
+    "reasoning": "Feature is already implemented - only verification needed. Tests already exist and should pass."
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": true,
+      "commands": [
+        "cargo test -p bop webhook",
+        "cargo test -p bop-core"
+      ],
+      "minimum_coverage": null
+    },
+    "integration_tests": {
+      "required": false,
+      "commands": [],
+      "services_to_test": []
+    },
+    "e2e_tests": {
+      "required": false,
+      "commands": [],
+      "flows": []
+    },
+    "browser_verification": {
+      "required": false,
+      "pages": []
+    },
+    "database_verification": {
+      "required": false,
+      "checks": []
+    },
+    "manual_verification": {
+      "required": true,
+      "steps": [
+        "Create test webhook config at .cards/.bop/config.json",
+        "Run: bop webhook test",
+        "Verify test payload is sent to configured URLs",
+        "Check logs/webhook.log for any failures"
+      ]
+    }
+  },
+  "qa_signoff": null,
+  "status": "in_progress",
+  "planStatus": "in_progress",
+  "xstateState": "planning",
+  "executionPhase": "coding",
+  "updated_at": "2026-03-09T20:27:37.903Z"
+}
