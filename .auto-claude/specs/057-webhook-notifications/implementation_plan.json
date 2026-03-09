@@ -79,7 +79,9 @@
             "type": "manual",
             "instructions": "Confirm dispatcher.rs contains: WebhookClient field in Dispatcher struct, emit_webhook_transition calls for Running/Done/Failed events"
           },
-          "status": "pending"
+          "status": "completed",
+          "notes": "Verified dispatcher webhook integration. Confirmed: WebhookClient field in Dispatcher struct (line 22), emit_webhook_transition function (line 33), Running event emission (line 409), Done event emission (line 709/716), Failed event emission (lines 458/711). All acceptance criteria met.",
+          "updated_at": "2026-03-09T20:36:17.644778+00:00"
         },
         {
           "id": "subtask-1-5",
@@ -231,6 +233,6 @@
   "planStatus": "in_progress",
   "xstateState": "planning",
   "executionPhase": "coding",
-  "updated_at": "2026-03-09T20:32:52.079Z",
-  "last_updated": "2026-03-09T20:34:46.655693+00:00"
+  "updated_at": "2026-03-09T20:35:34.812Z",
+  "last_updated": "2026-03-09T20:36:17.644784+00:00"
 }
