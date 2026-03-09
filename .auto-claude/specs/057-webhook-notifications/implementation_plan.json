@@ -96,7 +96,9 @@
             "type": "manual",
             "instructions": "Confirm merge_gate.rs calls webhook_client.emit_transition(WebhookEvent::Merged, ...) after successful merge"
           },
-          "status": "pending"
+          "status": "completed",
+          "notes": "Verified merge gate webhook integration exists. Confirmed webhook_client.emit_transition(WebhookEvent::Merged, Some(&meta), &merged_path) is called on line 425 after successful merge. Also verified Failed event emissions on lines 235, 260, 287, 406 for error cases. Integration is complete and correct.",
+          "updated_at": "2026-03-09T20:38:21.030434+00:00"
         },
         {
           "id": "subtask-1-6",
@@ -233,6 +235,6 @@
   "planStatus": "in_progress",
   "xstateState": "planning",
   "executionPhase": "coding",
-  "updated_at": "2026-03-09T20:35:34.812Z",
-  "last_updated": "2026-03-09T20:36:17.644784+00:00"
+  "updated_at": "2026-03-09T20:37:49.003Z",
+  "last_updated": "2026-03-09T20:38:21.030443+00:00"
 }
