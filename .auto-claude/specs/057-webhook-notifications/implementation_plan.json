@@ -44,7 +44,9 @@
             "command": "cargo build && ./target/debug/bop webhook test --help",
             "expected": "Command help displays without errors"
           },
-          "status": "pending"
+          "status": "completed",
+          "notes": "Verified webhook test CLI command works correctly. Command help displays: 'Send a test payload to every configured webhook endpoint' with proper options. Tests pass (2/2 webhook tests passed).",
+          "updated_at": "2026-03-09T20:32:10.144584+00:00"
         },
         {
           "id": "subtask-1-3",
@@ -228,6 +230,6 @@
   "planStatus": "in_progress",
   "xstateState": "planning",
   "executionPhase": "coding",
-  "updated_at": "2026-03-09T20:27:37.903Z",
-  "last_updated": "2026-03-09T20:29:20.340095+00:00"
+  "updated_at": "2026-03-09T20:29:55.549Z",
+  "last_updated": "2026-03-09T20:32:10.144593+00:00"
 }
