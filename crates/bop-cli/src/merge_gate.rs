@@ -185,8 +185,7 @@ pub async fn run_merge_gate(
                             .current_dir(&workdir)
                             .env(
                                 "CARGO_TARGET_DIR",
-                                std::env::temp_dir()
-                                    .join(format!("bop-target-ac-{}", meta.id)),
+                                std::env::temp_dir().join(format!("bop-target-ac-{}", meta.id)),
                             )
                             .output()
                             .await;
