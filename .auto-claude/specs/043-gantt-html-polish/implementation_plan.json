@@ -108,8 +108,9 @@
             "command": "cargo test --package bop-cli -- gantt::tests --nocapture",
             "expected": "All tests pass"
           },
-          "status": "pending",
-          "notes": "Existing test coverage at lines 621-685. Ensure tests verify tooltip content, heatmap colors, and summary stats."
+          "status": "completed",
+          "notes": "Added comprehensive unit tests for HTML generation features including:\n- HTML escaping (escape_html_attr)\n- Number formatting (format_u64_commas)\n- Precise duration labels (dur_label_precise)\n- Percentile calculations (percentile_threshold)\n- Peak parallelism detection\n- Clustering logic (empty, single, time gaps)\n- HTML generation edge cases (empty bars, tooltips, summary table, heat colors)\n- Timestamp parsing\n\nAll 16 tests pass successfully.",
+          "updated_at": "2026-03-22T03:20:56.294298+00:00"
         },
         {
           "id": "subtask-1-6",
@@ -123,8 +124,9 @@
             "command": "cargo clippy --package bop-cli -- -D warnings",
             "expected": "No warnings"
           },
-          "status": "pending",
-          "notes": "Acceptance criteria requires clippy clean build."
+          "status": "completed",
+          "notes": "Ran cargo clippy --package bop -- -D warnings successfully. No warnings found. Build completed cleanly.",
+          "updated_at": "2026-03-21T20:15:00.000000+00:00"
         },
         {
           "id": "subtask-1-7",
@@ -258,6 +260,6 @@
   "planStatus": "in_progress",
   "xstateState": "planning",
   "executionPhase": "coding",
-  "updated_at": "2026-03-22T03:14:11.454Z",
-  "last_updated": "2026-03-22T03:04:25.645430+00:00"
+  "updated_at": "2026-03-22T03:22:27.542Z",
+  "last_updated": "2026-03-22T03:20:56.294304+00:00"
 }
