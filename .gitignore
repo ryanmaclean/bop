@@ -66,3 +66,6 @@ crates/jc-zellij-plugin/target/
 logs/security/
 crates/jc-zellij-plugin/target/ echo .auto-claude/dispatch-lock.json ./target/debug/bop index
 crates/jc-zellij-plugin/target/ echo .auto-claude/dispatch-lock.json ./target/debug/bop index
+
+# Auto Claude data directory
+.auto-claude/
