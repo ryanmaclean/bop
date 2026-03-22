@@ -308,6 +308,7 @@ fn query_service_status(label: &str) -> FactoryServiceStatus {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn query_launchd_status(label: &str) -> FactoryServiceStatus {
     let installed = plist_path(label).exists();
     if !installed {
@@ -384,6 +385,7 @@ fn stop_service(label: &str) -> Result<()> {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn start_launchd_service(label: &str) -> Result<()> {
     let target = format!("{}/{}", launchd_user_domain()?, label);
     let kickstart = Command::new("launchctl")
@@ -420,6 +422,7 @@ fn start_launchd_service(label: &str) -> Result<()> {
     bail!("launchctl kickstart failed: {}", err.trim())
 }
 
+#[cfg(target_os = "macos")]
 fn stop_launchd_service(label: &str) -> Result<()> {
     let target = format!("{}/{}", launchd_user_domain()?, label);
     let out = Command::new("launchctl")
@@ -473,6 +476,7 @@ fn stop_systemd_service(label: &str) -> Result<()> {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn launchd_user_domain() -> Result<String> {
     if let Ok(uid) = std::env::var("UID") {
         let uid = uid.trim();
@@ -498,6 +502,7 @@ fn launchd_user_domain() -> Result<String> {
     Ok(format!("gui/{uid}"))
 }
 
+#[cfg(target_os = "macos")]
 fn parse_launchctl_pid(stdout: &str) -> Option<u32> {
     for line in stdout.lines() {
         if !line.contains("PID") {
@@ -580,6 +585,7 @@ mod tests {
     use std::fs;
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn parse_launchctl_pid_extracts_pid() {
         let sample = r#"
         {
@@ -591,6 +597,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn parse_launchctl_pid_ignores_zero() {
         let sample = "\"PID\" = 0;";
         assert_eq!(parse_launchctl_pid(sample), None);
