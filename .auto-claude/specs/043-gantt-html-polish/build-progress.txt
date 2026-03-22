@@ -1,0 +1,193 @@
+=== AUTO-BUILD PROGRESS ===
+
+Project: bop gantt HTML polish - tooltips, heatmap, and summary stats
+Workspace: /Users/studio/bop/.auto-claude/worktrees/tasks/043-gantt-html-polish
+Started: 2026-03-21 19:56 UTC
+
+Workflow Type: simple
+Rationale: Single-file polish task for CLI HTML generation. The requested features (tooltips, duration heatmap, summary statistics, responsive layout) are already implemented in gantt.rs. This task focuses on verification, testing, and minor polish to ensure all acceptance criteria are met.
+
+Session 1 (Planner):
+- Completed deep codebase investigation
+- Created project_index.json
+- Created context.json
+- Created implementation_plan.json
+- Created init.sh
+- Phases: 1
+- Total subtasks: 7
+- Created this build-progress.txt
+
+Phase Summary:
+- Phase 1 (Verification and Polish): 7 subtasks, no dependencies
+  - Verify HTML tooltip implementation (subtask-1-1)
+  - Verify duration heatmap colors (subtask-1-2)
+  - Verify summary statistics table (subtask-1-3)
+  - Verify responsive layout at 1280px (subtask-1-4)
+  - Add/update unit tests (subtask-1-5)
+  - Run cargo clippy (subtask-1-6)
+  - Verify no JS errors in browser (subtask-1-7)
+
+Services Involved:
+- bop-cli: Rust CLI binary with Gantt HTML generation
+
+Files to Modify:
+- crates/bop-cli/src/gantt.rs (primary implementation file)
+
+Files to Reference:
+- crates/bop-cli/src/colors.rs (state color definitions)
+- crates/bop-cli/src/gantt.rs (existing patterns)
+
+Existing Implementation Status:
+✅ HTML tooltips via title attribute (lines 521-529)
+✅ Duration heatmap with percentile-based colors (lines 505-536)
+✅ Summary statistics table with 6 metrics (lines 570-587)
+✅ Responsive CSS layout (lines 409-427)
+✅ Unit tests present (lines 621-685)
+
+Investigation Findings:
+1. Project uses Rust with Cargo build system
+2. HTML is generated as inline string with embedded CSS
+3. Tooltips use HTML title attribute (CSS-only, no JavaScript)
+4. Heatmap colors computed from p50/p80 percentiles
+5. Test framework: cargo test with #[test] attributes
+6. Lint tool: cargo clippy -- -D warnings
+7. Make check runs test + lint + fmt check
+
+Parallelism Analysis:
+- Max parallel phases: 1
+- Recommended workers: 1
+- Parallel groups: None (single phase)
+
+=== STARTUP COMMAND ===
+
+To continue building this spec, run:
+
+  ./init.sh
+
+Or manually:
+  cargo build --package bop-cli
+  cargo test --package bop-cli -- gantt::tests
+  ./target/debug/bop gantt --html -o
+
+=== ACCEPTANCE CRITERIA ===
+
+From spec.md:
+- [ ] bop gantt --html opens in browser without JS errors
+- [ ] Hovering a bar shows tooltip with card details
+- [ ] Bars are color-coded by duration heatmap
+- [ ] Summary stats table renders below chart
+- [ ] Page is readable at 1280px width (no horizontal scroll)
+- [ ] cargo clippy -- -D warnings clean
+- [ ] cargo test passes
+
+=== NOTES ===
+
+This is a verification and polish task. The core features requested in the spec
+are already implemented in gantt.rs. The coder agent should:
+
+1. Review the existing implementation to understand how it works
+2. Run manual tests to verify each feature works as specified
+3. Add or improve unit tests to ensure coverage
+4. Make any minor polish adjustments if needed
+5. Ensure all acceptance criteria pass
+
+The implementation already includes:
+- Tooltip content formatting with escape_html_attr()
+- Percentile calculation for heatmap thresholds
+- Peak parallelism calculation
+- Responsive CSS with max-width and overflow-x
+- Existing unit test coverage
+
+=== END SESSION 1 ===
+
+Session 2 (Coder - subtask-1-1):
+- Task: Verify HTML tooltip implementation and ensure all card details are included
+- Status: COMPLETED
+
+Verification Steps:
+1. Built project successfully with cargo build --release
+2. Inspected tooltip generation code in gantt.rs (lines 521-529)
+3. Verified all required fields are present in tooltip format string:
+   ✓ id: {} - Card identifier
+   ✓ stage: {} - Card stage (implement/qa/etc)
+   ✓ provider: {} - LLM provider used
+   ✓ duration: {} - Run duration in h/m/s format
+   ✓ tokens: {} - Total tokens (prompt + completion)
+   ✓ cost: {} - Cost in USD
+
+4. Confirmed tooltip is applied to bar element via title attribute (line 540)
+5. Verified existing unit test checks for tooltip content (line 681)
+6. Test suite passes: cargo test generate_html_produces_valid_structure ... ok
+
+Implementation Details:
+- Tooltip uses &#10; (newline) to separate fields vertically in hover display
+- escape_html_attr() properly escapes id, stage, and provider values
+- Duration formatted using dur_label_precise() helper
+- Tokens and cost handle None values with "n/a" fallback
+- All fields are correctly interpolated into HTML title attribute
+
+Conclusion:
+✅ HTML tooltip implementation is complete and correct
+✅ All required card details (id, stage, provider, duration, tokens, cost) are included
+✅ No changes needed - implementation already meets all requirements
+✅ Unit tests verify tooltip content is present in generated HTML
+
+=== END SESSION 2 ===
+Session 3 (Coder - subtask-1-2):
+- Task: Verify duration heatmap colors are correctly applied based on percentiles
+- Status: COMPLETED
+
+Verification Steps:
+1. Built project successfully with cargo build --release
+2. Analyzed percentile_threshold() function (lines 179-187):
+   ✓ Sorts durations in ascending order
+   ✓ Calculates index: (length - 1) * percentile, rounded
+   ✓ Returns duration value at that index
+   ✓ Handles empty arrays by returning 0.0
+
+3. Verified per-cluster percentile calculation (lines 505-507):
+   ✓ Collects all durations within each cluster
+   ✓ Calculates p50 (50th percentile/median)
+   ✓ Calculates p80 (80th percentile)
+   ✓ Percentiles calculated independently per cluster
+
+4. Verified color assignment logic (lines 530-536):
+   ✓ Green (#4caf50): duration ≤ p50 (fast, 0-50th percentile)
+   ✓ Amber (#ff9800): p50 < duration ≤ p80 (medium, 50-80th percentile)
+   ✓ Red (#f44336): duration > p80 (slow, 80-100th percentile)
+   ✓ If/else chain correctly implements percentile ranges
+
+5. Verified HTML rendering (lines 537-541):
+   ✓ heat_color variable applied to background CSS property
+   ✓ Each bar gets its appropriate color based on its duration
+
+6. Verified legend display (lines 549-559):
+   ✓ "fast (p0-p50)" with green swatch (#4caf50)
+   ✓ "medium (p50-p80)" with amber swatch (#ff9800)
+   ✓ "slow (p80-p100)" with red swatch (#f44336)
+   ✓ Legend accurately describes color scheme
+
+7. Ran test suite:
+   ✓ cargo test generate_html_produces_valid_structure ... ok
+   ✓ Test verifies at least one heatmap color appears in output (line 682)
+
+Implementation Details:
+- Percentile calculation uses proper statistical method (sorted array indexing)
+- Colors are applied per-cluster, making them relative to cluster performance
+- Three-tier color scheme provides clear visual differentiation
+- CSS inline styles apply colors directly to bar elements
+- No JavaScript required - pure HTML/CSS solution
+
+Conclusion:
+✅ Duration heatmap colors are correctly implemented
+✅ Percentile calculations are mathematically correct
+✅ Color assignment logic matches percentile ranges
+✅ HTML output properly applies heat colors
+✅ Legend accurately documents the color scheme
+✅ Unit tests verify color presence in generated HTML
+✅ No changes needed - implementation already meets all requirements
+
+Created HEATMAP_VERIFICATION.md documenting the complete implementation flow.
+
+=== END SESSION 3 ===
+
