@@ -1433,8 +1433,10 @@ mod tests {
         ];
 
         for (provider, adapter) in known {
-            let mut meta = Meta::default();
-            meta.provider_chain = vec![provider.to_string()];
+            let meta = Meta {
+                provider_chain: vec![provider.to_string()],
+                ..Meta::default()
+            };
             assert_eq!(resolve_adapter(&meta, fallback), adapter.to_string());
         }
     }
@@ -1449,8 +1451,10 @@ mod tests {
     #[test]
     fn resolve_adapter_returns_fallback_for_unknown_provider() {
         let fallback = "adapters/fallback.nu";
-        let mut meta = Meta::default();
-        meta.provider_chain = vec!["grok".to_string()];
+        let meta = Meta {
+            provider_chain: vec!["grok".to_string()],
+            ..Meta::default()
+        };
         assert_eq!(resolve_adapter(&meta, fallback), fallback.to_string());
     }
 
