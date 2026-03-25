@@ -128,7 +128,9 @@
             "command": "cargo clippy -p bop-cli -- -D warnings 2>&1 | tail -3 && cargo fmt --check 2>&1 | tail -3 && echo GATES_PASS",
             "expected": "GATES_PASS"
           },
-          "status": "pending"
+          "status": "completed",
+          "notes": "All quality gates pass: cargo clippy -p bop -- -D warnings (zero warnings), cargo fmt --check (clean after fixing 4 long assert! lines from subtask-2-2), 159/159 provider tests pass. bop providers --help shows all 3 expected flags: --watch, --json, --interval. One formatting fix committed (rustfmt wrapping long assert macro lines).",
+          "updated_at": "2026-03-25T06:30:13.637112+00:00"
         },
         {
           "id": "subtask-3-2",
@@ -142,7 +144,9 @@
             "command": "cargo build -p bop-cli 2>&1 | tail -1 && ./target/debug/bop providers --help 2>&1 | head -10",
             "expected": "--watch"
           },
-          "status": "pending"
+          "status": "completed",
+          "notes": "All acceptance criteria validated. Build succeeds, providers --help shows all 3 flags (--watch, --json, --interval). All 162 provider tests pass. clippy clean (0 warnings), fmt clean. History file path ~/.bop/provider-history.jsonl verified correct. JSONL format validated via roundtrip + malformed-line tests. --watch code path verified: cmd_providers -> run_provider_watch_task -> tokio poll loop with ctrl_c handler. BopDeck socket emit code path verified with emit_writes_openlineage_event test. No code changes needed - pure validation subtask.",
+          "updated_at": "2026-03-25T06:34:41.215869+00:00"
         }
       ]
     }
@@ -242,10 +246,11 @@
     }
   },
   "qa_signoff": null,
-  "status": "in_progress",
-  "planStatus": "in_progress",
-  "xstateState": "backlog",
-  "executionPhase": "coding",
-  "updated_at": "2026-03-25T05:46:39.318Z",
-  "last_updated": "2026-03-25T05:40:05.812220+00:00"
+  "status": "human_review",
+  "planStatus": "review",
+  "xstateState": "human_review",
+  "executionPhase": "complete",
+  "updated_at": "2026-03-25T06:34:41.689Z",
+  "last_updated": "2026-03-25T06:34:41.215878+00:00",
+  "reviewReason": "completed"
 }
