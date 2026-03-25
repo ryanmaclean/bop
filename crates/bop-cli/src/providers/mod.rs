@@ -1812,8 +1812,14 @@ mod tests {
         let out = render_snapshots(&snapshots, false).unwrap();
 
         // Provider display names appear in the table
-        assert!(out.contains("Claude Code"), "expected 'Claude Code' in table output");
-        assert!(out.contains("Codex CLI"), "expected 'Codex CLI' in table output");
+        assert!(
+            out.contains("Claude Code"),
+            "expected 'Claude Code' in table output"
+        );
+        assert!(
+            out.contains("Codex CLI"),
+            "expected 'Codex CLI' in table output"
+        );
 
         // Source labels are present
         assert!(out.contains("oauth"), "expected 'oauth' source label");
@@ -1833,8 +1839,14 @@ mod tests {
         assert!(out.contains('░'), "expected empty bar character '░'");
 
         // Error annotation line is rendered
-        assert!(out.contains("rate limited"), "expected error annotation in output");
-        assert!(out.contains('⚠'), "expected warning glyph for error snapshot");
+        assert!(
+            out.contains("rate limited"),
+            "expected error annotation in output"
+        );
+        assert!(
+            out.contains('⚠'),
+            "expected warning glyph for error snapshot"
+        );
 
         // Reset time for Claude should show a relative duration (e.g. "in 20m" or "in 19m")
         assert!(out.contains("in "), "expected relative reset time");
