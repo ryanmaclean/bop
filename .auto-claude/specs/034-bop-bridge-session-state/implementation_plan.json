@@ -27,7 +27,9 @@
             "command": "cargo test -p bop bridge::tests -- --nocapture",
             "expected": "5 tests pass: test_event_serialize_session_start, test_event_serialize_stage_change, test_emit_no_socket_is_noop, test_roundtrip_all_variants, test_stage_from_str"
           },
-          "status": "completed"
+          "status": "completed",
+          "notes": "Implementation already existed on branch. Verified: bridge/mod.rs has BridgeEvent/CardStage enums with serde kebab-case, socket_path(), events_log_path(), emit() with fire-and-forget Unix socket write, Display/FromStr impls. All 5 tests pass, clippy + fmt clean.",
+          "updated_at": "2026-03-25T18:25:44.239161+00:00"
         }
       ]
     },
@@ -57,7 +59,9 @@
             "command": "cargo test -p bop bridge::cmd::tests -- --nocapture",
             "expected": "2 tests pass: emit_builder_parses_stage_change, emit_builder_parses_tool_done"
           },
-          "status": "pending"
+          "status": "completed",
+          "notes": "Implementation already existed on branch. Verified: cmd.rs has BridgeSubcommand enum (Listen, Emit, Install, Uninstall, Opencode), cmd_bridge async handler, build_emit_event() with env var fallbacks (SESSION_ID/CLAUDE_SESSION_ID, CARD_ID, TOOL_NAME/CLAUDE_TOOL_NAME), run_listener() with Unix socket accept loop, SIGTERM/Ctrl-C handling, JSONL event logging, stale socket detection. Both tests pass (emit_builder_parses_stage_change, emit_builder_parses_tool_done), clippy clean, fmt clean.",
+          "updated_at": "2026-03-25T18:27:47.389789+00:00"
         },
         {
           "id": "subtask-2-2",
@@ -75,7 +79,9 @@
             "command": "cargo build -p bop && ./target/debug/bop bridge emit --cli claude --event session-start --session test-123; echo \"exit: $?\"",
             "expected": "Build succeeds, emit exits 0 (noop since no socket running)"
           },
-          "status": "pending"
+          "status": "completed",
+          "notes": "Already wired on branch. Verified: mod bridge at line 12, Bridge variant in Command enum (lines 371-375) with #[command(subcommand)] sub: bridge::BridgeSubcommand, routing at line 1085: Command::Bridge { sub } => bridge::cmd_bridge(sub).await. Build succeeds, cargo run bop bridge emit exits 0 (noop), clippy clean, fmt clean.",
+          "updated_at": "2026-03-25T18:43:06.966866+00:00"
         }
       ]
     },
@@ -103,7 +109,9 @@
             "command": "cargo test -p bop bridge::hook_installer::tests -- --nocapture",
             "expected": "4 tests pass: test_install_into_empty_settings, test_install_merges_existing_settings, test_install_appends_existing_hooks, test_uninstall_removes_bop_hooks_only"
           },
-          "status": "pending"
+          "status": "completed",
+          "notes": "Implementation already existed on branch from bop v0.2. Verified: hook_installer.rs has install_claude_hooks()/uninstall_claude_hooks() with merge strategy (read settings.json -> merge hooks key -> write back). Install creates SessionStart/PreToolUse/PostToolUse/Stop hook entries pointing to `bop bridge emit` commands. Uninstall retains non-bop hooks and cleans empty arrays/objects. Uses BRIDGE_MARKER 'bop bridge emit' for identification. All 4 tests pass, clippy clean, fmt clean.",
+          "updated_at": "2026-03-25T19:15:00.000000+00:00"
         }
       ]
     },
@@ -307,5 +315,6 @@
   "planStatus": "in_progress",
   "xstateState": "backlog",
   "executionPhase": "coding",
-  "updated_at": "2026-03-25T18:22:12.863Z"
+  "updated_at": "2026-03-25T18:43:29.122Z",
+  "last_updated": "2026-03-25T18:43:06.966876+00:00"
 }
