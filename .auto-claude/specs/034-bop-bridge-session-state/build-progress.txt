@@ -1,0 +1,83 @@
+=== AUTO-BUILD PROGRESS ===
+
+Project: bop bridge — session state bridge for BopDeck
+Workspace: 034-bop-bridge-session-state (worktree)
+Started: 2026-03-25
+
+Workflow Type: feature
+Rationale: New feature adding bridge subcommand with multiple components (socket daemon,
+emit CLI, hook installer, opencode SSE adapter, Nushell skill script). All code lives
+in bop-cli crate with one Nushell script in vibekanban/.
+
+Session 1 (Planner):
+- Created implementation_plan.json
+- Phases: 6
+- Total subtasks: 7
+- Created init.sh
+- Created project_index.json
+- Updated context.json (already existed)
+
+IMPORTANT: All code for this spec is ALREADY IMPLEMENTED on main.
+The bridge module, tests, main.rs wiring, and Nushell skill all exist and pass.
+A coder agent session should verify everything passes and mark subtasks complete.
+
+Phase Summary:
+- Phase 1 (Core types & emit): 1 subtask — BridgeEvent/CardStage enums, emit()
+- Phase 2 (CLI subcommand & listener): 2 subtasks — cmd.rs, main.rs wiring
+- Phase 3 (Hook installer): 1 subtask — install/uninstall Claude Code hooks
+- Phase 4 (opencode SSE): 1 subtask — SSE listener + event translation
+- Phase 5 (Nushell skill): 1 subtask — bop-bridge.nu script
+- Phase 6 (Integration): 1 subtask — full acceptance criteria verification
+
+Services Involved:
+- bop-cli: All Rust bridge code (bridge/mod.rs, cmd.rs, hook_installer.rs, opencode.rs)
+- vibekanban: Nushell bridge skill script (bop-bridge.nu)
+
+Parallelism Analysis:
+- Max parallel phases: 3 (phases 3, 4, 5 can run after phase 1)
+- Recommended workers: 1 (all in same Cargo crate; build serializes anyway)
+- Parallel groups: [phase-3-hook-installer, phase-4-opencode-sse] share only phase-1 dep
+
+Test Coverage (14 bridge tests total):
+- bridge::tests (5): serialization, emit noop, roundtrip, FromStr
+- bridge::cmd::tests (2): event builder parsing
+- bridge::hook_installer::tests (4): install/uninstall scenarios
+- bridge::opencode::tests (3): SSE event translation
+
+Out of Scope (spec 035):
+- {{bridge_skill}} template substitution in render_prompt
+- Goose/Gemini/Aider/Crush/Ollama adapters
+- BopDeck-side socket reader
+
+=== VERIFICATION STATUS ===
+- cargo build -p bop: PASS
+- cargo test -p bop bridge: PASS (14/14)
+- cargo clippy -p bop -- -D warnings: PASS (clean)
+- cargo fmt --check: PASS (clean)
+- bridge emit noop: PASS (exits 0 with no socket)
+
+=== STARTUP COMMAND ===
+
+To verify this spec:
+
+  cargo build -p bop && cargo test -p bop bridge
+
+=== END SESSION 1 ===
+
+=== SESSION 2 (Coder: subtask-1-1) ===
+
+subtask-1-1: Core types and socket emit — COMPLETED
+- Implementation already present on branch (all code from main)
+- Verified crates/bop-cli/src/bridge/mod.rs contains:
+  - CardStage enum with Display/FromStr impls (kebab-case)
+  - BridgeEvent enum with serde tags (6 variants)
+  - socket_path() -> ~/.bop/bridge.sock
+  - events_log_path() -> ~/.bop/bridge-events.jsonl
+  - emit() / emit_to_path() - Unix socket write, noop if missing
+- All 5 tests pass: test_event_serialize_session_start,
+  test_event_serialize_stage_change, test_emit_no_socket_is_noop,
+  test_roundtrip_all_variants, test_stage_from_str
+- clippy clean, fmt clean
+- Updated implementation_plan.json: subtask-1-1 status -> "completed"
+
+=== END SESSION 2 ===

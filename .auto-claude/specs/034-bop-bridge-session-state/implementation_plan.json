@@ -1,0 +1,311 @@
+{
+  "feature": "bop bridge: session state bridge for BopDeck",
+  "workflow_type": "feature",
+  "workflow_rationale": "This is a new feature adding a bridge subcommand with multiple components (socket daemon, emit CLI, hook installer, opencode SSE adapter, Nushell skill). All components are in the bop-cli crate with one Nushell script in vibekanban/.",
+  "phases": [
+    {
+      "id": "phase-1-core-types",
+      "name": "Core types and socket emit",
+      "type": "implementation",
+      "description": "Define BridgeEvent, CardStage enums with serde serialization, socket_path helper, and the fire-and-forget emit() function. This is the foundation all other components depend on.",
+      "depends_on": [],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Create bridge module with BridgeEvent/CardStage types, socket_path(), events_log_path(), and emit() function. Include Display/FromStr impls for CardStage. Emit connects to Unix socket, writes JSON line, silently succeeds if socket absent.",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [
+            "crates/bop-cli/src/bridge/mod.rs"
+          ],
+          "patterns_from": [
+            "crates/bop-cli/src/providers/history.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo test -p bop bridge::tests -- --nocapture",
+            "expected": "5 tests pass: test_event_serialize_session_start, test_event_serialize_stage_change, test_emit_no_socket_is_noop, test_roundtrip_all_variants, test_stage_from_str"
+          },
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "id": "phase-2-cmd-listener",
+      "name": "CLI subcommand and socket listener",
+      "type": "implementation",
+      "description": "Build the bridge subcommand handler with listen (daemon), emit (fire-and-forget), install, uninstall, and opencode sub-subcommands. Wire into main.rs Command enum.",
+      "depends_on": [
+        "phase-1-core-types"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-2-1",
+          "description": "Create bridge/cmd.rs with BridgeSubcommand enum (Listen, Emit, Install, Uninstall, Opencode) and cmd_bridge async handler. Implement build_emit_event() to construct BridgeEvent from CLI flags (--cli, --event, --session, --card-id, --tool, --stage). Session ID falls back to $SESSION_ID/$CLAUDE_SESSION_ID env vars. Implement run_listener() with Unix socket accept loop, SIGTERM/Ctrl-C handling, JSONL event logging, and stale socket detection.",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [
+            "crates/bop-cli/src/bridge/cmd.rs"
+          ],
+          "patterns_from": [
+            "crates/bop-cli/src/serve.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo test -p bop bridge::cmd::tests -- --nocapture",
+            "expected": "2 tests pass: emit_builder_parses_stage_change, emit_builder_parses_tool_done"
+          },
+          "status": "pending"
+        },
+        {
+          "id": "subtask-2-2",
+          "description": "Wire Bridge subcommand into main.rs: add `mod bridge;` import, Bridge variant to Command enum with #[command(subcommand)] BridgeSubcommand, and route `Command::Bridge { sub } => bridge::cmd_bridge(sub).await`.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/main.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo build -p bop && ./target/debug/bop bridge emit --cli claude --event session-start --session test-123; echo \"exit: $?\"",
+            "expected": "Build succeeds, emit exits 0 (noop since no socket running)"
+          },
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "phase-3-hook-installer",
+      "name": "Claude Code hook installer",
+      "type": "implementation",
+      "description": "Install/uninstall bop bridge hooks into ~/.claude/settings.json using merge strategy (read existing -> merge hooks key -> write back, never clobber).",
+      "depends_on": [
+        "phase-1-core-types"
+      ],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-3-1",
+          "description": "Create bridge/hook_installer.rs with install_claude_hooks() and uninstall_claude_hooks(). Install reads/creates ~/.claude/settings.json, merges SessionStart/PreToolUse/PostToolUse/Stop hook entries pointing to `bop bridge emit` commands. Uninstall retains non-bop hooks and cleans empty arrays/objects. Uses marker string 'bop bridge emit' for identification.",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [
+            "crates/bop-cli/src/bridge/hook_installer.rs"
+          ],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cargo test -p bop bridge::hook_installer::tests -- --nocapture",
+            "expected": "4 tests pass: test_install_into_empty_settings, test_install_merges_existing_settings, test_install_appends_existing_hooks, test_uninstall_removes_bop_hooks_only"
+          },
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "phase-4-opencode-sse",
+      "name": "opencode SSE adapter",
+      "type": "implementation",
+      "description": "Async SSE listener that connects to opencode's event bus and translates events to BridgeEvents. Port discovery from $OPENCODE_PORT or default 4096.",
+      "depends_on": [
+        "phase-1-core-types"
+      ],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-4-1",
+          "description": "Create bridge/opencode.rs with listen_opencode() async function. Connects to GET http://localhost:{port}/event with SSE Accept header. Parses SSE stream (event:/data: lines). Translates session.status busy->InProgress, idle->HumanReview, retry->AwaitingHuman. Translates message.part.delta->ToolStart, permission.updated->AwaitingHuman. Robust JSON field extraction with multiple path fallbacks.",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [
+            "crates/bop-cli/src/bridge/opencode.rs"
+          ],
+          "patterns_from": [
+            "crates/bop-cli/src/providers/opencode.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo test -p bop bridge::opencode::tests -- --nocapture",
+            "expected": "3 tests pass: session_status_busy_maps_to_in_progress, session_status_retry_maps_to_awaiting_human, permission_updated_maps_to_awaiting_human_with_reason"
+          },
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "phase-5-nushell-skill",
+      "name": "Nushell bridge skill script",
+      "type": "implementation",
+      "description": "Create the bop-bridge.nu Nushell script that wraps bop bridge emit for use inside AI sessions.",
+      "depends_on": [
+        "phase-2-cmd-listener"
+      ],
+      "parallel_safe": true,
+      "subtasks": [
+        {
+          "id": "subtask-5-1",
+          "description": "Create vibekanban/bop-bridge.nu with 'bridge stage' exported command. Takes stage name and optional card_id. Wraps `bop bridge emit --cli <cli> --event stage-change --stage <stage>`. Follows existing vibekanban/bop-provider.nu style.",
+          "service": "vibekanban",
+          "files_to_modify": [],
+          "files_to_create": [
+            "vibekanban/bop-bridge.nu"
+          ],
+          "patterns_from": [
+            "vibekanban/bop-provider.nu"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "head -5 vibekanban/bop-bridge.nu && grep -c 'bridge stage' vibekanban/bop-bridge.nu",
+            "expected": "File exists with shebang and 'bridge stage' function definition"
+          },
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "phase-6-integration",
+      "name": "Integration verification",
+      "type": "integration",
+      "description": "Verify all components work together: build, all tests pass, emit+listen roundtrip works, hook install/uninstall works.",
+      "depends_on": [
+        "phase-2-cmd-listener",
+        "phase-3-hook-installer",
+        "phase-4-opencode-sse",
+        "phase-5-nushell-skill"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-6-1",
+          "description": "Run full acceptance criteria: (1) cargo build succeeds, (2) all bridge tests pass (14 total), (3) clippy clean, (4) fmt clean, (5) bridge emit exits 0 with no socket, (6) bridge listen creates/removes socket on interrupt. Verify no regressions in existing tests.",
+          "all_services": true,
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cargo build -p bop && cargo test -p bop bridge 2>&1 | tail -5 && cargo clippy -p bop -- -D warnings 2>&1 | tail -1 && cargo fmt --check",
+            "expected": "Build succeeds, 14 bridge tests pass, clippy clean, fmt clean"
+          },
+          "status": "pending"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_phases": 6,
+    "total_subtasks": 7,
+    "services_involved": [
+      "bop-cli",
+      "vibekanban"
+    ],
+    "parallelism": {
+      "max_parallel_phases": 3,
+      "parallel_groups": [
+        {
+          "phases": [
+            "phase-3-hook-installer",
+            "phase-4-opencode-sse"
+          ],
+          "reason": "Both depend only on phase-1-core-types, completely disjoint file sets (hook_installer.rs vs opencode.rs)"
+        }
+      ],
+      "recommended_workers": 1,
+      "speedup_estimate": "Minimal — all phases are in the same crate, single-crate build serializes anyway"
+    },
+    "implementation_status": "All code already exists on main branch. Bridge module (mod.rs, cmd.rs, hook_installer.rs, opencode.rs) fully implemented with 14 passing tests. Nushell skill script in place. Main.rs wired. Build/clippy/fmt all clean.",
+    "startup_command": "cargo build -p bop && cargo test -p bop bridge"
+  },
+  "verification_strategy": {
+    "risk_level": "medium",
+    "skip_validation": false,
+    "test_creation_phase": "inline_with_implementation",
+    "test_types_required": [
+      "unit"
+    ],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      "cargo build -p bop succeeds with zero errors",
+      "cargo test -p bop bridge passes all 14 tests",
+      "cargo clippy -p bop -- -D warnings passes clean",
+      "cargo fmt --check passes",
+      "bop bridge emit --cli claude --event session-start --session test-123 exits 0",
+      "bop bridge listen creates socket and cleans up on interrupt",
+      "Hook install/uninstall preserves existing ~/.claude/settings.json content"
+    ],
+    "verification_steps": [
+      {
+        "name": "Build check",
+        "command": "cargo build -p bop",
+        "expected_outcome": "Build succeeds",
+        "type": "build",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Bridge unit tests",
+        "command": "cargo test -p bop bridge",
+        "expected_outcome": "14 tests pass",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Clippy lint",
+        "command": "cargo clippy -p bop -- -D warnings",
+        "expected_outcome": "No warnings",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Format check",
+        "command": "cargo fmt --check",
+        "expected_outcome": "No formatting issues",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      }
+    ],
+    "reasoning": "Medium risk feature adding new CLI subcommand with Unix socket IPC and external JSON file manipulation. Unit tests cover serialization, hook install/uninstall, and SSE translation logic."
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": true,
+      "commands": [
+        "cargo test -p bop bridge"
+      ],
+      "minimum_coverage": null
+    },
+    "integration_tests": {
+      "required": false,
+      "commands": [],
+      "services_to_test": []
+    },
+    "e2e_tests": {
+      "required": false,
+      "commands": [],
+      "flows": []
+    },
+    "browser_verification": {
+      "required": false,
+      "pages": []
+    },
+    "database_verification": {
+      "required": false,
+      "checks": []
+    }
+  },
+  "qa_signoff": null,
+  "status": "in_progress",
+  "planStatus": "in_progress",
+  "xstateState": "backlog",
+  "executionPhase": "coding",
+  "updated_at": "2026-03-25T18:22:12.863Z"
+}
