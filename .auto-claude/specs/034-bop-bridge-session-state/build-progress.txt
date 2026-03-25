@@ -108,3 +108,38 @@ subtask-4-1: opencode SSE adapter — COMPLETED
 - Updated implementation_plan.json: subtask-4-1 status -> "completed"
 
 === END SESSION 3 ===
+
+=== SESSION 4 (Coder: subtask-6-1 — Integration verification) ===
+
+subtask-6-1: Full acceptance criteria verification — COMPLETED
+
+All 6 acceptance criteria passed:
+
+1. cargo build -p bop: SUCCESS (0 errors)
+2. cargo test -p bop bridge: 14/14 tests pass
+   - bridge::tests (5): test_event_serialize_session_start,
+     test_event_serialize_stage_change, test_emit_no_socket_is_noop,
+     test_roundtrip_all_variants, test_stage_from_str
+   - bridge::cmd::tests (2): emit_builder_parses_stage_change,
+     emit_builder_parses_tool_done
+   - bridge::hook_installer::tests (4): test_install_into_empty_settings,
+     test_install_merges_existing_settings,
+     test_install_appends_existing_hooks,
+     test_uninstall_removes_bop_hooks_only
+   - bridge::opencode::tests (3): session_status_busy_maps_to_in_progress,
+     session_status_retry_maps_to_awaiting_human,
+     permission_updated_maps_to_awaiting_human_with_reason
+3. cargo clippy -p bop -- -D warnings: CLEAN (0 warnings)
+4. cargo fmt --check: CLEAN (no formatting issues)
+5. bridge emit with no socket: exits 0 (fire-and-forget noop confirmed)
+6. bridge listen creates socket, cleans up on interrupt (timeout test passed)
+
+Regression check:
+- 1024 bop unit tests: ALL PASS (0 failures, 1 ignored)
+- bop-core tests: ALL PASS
+- Workspace-wide clippy: CLEAN
+
+All 7/7 subtasks across 6 phases: COMPLETED
+Implementation plan status: human_review (ready for signoff)
+
+=== END SESSION 4 ===
