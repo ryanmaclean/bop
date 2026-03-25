@@ -111,7 +111,7 @@
           },
           "status": "completed",
           "notes": "Implementation already existed on branch from bop v0.2. Verified: hook_installer.rs has install_claude_hooks()/uninstall_claude_hooks() with merge strategy (read settings.json -> merge hooks key -> write back). Install creates SessionStart/PreToolUse/PostToolUse/Stop hook entries pointing to `bop bridge emit` commands. Uninstall retains non-bop hooks and cleans empty arrays/objects. Uses BRIDGE_MARKER 'bop bridge emit' for identification. All 4 tests pass, clippy clean, fmt clean.",
-          "updated_at": "2026-03-25T19:15:00.000000+00:00"
+          "updated_at": "2026-03-25T18:45:03.397503+00:00"
         }
       ]
     },
@@ -141,7 +141,9 @@
             "command": "cargo test -p bop bridge::opencode::tests -- --nocapture",
             "expected": "3 tests pass: session_status_busy_maps_to_in_progress, session_status_retry_maps_to_awaiting_human, permission_updated_maps_to_awaiting_human_with_reason"
           },
-          "status": "pending"
+          "status": "completed",
+          "notes": "Implementation already existed on branch from bop v0.2. Verified: bridge/opencode.rs has listen_opencode() async function connecting to GET http://localhost:{port}/event with SSE Accept header. Parses SSE stream (event:/data: lines). Translates session.status busy->InProgress, idle->HumanReview, retry->AwaitingHuman. Translates message.part.delta->ToolStart, permission.updated->AwaitingHuman. Robust JSON field extraction with multiple path fallbacks via extract_string/value_at_path helpers. All 3 tests pass, clippy clean, fmt clean.",
+          "updated_at": "2026-03-25T19:10:00.000000+00:00"
         }
       ]
     },
@@ -315,6 +317,6 @@
   "planStatus": "in_progress",
   "xstateState": "backlog",
   "executionPhase": "coding",
-  "updated_at": "2026-03-25T18:43:29.122Z",
-  "last_updated": "2026-03-25T18:43:06.966876+00:00"
+  "updated_at": "2026-03-25T18:45:29.686Z",
+  "last_updated": "2026-03-25T18:45:03.397513+00:00"
 }

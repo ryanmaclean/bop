@@ -81,3 +81,30 @@ subtask-1-1: Core types and socket emit — COMPLETED
 - Updated implementation_plan.json: subtask-1-1 status -> "completed"
 
 === END SESSION 2 ===
+
+=== SESSION 3 (Coder: subtask-4-1) ===
+
+subtask-4-1: opencode SSE adapter — COMPLETED
+- Implementation already present on branch (all code from bop v0.2)
+- Verified crates/bop-cli/src/bridge/opencode.rs contains:
+  - listen_opencode(port) async fn: connects to GET http://localhost:{port}/event
+    with SSE Accept header, parses SSE stream (event:/data: lines)
+  - dispatch_event() / translate_sse_event(): event dispatch + translation
+  - SSE event mapping:
+    - session.status "busy" -> StageChange { stage: InProgress }
+    - session.status "idle" -> StageChange { stage: HumanReview }
+    - session.status "retry" -> AwaitingHuman { reason: "retry" }
+    - message.part.delta -> ToolStart { tool: extracted or "message.part.delta" }
+    - permission.updated -> AwaitingHuman { reason: extracted }
+  - Robust JSON field extraction via extract_string/value_at_path helpers
+    with multiple path fallbacks (snake_case, camelCase, nested objects)
+  - Helper functions: parse_payload, extract_status, extract_session_id,
+    extract_card_id, extract_tool, extract_reason
+- All 3 tests pass:
+  - session_status_busy_maps_to_in_progress
+  - session_status_retry_maps_to_awaiting_human
+  - permission_updated_maps_to_awaiting_human_with_reason
+- clippy clean, fmt clean
+- Updated implementation_plan.json: subtask-4-1 status -> "completed"
+
+=== END SESSION 3 ===
