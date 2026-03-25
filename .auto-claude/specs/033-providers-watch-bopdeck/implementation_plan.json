@@ -80,8 +80,9 @@
             "command": "cargo test -p bop-cli -- upsert_snapshot sort_snapshots 2>&1 | tail -5",
             "expected": "test result: ok"
           },
-          "status": "pending",
-          "notes": "Follow existing test patterns: use mock ProviderSnapshot instances, assert ordering by provider name."
+          "status": "completed",
+          "notes": "Added 5 unit tests: upsert_snapshot_inserts_new_provider, upsert_snapshot_updates_existing_provider, upsert_snapshot_maintains_sort_order, sort_snapshots_sorts_by_provider_order, sort_snapshots_unknown_providers_go_last. All pass. Package name is 'bop' not 'bop-cli'.",
+          "updated_at": "2026-03-25T05:40:05.812214+00:00"
         },
         {
           "id": "subtask-2-2",
@@ -99,7 +100,9 @@
             "command": "cargo test -p bop-cli -- render_snapshots_table 2>&1 | tail -5",
             "expected": "test result: ok"
           },
-          "status": "pending"
+          "status": "completed",
+          "notes": "Added render_snapshots_table_contains_provider_names_and_bars test. Verifies: provider display names, source labels, header labels, percentage values, bar characters, error annotation with warning glyph, and relative reset time. All tests pass, clippy clean.",
+          "updated_at": "2026-03-25T05:45:00.000000+00:00"
         }
       ]
     },
@@ -243,6 +246,6 @@
   "planStatus": "in_progress",
   "xstateState": "backlog",
   "executionPhase": "coding",
-  "updated_at": "2026-03-25T05:35:31.132Z",
-  "last_updated": "2026-03-25T05:37:09.902045+00:00"
+  "updated_at": "2026-03-25T05:40:31.560Z",
+  "last_updated": "2026-03-25T05:40:05.812220+00:00"
 }

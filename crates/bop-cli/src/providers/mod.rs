@@ -1775,4 +1775,68 @@ mod tests {
         assert!(codex.get("reset_in_secs").unwrap().is_null());
         assert_eq!(codex.get("error").and_then(|v| v.as_str()), Some("note"));
     }
+
+    #[test]
+    fn render_snapshots_table_contains_provider_names_and_bars() {
+        let snapshots = vec![
+            ProviderSnapshot {
+                provider: "claude".into(),
+                display_name: "Claude Code".into(),
+                primary_pct: Some(61),
+                secondary_pct: Some(30),
+                primary_label: Some("5h".into()),
+                secondary_label: Some("7d".into()),
+                tokens_used: None,
+                cost_usd: None,
+                reset_at: Some(Utc::now() + chrono::Duration::minutes(20)),
+                source: "oauth".into(),
+                error: None,
+                loaded_models: None,
+            },
+            ProviderSnapshot {
+                provider: "codex".into(),
+                display_name: "Codex CLI".into(),
+                primary_pct: Some(92),
+                secondary_pct: None,
+                primary_label: Some("5h".into()),
+                secondary_label: Some("7d".into()),
+                tokens_used: None,
+                cost_usd: None,
+                reset_at: None,
+                source: "oauth".into(),
+                error: Some("rate limited".into()),
+                loaded_models: None,
+            },
+        ];
+
+        let out = render_snapshots(&snapshots, false).unwrap();
+
+        // Provider display names appear in the table
+        assert!(out.contains("Claude Code"), "expected 'Claude Code' in table output");
+        assert!(out.contains("Codex CLI"), "expected 'Codex CLI' in table output");
+
+        // Source labels are present
+        assert!(out.contains("oauth"), "expected 'oauth' source label");
+
+        // Header row includes column labels
+        assert!(out.contains("Provider"), "expected 'Provider' header");
+        assert!(out.contains("5h"), "expected '5h' header label");
+        assert!(out.contains("7d"), "expected '7d' header label");
+
+        // Percentage values appear with their % suffix
+        assert!(out.contains("61%"), "expected '61%' in table output");
+        assert!(out.contains("30%"), "expected '30%' in table output");
+        assert!(out.contains("92%"), "expected '92%' in table output");
+
+        // Bar characters are present (filled and empty blocks)
+        assert!(out.contains('█'), "expected filled bar character '█'");
+        assert!(out.contains('░'), "expected empty bar character '░'");
+
+        // Error annotation line is rendered
+        assert!(out.contains("rate limited"), "expected error annotation in output");
+        assert!(out.contains('⚠'), "expected warning glyph for error snapshot");
+
+        // Reset time for Claude should show a relative duration (e.g. "in 20m" or "in 19m")
+        assert!(out.contains("in "), "expected relative reset time");
+    }
 }
