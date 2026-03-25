@@ -1,0 +1,103 @@
+=== AUTO-BUILD PROGRESS ===
+
+Project: Spec 033 — bop providers: --watch mode + BopDeck socket feed
+Workspace: 033-providers-watch-bopdeck (worktree)
+Started: 2026-03-24
+
+Workflow Type: simple
+Rationale: All spec features are already implemented from specs 030-032. The remaining
+work is verification, missing unit tests, and acceptance criteria validation. Single
+service (bop-cli), low risk.
+
+Session 1 (Planner):
+- Created implementation_plan.json
+- Phases: 3
+- Total subtasks: 6
+- Created init.sh
+- Created context.json
+
+CRITICAL FINDING:
+All features described in spec 033 are ALREADY IMPLEMENTED in the codebase:
+  - cmd_providers() with --watch mode (concurrent tokio tasks, mpsc channels)
+  - BopDeckWriter with OpenLineage event emission to Unix domain socket
+  - History JSONL module (append, read, sparkline, trim at 1MB/10k lines)
+  - All 6 provider backends (claude, codex, gemini, ollama-local, ollama-cloud, opencode)
+  - CLI wiring: Providers { watch, json, interval } -> providers::cmd_providers()
+  - In-place ANSI table redraw with cursor-up escape codes
+  - Ctrl+C clean shutdown
+  - resolve_poll_interval() with CLI > env > 60s default
+
+Phase Summary:
+- Phase 1 (Compilation and test verification): 2 subtasks, depends on []
+  - subtask-1-1: Verify cargo build -p bop-cli compiles + clippy + fmt
+  - subtask-1-2: Run all existing provider tests, fix failures
+- Phase 2 (Add missing unit tests): 2 subtasks, depends on [phase-1-verify]
+  - subtask-2-1: Tests for upsert_snapshot and sort_snapshots
+  - subtask-2-2: Test for render_snapshots ANSI table output
+- Phase 3 (Acceptance criteria validation): 2 subtasks, depends on [phase-2-tests]
+  - subtask-3-1: make check (test + clippy + fmt)
+  - subtask-3-2: Integration test: build, help output, history path
+
+Services Involved:
+- bop-cli: providers module (crates/bop-cli/src/providers/)
+
+Parallelism Analysis:
+- Max parallel phases: 1
+- Recommended workers: 1
+- Parallel groups: None (all phases sequential)
+
+Key Files:
+- crates/bop-cli/src/providers/mod.rs (main module: cmd_providers, watch loop, rendering)
+- crates/bop-cli/src/providers/bopdeck.rs (BopDeckWriter, OpenLineage events)
+- crates/bop-cli/src/providers/history.rs (JSONL append/read/sparkline)
+- crates/bop-cli/src/providers/claude.rs (Claude OAuth provider)
+- crates/bop-cli/src/providers/codex.rs (Codex provider)
+- crates/bop-cli/src/providers/gemini.rs (Gemini provider)
+- crates/bop-cli/src/providers/ollama.rs (Ollama local+cloud providers)
+- crates/bop-cli/src/providers/opencode.rs (OpenCode provider)
+- crates/bop-cli/src/main.rs (CLI command registration)
+
+=== STARTUP COMMAND ===
+
+To continue building this spec, run the coder agent against this worktree.
+
+Coder should:
+1. cargo build -p bop — verify compilation (NOTE: package name is "bop", not "bop-cli")
+2. cargo test -p bop — verify existing tests
+3. Add missing unit tests (upsert_snapshot, sort_snapshots, render_snapshots_table)
+4. cargo clippy -p bop -- -D warnings && cargo fmt --check
+5. Verify: ./target/debug/bop providers --help shows --watch, --json, --interval
+
+=== END SESSION 1 ===
+
+=== Session 2 (Coder - subtask-1-1) ===
+Started: 2026-03-24
+
+subtask-1-1: Verify compilation + clippy + fmt
+- NOTE: Cargo package name is "bop" (not "bop-cli"). Plan verification commands
+  use -p bop-cli which fails with "package ID specification did not match".
+  Correct usage: cargo build -p bop
+- cargo build -p bop: PASS (compiles cleanly, no errors)
+- cargo clippy -p bop -- -D warnings: PASS (zero warnings)
+- cargo fmt --check -p bop: PASS (no formatting issues)
+- cargo test -p bop -- providers::bopdeck providers::history: PASS (9/9 tests OK)
+- No code changes required — all files compile as-is.
+
+Status: subtask-1-1 COMPLETED
+=== END Session 2 ===
+
+=== Session 3 (Coder - subtask-1-2) ===
+Started: 2026-03-24
+
+subtask-1-2: Run all existing provider-related tests, fix failures
+- Initial run: 31 of 156 provider tests FAILED
+- Root cause: TMPDIR=/tmp/claude but directory did not exist. All tempfile::tempdir()
+  calls failed with PathError/NotFound, causing cascading PoisonError on shared mutexes.
+- Fix: mkdir -p /tmp/claude (environment issue, not a code bug)
+- Re-run: cargo test -p bop providers → 156 passed; 0 failed
+- Also verified: cargo test -p bop bopdeck → ok, cargo test -p bop history → ok
+- No code changes were required — all provider source files are correct as-is.
+- Files checked: mod.rs, bopdeck.rs, history.rs, claude.rs (plus codex, gemini, ollama, opencode)
+
+Status: subtask-1-2 COMPLETED
+=== END Session 3 ===

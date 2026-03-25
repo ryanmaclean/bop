@@ -1,0 +1,248 @@
+{
+  "feature": "Spec 033 — bop providers: --watch mode + BopDeck socket feed",
+  "workflow_type": "simple",
+  "workflow_rationale": "All spec features are already implemented in the codebase (from specs 030-032). The remaining work is verification, adding missing unit tests, and ensuring the acceptance criteria pass. Single-service (bop-cli), simple workflow.",
+  "phases": [
+    {
+      "id": "phase-1-verify",
+      "name": "Compilation and test verification",
+      "type": "implementation",
+      "description": "Verify the existing implementation compiles, passes tests, and is clippy+fmt clean. Fix any compilation or test issues found.",
+      "depends_on": [],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Verify cargo build -p bop-cli compiles successfully. If there are compilation errors, fix them. Run cargo clippy -- -D warnings and cargo fmt --check to ensure code quality gates pass.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/providers/mod.rs",
+            "crates/bop-cli/src/providers/bopdeck.rs",
+            "crates/bop-cli/src/providers/history.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cargo build -p bop-cli 2>&1 && echo BUILD_OK",
+            "expected": "BUILD_OK"
+          },
+          "status": "completed",
+          "notes": "Verified: cargo build -p bop compiles cleanly, cargo clippy -p bop -- -D warnings has zero warnings, cargo fmt --check passes. Note: package name is 'bop' not 'bop-cli'. All 9 bopdeck+history tests pass. No code changes required.",
+          "updated_at": "2026-03-25T05:35:01.006161+00:00"
+        },
+        {
+          "id": "subtask-1-2",
+          "description": "Run all existing provider-related tests: cargo test -p bop-cli providers (and cargo test -p bop-cli bopdeck, history). Fix any failing tests. Ensure all tests pass cleanly.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/providers/mod.rs",
+            "crates/bop-cli/src/providers/bopdeck.rs",
+            "crates/bop-cli/src/providers/history.rs",
+            "crates/bop-cli/src/providers/claude.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cargo test -p bop-cli providers 2>&1 | tail -5",
+            "expected": "test result: ok"
+          },
+          "status": "completed",
+          "notes": "All 156 provider tests pass (0 failures). Initial failures were caused by missing TMPDIR directory (/tmp/claude), not code bugs. No code changes required - all provider source files (mod.rs, bopdeck.rs, history.rs, claude.rs, codex.rs, gemini.rs, ollama.rs, opencode.rs) are correct as-is.",
+          "updated_at": "2026-03-25T05:37:09.902040+00:00"
+        }
+      ]
+    },
+    {
+      "id": "phase-2-tests",
+      "name": "Add missing unit tests",
+      "type": "implementation",
+      "description": "Add unit tests for helper functions that lack coverage: upsert_snapshot, sort_snapshots, and render_snapshots ANSI table output. These are internal functions in mod.rs that are exercised by the watch loop but not directly tested.",
+      "depends_on": [
+        "phase-1-verify"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-2-1",
+          "description": "Add unit tests for upsert_snapshot (tests: insert new provider, update existing provider, maintains sort order) and sort_snapshots (tests: sorts by provider_order, unknown providers go last). Add these to the existing #[cfg(test)] mod tests block in providers/mod.rs.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/providers/mod.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/providers/mod.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo test -p bop-cli -- upsert_snapshot sort_snapshots 2>&1 | tail -5",
+            "expected": "test result: ok"
+          },
+          "status": "pending",
+          "notes": "Follow existing test patterns: use mock ProviderSnapshot instances, assert ordering by provider name."
+        },
+        {
+          "id": "subtask-2-2",
+          "description": "Add a unit test for render_snapshots in ANSI table mode (not JSON). Verify the table output contains expected provider names, percentage values, and bar characters. This complements the existing render_snapshots_json test.",
+          "service": "bop-cli",
+          "files_to_modify": [
+            "crates/bop-cli/src/providers/mod.rs"
+          ],
+          "files_to_create": [],
+          "patterns_from": [
+            "crates/bop-cli/src/providers/mod.rs"
+          ],
+          "verification": {
+            "type": "command",
+            "command": "cargo test -p bop-cli -- render_snapshots_table 2>&1 | tail -5",
+            "expected": "test result: ok"
+          },
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "phase-3-acceptance",
+      "name": "Acceptance criteria validation",
+      "type": "integration",
+      "description": "Run all acceptance criteria from the spec to verify the full feature works end-to-end: build, test, help output, and watch+history integration.",
+      "depends_on": [
+        "phase-2-tests"
+      ],
+      "parallel_safe": false,
+      "subtasks": [
+        {
+          "id": "subtask-3-1",
+          "description": "Run make check (test + clippy + fmt) to ensure full quality gates pass. Then verify 'bop providers --help' shows the expected flags (--watch, --json, --interval). Fix any issues found.",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cargo clippy -p bop-cli -- -D warnings 2>&1 | tail -3 && cargo fmt --check 2>&1 | tail -3 && echo GATES_PASS",
+            "expected": "GATES_PASS"
+          },
+          "status": "pending"
+        },
+        {
+          "id": "subtask-3-2",
+          "description": "Run the integration acceptance test from the spec: build, run providers --help to verify usage text. Verify that the history file path is correct and the JSONL format is valid. Note: the --watch + kill integration test requires network access and live providers, so verify the code path exists rather than end-to-end execution.",
+          "service": "bop-cli",
+          "files_to_modify": [],
+          "files_to_create": [],
+          "patterns_from": [],
+          "verification": {
+            "type": "command",
+            "command": "cargo build -p bop-cli 2>&1 | tail -1 && ./target/debug/bop providers --help 2>&1 | head -10",
+            "expected": "--watch"
+          },
+          "status": "pending"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_phases": 3,
+    "total_subtasks": 6,
+    "services_involved": [
+      "bop-cli"
+    ],
+    "parallelism": {
+      "max_parallel_phases": 1,
+      "parallel_groups": [],
+      "recommended_workers": 1,
+      "speedup_estimate": "Sequential — all phases depend on prior phases"
+    },
+    "startup_command": "cargo build -p bop-cli"
+  },
+  "verification_strategy": {
+    "risk_level": "low",
+    "skip_validation": false,
+    "test_creation_phase": "phase-2-tests",
+    "test_types_required": [
+      "unit"
+    ],
+    "security_scanning_required": false,
+    "staging_deployment_required": false,
+    "acceptance_criteria": [
+      "cargo build -p bop-cli succeeds",
+      "cargo test -p bop-cli providers passes all tests",
+      "cargo clippy -p bop-cli -- -D warnings is clean",
+      "cargo fmt --check is clean",
+      "bop providers --help shows --watch, --json, --interval flags",
+      "New unit tests for upsert_snapshot, sort_snapshots, render_snapshots_table pass"
+    ],
+    "verification_steps": [
+      {
+        "name": "Build",
+        "command": "cargo build -p bop-cli",
+        "expected_outcome": "Compiles without errors",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Unit Tests",
+        "command": "cargo test -p bop-cli",
+        "expected_outcome": "All tests pass",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Clippy",
+        "command": "cargo clippy -p bop-cli -- -D warnings",
+        "expected_outcome": "No warnings",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      },
+      {
+        "name": "Format",
+        "command": "cargo fmt --check",
+        "expected_outcome": "No formatting issues",
+        "type": "test",
+        "required": true,
+        "blocking": true
+      }
+    ],
+    "reasoning": "Low risk — all features already implemented. Work is verification and adding test coverage for internal helpers."
+  },
+  "qa_acceptance": {
+    "unit_tests": {
+      "required": true,
+      "commands": [
+        "cargo test -p bop-cli"
+      ],
+      "minimum_coverage": null
+    },
+    "integration_tests": {
+      "required": false,
+      "commands": [],
+      "services_to_test": []
+    },
+    "e2e_tests": {
+      "required": false,
+      "commands": [],
+      "flows": []
+    },
+    "browser_verification": {
+      "required": false,
+      "pages": []
+    },
+    "database_verification": {
+      "required": false,
+      "checks": []
+    }
+  },
+  "qa_signoff": null,
+  "status": "in_progress",
+  "planStatus": "in_progress",
+  "xstateState": "backlog",
+  "executionPhase": "coding",
+  "updated_at": "2026-03-25T05:35:31.132Z",
+  "last_updated": "2026-03-25T05:37:09.902045+00:00"
+}
