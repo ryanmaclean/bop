@@ -1,4 +1,4 @@
-# bop — Heterogeneous Agent Orchestrator
+# bop — Agent Orchestrator
 
 ![CI](https://github.com/ryanmaclean/bop/actions/workflows/ci.yml/badge.svg)
 
