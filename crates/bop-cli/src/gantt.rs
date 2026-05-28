@@ -682,4 +682,384 @@ mod tests {
         assert!(html.contains("#4caf50") || html.contains("#ff9800") || html.contains("#f44336"));
         assert!(html.contains("Parallelism peak"));
     }
+
+    #[test]
+    fn escape_html_attr_handles_special_chars() {
+        assert_eq!(escape_html_attr("foo & bar"), "foo &amp; bar");
+        assert_eq!(escape_html_attr("<script>"), "&lt;script&gt;");
+        assert_eq!(escape_html_attr("a\"b'c"), "a&quot;b&#39;c");
+        assert_eq!(
+            escape_html_attr("&<>\"'"),
+            "&amp;&lt;&gt;&quot;&#39;"
+        );
+        assert_eq!(escape_html_attr("safe-text_123"), "safe-text_123");
+    }
+
+    #[test]
+    fn format_u64_commas_adds_separators() {
+        assert_eq!(format_u64_commas(0), "0");
+        assert_eq!(format_u64_commas(999), "999");
+        assert_eq!(format_u64_commas(1000), "1,000");
+        assert_eq!(format_u64_commas(1234567), "1,234,567");
+        assert_eq!(format_u64_commas(999999999), "999,999,999");
+    }
+
+    #[test]
+    fn dur_label_precise_formats_correctly() {
+        assert_eq!(dur_label_precise(0.0), "0s");
+        assert_eq!(dur_label_precise(45.0), "45s");
+        assert_eq!(dur_label_precise(90.0), "1m 30s");
+        assert_eq!(dur_label_precise(3661.0), "1h 1m 1s");
+        assert_eq!(dur_label_precise(7384.0), "2h 3m 4s");
+        // Negative values should be clamped to 0
+        assert_eq!(dur_label_precise(-10.0), "0s");
+    }
+
+    #[test]
+    fn percentile_threshold_calculates_correctly() {
+        let vals = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        assert_eq!(percentile_threshold(&vals, 0.0), 1.0);
+        assert_eq!(percentile_threshold(&vals, 0.5), 3.0);
+        assert_eq!(percentile_threshold(&vals, 1.0), 5.0);
+
+        // Empty array
+        assert_eq!(percentile_threshold(&[], 0.5), 0.0);
+
+        // Single element
+        assert_eq!(percentile_threshold(&[42.0], 0.5), 42.0);
+
+        // Two elements
+        let two = vec![10.0, 20.0];
+        assert_eq!(percentile_threshold(&two, 0.0), 10.0);
+        assert_eq!(percentile_threshold(&two, 1.0), 20.0);
+    }
+
+    #[test]
+    fn peak_parallelism_detects_concurrent_tasks() {
+        use chrono::Duration;
+        let base = Utc::now();
+
+        // Sequential tasks - peak should be 1
+        let sequential = vec![
+            Bar {
+                id: "a".into(),
+                glyph: "".into(),
+                state: "done".into(),
+                stage: "implement".into(),
+                provider: "claude".into(),
+                start: base,
+                end: base + Duration::minutes(5),
+                dur_s: 300.0,
+                tokens: None,
+                cost: None,
+            },
+            Bar {
+                id: "b".into(),
+                glyph: "".into(),
+                state: "done".into(),
+                stage: "implement".into(),
+                provider: "claude".into(),
+                start: base + Duration::minutes(6),
+                end: base + Duration::minutes(10),
+                dur_s: 240.0,
+                tokens: None,
+                cost: None,
+            },
+        ];
+        assert_eq!(peak_parallelism(&sequential), 1);
+
+        // Overlapping tasks - peak should be 2
+        let overlapping = vec![
+            Bar {
+                id: "a".into(),
+                glyph: "".into(),
+                state: "done".into(),
+                stage: "implement".into(),
+                provider: "claude".into(),
+                start: base,
+                end: base + Duration::minutes(10),
+                dur_s: 600.0,
+                tokens: None,
+                cost: None,
+            },
+            Bar {
+                id: "b".into(),
+                glyph: "".into(),
+                state: "done".into(),
+                stage: "implement".into(),
+                provider: "claude".into(),
+                start: base + Duration::minutes(5),
+                end: base + Duration::minutes(15),
+                dur_s: 600.0,
+                tokens: None,
+                cost: None,
+            },
+        ];
+        assert_eq!(peak_parallelism(&overlapping), 2);
+
+        // Three concurrent tasks
+        let triple = vec![
+            Bar {
+                id: "a".into(),
+                glyph: "".into(),
+                state: "done".into(),
+                stage: "implement".into(),
+                provider: "claude".into(),
+                start: base,
+                end: base + Duration::minutes(10),
+                dur_s: 600.0,
+                tokens: None,
+                cost: None,
+            },
+            Bar {
+                id: "b".into(),
+                glyph: "".into(),
+                state: "done".into(),
+                stage: "implement".into(),
+                provider: "claude".into(),
+                start: base + Duration::minutes(2),
+                end: base + Duration::minutes(8),
+                dur_s: 360.0,
+                tokens: None,
+                cost: None,
+            },
+            Bar {
+                id: "c".into(),
+                glyph: "".into(),
+                state: "done".into(),
+                stage: "implement".into(),
+                provider: "claude".into(),
+                start: base + Duration::minutes(3),
+                end: base + Duration::minutes(7),
+                dur_s: 240.0,
+                tokens: None,
+                cost: None,
+            },
+        ];
+        assert_eq!(peak_parallelism(&triple), 3);
+
+        // Empty case
+        assert_eq!(peak_parallelism(&[]), 0);
+    }
+
+    #[test]
+    fn cluster_groups_by_time_gaps() {
+        use chrono::Duration;
+        let base = Utc::now();
+
+        let bars = vec![
+            Bar {
+                id: "a".into(),
+                glyph: "".into(),
+                state: "done".into(),
+                stage: "implement".into(),
+                provider: "claude".into(),
+                start: base,
+                end: base + Duration::minutes(5),
+                dur_s: 300.0,
+                tokens: None,
+                cost: None,
+            },
+            Bar {
+                id: "b".into(),
+                glyph: "".into(),
+                state: "done".into(),
+                stage: "implement".into(),
+                provider: "claude".into(),
+                start: base + Duration::minutes(10),
+                end: base + Duration::minutes(15),
+                dur_s: 300.0,
+                tokens: None,
+                cost: None,
+            },
+            // Gap of 35 minutes - should create new cluster
+            Bar {
+                id: "c".into(),
+                glyph: "".into(),
+                state: "done".into(),
+                stage: "implement".into(),
+                provider: "claude".into(),
+                start: base + Duration::minutes(50),
+                end: base + Duration::minutes(55),
+                dur_s: 300.0,
+                tokens: None,
+                cost: None,
+            },
+        ];
+
+        let clusters = cluster(&bars);
+        assert_eq!(clusters.len(), 2);
+        assert_eq!(clusters[0].len(), 2);
+        assert_eq!(clusters[1].len(), 1);
+        assert_eq!(clusters[0], vec![0, 1]);
+        assert_eq!(clusters[1], vec![2]);
+    }
+
+    #[test]
+    fn cluster_single_bar() {
+        use chrono::Duration;
+        let base = Utc::now();
+
+        let bars = vec![Bar {
+            id: "a".into(),
+            glyph: "".into(),
+            state: "done".into(),
+            stage: "implement".into(),
+            provider: "claude".into(),
+            start: base,
+            end: base + Duration::minutes(5),
+            dur_s: 300.0,
+            tokens: None,
+            cost: None,
+        }];
+
+        let clusters = cluster(&bars);
+        assert_eq!(clusters.len(), 1);
+        assert_eq!(clusters[0], vec![0]);
+    }
+
+    #[test]
+    fn generate_html_empty_bars() {
+        let html = generate_html(&[]);
+        assert!(html.contains("<!DOCTYPE html>"));
+        assert!(html.contains("0 runs"));
+        assert!(html.contains("</html>"));
+    }
+
+    #[test]
+    fn generate_html_includes_summary_table() {
+        use chrono::Duration;
+        let base = Utc::now();
+
+        let bars = vec![
+            Bar {
+                id: "success".into(),
+                glyph: "".into(),
+                state: "done".into(),
+                stage: "implement".into(),
+                provider: "claude".into(),
+                start: base,
+                end: base + Duration::minutes(5),
+                dur_s: 300.0,
+                tokens: Some(1000),
+                cost: Some(0.10),
+            },
+            Bar {
+                id: "failed-task".into(),
+                glyph: "".into(),
+                state: "failed".into(),
+                stage: "implement".into(),
+                provider: "claude".into(),
+                start: base + Duration::minutes(10),
+                end: base + Duration::minutes(15),
+                dur_s: 300.0,
+                tokens: Some(2000),
+                cost: Some(0.20),
+            },
+        ];
+
+        let html = generate_html(&bars);
+        assert!(html.contains("Total cards"));
+        assert!(html.contains("Completed"));
+        assert!(html.contains("Failed"));
+        assert!(html.contains("Avg duration"));
+        assert!(html.contains("Total cost"));
+        assert!(html.contains("Parallelism peak"));
+        // Check actual values
+        assert!(html.contains("<td>2</td>")); // Total cards
+        assert!(html.contains("<td>1</td>")); // Completed or Failed
+        assert!(html.contains("$0.30")); // Total cost
+    }
+
+    #[test]
+    fn generate_html_tooltips_escape_content() {
+        use chrono::Duration;
+        let base = Utc::now();
+
+        let bars = vec![Bar {
+            id: "<script>alert('xss')</script>".into(),
+            glyph: "".into(),
+            state: "done".into(),
+            stage: "impl & test".into(),
+            provider: "claude \"pro\"".into(),
+            start: base,
+            end: base + Duration::minutes(5),
+            dur_s: 300.0,
+            tokens: Some(1000),
+            cost: Some(0.10),
+        }];
+
+        let html = generate_html(&bars);
+        // Ensure special characters are escaped in tooltip attributes
+        // The ID will appear in the label, but must be escaped in the tooltip
+        assert!(html.contains("title="));
+        assert!(html.contains("&lt;script&gt;")); // <script> escaped in tooltip
+        assert!(html.contains("impl &amp; test")); // & escaped in stage
+        assert!(html.contains("claude &quot;pro&quot;")); // " escaped in provider
+    }
+
+    #[test]
+    fn generate_html_heat_colors_by_percentile() {
+        use chrono::Duration;
+        let base = Utc::now();
+
+        // Create bars with varying durations to test heat coloring
+        let bars = vec![
+            Bar {
+                id: "fast".into(),
+                glyph: "".into(),
+                state: "done".into(),
+                stage: "implement".into(),
+                provider: "claude".into(),
+                start: base,
+                end: base + Duration::seconds(30),
+                dur_s: 30.0,
+                tokens: None,
+                cost: None,
+            },
+            Bar {
+                id: "medium".into(),
+                glyph: "".into(),
+                state: "done".into(),
+                stage: "implement".into(),
+                provider: "claude".into(),
+                start: base + Duration::minutes(1),
+                end: base + Duration::minutes(3),
+                dur_s: 120.0,
+                tokens: None,
+                cost: None,
+            },
+            Bar {
+                id: "slow".into(),
+                glyph: "".into(),
+                state: "done".into(),
+                stage: "implement".into(),
+                provider: "claude".into(),
+                start: base + Duration::minutes(5),
+                end: base + Duration::minutes(10),
+                dur_s: 300.0,
+                tokens: None,
+                cost: None,
+            },
+        ];
+
+        let html = generate_html(&bars);
+        // Should contain heat colors
+        assert!(html.contains("#4caf50")); // Fast (green)
+        assert!(html.contains("#ff9800")); // Medium (orange)
+        assert!(html.contains("#f44336")); // Slow (red)
+    }
+
+    #[test]
+    fn parse_ts_handles_various_formats() {
+        // Standard ISO 8601 with Z
+        assert!(parse_ts("2024-01-15T10:30:45Z").is_some());
+
+        // Without Z
+        assert!(parse_ts("2024-01-15T10:30:45").is_some());
+
+        // Invalid format
+        assert!(parse_ts("not-a-date").is_none());
+        assert!(parse_ts("").is_none());
+    }
 }
