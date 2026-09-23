@@ -122,3 +122,64 @@ Totals: **yes 26 · partial 31 · no 3**. All 60 were marked completed.
 | auto-claude/059-multi-project | 2 / 0 | clippy fixes in `dispatcher.rs` test code (`--all-targets` lints) |
 | auto-claude/043-gantt-html-polish | 5 / 11 | tests + scratch artefacts; not in the human_review set, not merged |
 | auto-claude/032, 038, 060 | 0 / 0 | branches still point at `main` |
+
+## Merges into `ac/pickup-2026-09` (step 2)
+
+| branch | result |
+|---|---|
+| auto-claude/033-providers-watch-bopdeck | merged cleanly; `cargo test providers::` 159/159 (incl. the new upsert/sort/render tests) |
+| auto-claude/034-bop-bridge-session-state | merged cleanly; `nu vibekanban/bop-bridge.nu --test` → PASS |
+| auto-claude/059-multi-project | merged cleanly; `cargo clippy --all-targets -- -D warnings` clean |
+| auto-claude/042-providers-live-quota | skipped: no commits beyond `main` |
+
+`make check` after the three merges: 1177 passed, 0 failed, 1 ignored; clippy and fmt clean.
+
+## Finished in this pass (step 3)
+
+| spec | before | after | what changed / evidence |
+|---|---|---|---|
+| 032 | partial, AC review failed | **yes** | Root cause of the AC review failure: the spec's `-p bop-cli` (the crate is named `bop`), plus an env-var race. The ollama cloud test panicked because provider tests swapped `HOME`/`OLLAMA_API_KEY` under separate or missing mutexes. Fixes: shared `test_env::HomeGuard`; pure ollama credential resolution; opencode SSE parser (handles `data: {"type":…}` frames) wired into `--watch`; `--json` gains `loaded_models`, `display_name`, `source`, `tokens_used`, `cost_usd`. Live `bop providers --json` shows `ollama-local` with `loaded_models: []`. |
+| 060 | yes, AC 5/6 | **yes** (all bullets re-verified live) | Mock-adapter run: `--providers mock,mock2,broken,ghost --runs 2 --judge mock` rendered the table, marked broken/ghost `2/2 failed` and parsed judge scores. `--json` is valid. Result file saved to cwd. Fixed: judge card collided with `bench-mock-run-1.bop`; judge parser took the prompt's example object; same-second results overwrote each other; `$inf/point`. |
+| 038 | yes, AC stuck in planning | **yes** | `dispatch.nu cmd NNN [--json]` prints the spawned command. `dispatch.nu test` asserts cost 1→low … 4→xhigh, `--full-auto`, no bypass. `PROJECT_DIR` now comes from `path self`, so a worktree no longer writes the default checkout's state file. |
+| 036 + 052 | partial | **yes** (live `factory status` after reinstall not run) | The adapter now follows the selected provider: providers.json `command`, then the built-in adapter (ollama → `adapters/ollama.nu`), then the global `--adapter`. A chain of only unknown providers uses the global adapter instead of being requeued forever. New tests: 3 dispatcher-harness end-to-end tests (selected-not-head, unknown → global, empty chain → global) and 5 unit tests. |
+| 037 | partial | **yes** (code; live install not run) | merge-gate plist/unit now runs `merge-gate --vcs-engine jj --once`. First factory tests, including `plutil -lint` on both plists. |
+| 035 | partial | **yes** | codex.nu reads priority from `$BOP_CARD_DIR/meta.json`; self-test 17. |
+| (003/016) | — | still open | `adapters/claude.nu` no longer crashes (`claude.nu --test` passes), but no live claude e2e run has been recorded. |
+
+## dispatch-state corrections (step 4)
+
+`dispatch.nu` already had a `reset --spec` path. I extended it with `--reason`, which
+records the spec under a new `needs_recheck` map; `mark-done` clears the entry and
+`status [--json]` shows it. No spec was completed-but-missing, so there was nothing
+to `mark-done`. Final state: **31 completed, 29 reset to pending with a
+`needs_recheck` reason** (001–007 except 008, 009–014 except 015, 016, 020, 021,
+023–025, 027–031, 041, 044, 050, 054, 058). `nu dispatch.nu status` lists the reasons.
+
+## Left open
+
+- The 29 `needs_recheck` specs above. The heaviest are 023 (pause is global, tests
+  missing), 024 (sleep/wake is a stub), 050/054/058 (QEMU guest never mounts 9P),
+  011/044 (GitHub CI red; logs expired, needs a fresh run) and 001–004/016 (live
+  adapter e2e runs).
+- The AC kanban was not edited: 032 is still `ai_review/failed`, 038/060 `in_progress`,
+  033/034/042/059 `human_review`. Re-running AC QA or dragging the cards is an operator
+  action.
+- `auto-claude/043-gantt-html-polish` was not merged. It is not in the human_review set,
+  and it adds scratch files at the repo root.
+- `cargo deny check licenses` fails on `main` and on this branch alike:
+  `foldhash` (Zlib) and `webpki-roots` (CDLA-Permissive-2.0) are not in `deny.toml`.
+  `deny.toml` also allows MPL-2.0 (nucleo), ISC, CC0 and Unicode. All are outside the
+  MIT/BSD/Apache-only policy and need an owner decision.
+- `.auto-claude/.env` is tracked in git.
+
+## Verification (step 5)
+
+- `make check` on `ac/pickup-2026-09`: **1198 passed, 0 failed, 1 ignored**. That is
+  bop unit 1048, dispatcher_harness 13, job_control 17, merge_gate 4, serve_smoke 5,
+  bop-core 110 and doctest 1, up from 1171 on `main`. `cargo clippy -- -D warnings`
+  and `cargo fmt --check` are clean, and so is `cargo clippy --all-targets -- -D warnings`.
+- Every adapter `--test` passes (`claude.nu` failed on `main`). `nu dispatch.nu test` → PASS.
+- `cargo deny check licenses` → **FAILED**, the same two crates as on `main`
+  (`foldhash` Zlib, `webpki-roots` CDLA-Permissive-2.0). No dependencies were added
+  in this pass.
+- `nu dispatch.nu status` → Completed 31 / 59, Failed 0, Recheck 29.
