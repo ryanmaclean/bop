@@ -289,43 +289,84 @@ impl OpenCodeProvider {
             resp.status()
         );
 
-        let mut buffer = String::new();
-        let mut event_name: Option<String> = None;
+        let mut parser = SseEventParser::default();
 
         while let Some(chunk) = resp.chunk().await.context("failed to read SSE chunk")? {
-            let text = String::from_utf8_lossy(&chunk);
-            buffer.push_str(&text);
-
-            while let Some(pos) = buffer.find('\n') {
-                let mut line = buffer[..pos].to_string();
-                buffer.drain(..=pos);
-
-                if line.ends_with('\r') {
-                    line.pop();
-                }
-
-                if line.is_empty() {
-                    if event_name
-                        .as_deref()
-                        .map(|event| event.starts_with("session."))
-                        .unwrap_or(false)
-                    {
-                        if let Ok(snapshot) = self.fetch().await {
-                            let _ = tx.send(snapshot);
+            for event_type in parser.push(&chunk) {
+                if is_session_event(&event_type) {
+                    if let Ok(snapshot) = self.fetch().await {
+                        if tx.send(snapshot).is_err() {
+                            // Receiver gone (watch loop exited) — stop streaming.
+                            return Ok(());
                         }
                     }
-                    event_name = None;
-                    continue;
-                }
-
-                if let Some(name) = line.strip_prefix("event:") {
-                    event_name = Some(name.trim().to_string());
                 }
             }
         }
 
         Ok(())
     }
+}
+
+/// Incremental parser for opencode's `GET /event` SSE stream.
+///
+/// opencode frames look like `data: {"type":"session.updated","properties":{…}}`
+/// with no `event:` line; generic SSE servers name frames with `event: <name>`.
+/// Both forms are recognised. Bytes are buffered until a full line arrives so
+/// multi-byte UTF-8 split across chunks is decoded correctly.
+#[derive(Debug, Default)]
+pub(crate) struct SseEventParser {
+    buffer: Vec<u8>,
+    event_name: Option<String>,
+    data: String,
+}
+
+impl SseEventParser {
+    /// Feeds raw bytes; returns the type of every frame completed by them.
+    pub(crate) fn push(&mut self, chunk: &[u8]) -> Vec<String> {
+        self.buffer.extend_from_slice(chunk);
+        let mut completed = Vec::new();
+        while let Some(pos) = self.buffer.iter().position(|b| *b == b'\n') {
+            let raw: Vec<u8> = self.buffer.drain(..=pos).collect();
+            let line = String::from_utf8_lossy(&raw[..raw.len() - 1]);
+            let line = line.strip_suffix('\r').unwrap_or(&line);
+
+            if line.is_empty() {
+                if let Some(event_type) = self.finish_frame() {
+                    completed.push(event_type);
+                }
+            } else if line.starts_with(':') {
+                // SSE comment / keep-alive.
+            } else if let Some(name) = line.strip_prefix("event:") {
+                self.event_name = Some(name.trim().to_string());
+            } else if let Some(data) = line.strip_prefix("data:") {
+                if !self.data.is_empty() {
+                    self.data.push('\n');
+                }
+                self.data.push_str(data.strip_prefix(' ').unwrap_or(data));
+            }
+        }
+        completed
+    }
+
+    fn finish_frame(&mut self) -> Option<String> {
+        let name = self.event_name.take();
+        let data = std::mem::take(&mut self.data);
+        match name {
+            // "message" is the SSE default type; the payload's `type` is more specific.
+            Some(n) if !n.is_empty() && n != "message" => Some(n),
+            _ => serde_json::from_str::<Value>(&data)
+                .ok()?
+                .get("type")?
+                .as_str()
+                .map(str::to_string),
+        }
+    }
+}
+
+/// Spec 032: only `session.*` events trigger a snapshot refresh.
+pub(crate) fn is_session_event(event_type: &str) -> bool {
+    event_type.starts_with("session.")
 }
 
 #[async_trait]
@@ -419,7 +460,9 @@ impl Provider for OpenCodeProvider {
     }
 }
 
-#[allow(dead_code)] // retained for optional SSE integrations
+/// Live opencode counters for `bop providers --watch`: subscribes to the SSE
+/// stream and, whenever it drops, falls back to REST polling every
+/// `SSE_FALLBACK_POLL_S` seconds while retrying the stream.
 pub fn spawn_watch_task(
     tx: tokio::sync::mpsc::UnboundedSender<ProviderSnapshot>,
 ) -> tokio::task::JoinHandle<()> {
@@ -505,5 +548,39 @@ mod tests {
     fn parse_session_detail_malformed_json() {
         let result = OpenCodeProvider::parse_session_detail("not json");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn sse_parser_reads_opencode_data_type_frames() {
+        let mut p = SseEventParser::default();
+        let events = p.push(
+            b"data: {\"type\":\"server.connected\",\"properties\":{}}\n\n\
+data: {\"type\":\"session.updated\",\"properties\":{\"info\":{}}}\n\n",
+        );
+        assert_eq!(events, vec!["server.connected", "session.updated"]);
+        assert!(!is_session_event(&events[0]));
+        assert!(is_session_event(&events[1]));
+    }
+
+    #[test]
+    fn sse_parser_reads_named_events_and_ignores_comments() {
+        let mut p = SseEventParser::default();
+        let events = p.push(b": keep-alive\r\nevent: session.idle\r\ndata: {}\r\n\r\n");
+        assert_eq!(events, vec!["session.idle"]);
+    }
+
+    #[test]
+    fn sse_parser_handles_frames_split_across_chunks() {
+        let mut p = SseEventParser::default();
+        assert!(p.push(b"data: {\"type\":\"sess").is_empty());
+        assert!(p.push(b"ion.deleted\"}\n").is_empty());
+        assert_eq!(p.push(b"\n"), vec!["session.deleted"]);
+    }
+
+    #[test]
+    fn sse_parser_skips_untyped_frames() {
+        let mut p = SseEventParser::default();
+        assert!(p.push(b"data: not-json\n\n").is_empty());
+        assert!(p.push(b"event: message\ndata: {}\n\n").is_empty());
     }
 }

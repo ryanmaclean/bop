@@ -784,6 +784,26 @@ fn snapshot_json_entry(snap: &ProviderSnapshot) -> serde_json::Value {
         }
     }
 
+    // Additive fields (schema stays backward compatible with spec 042 consumers).
+    obj.insert(
+        "display_name".to_string(),
+        serde_json::Value::String(snap.display_name.clone()),
+    );
+    obj.insert(
+        "source".to_string(),
+        serde_json::Value::String(snap.source.clone()),
+    );
+    if let Some(tokens) = snap.tokens_used {
+        obj.insert("tokens_used".to_string(), serde_json::json!(tokens));
+    }
+    if let Some(cost) = snap.cost_usd {
+        obj.insert("cost_usd".to_string(), serde_json::json!(cost));
+    }
+    // Spec 032: local/cloud Ollama expose loaded model names instead of a quota.
+    if let Some(models) = &snap.loaded_models {
+        obj.insert("loaded_models".to_string(), serde_json::json!(models));
+    }
+
     serde_json::Value::Object(obj)
 }
 
@@ -1040,6 +1060,11 @@ pub async fn cmd_providers(watch: bool, json: bool, interval: Option<u64>) -> an
             writer,
             tx,
         )));
+    }
+    // Spec 032: opencode additionally streams live session counters over SSE
+    // (REST polling above stays as the baseline / fallback).
+    if provider_order.iter().any(|name| name == "opencode") {
+        tasks.push(opencode::spawn_watch_task(tx.clone()));
     }
     drop(tx);
 
@@ -1713,6 +1738,31 @@ mod tests {
             "expected unknown provider at index 3, got {}",
             snapshots[3].provider
         );
+    }
+
+    #[test]
+    fn render_snapshots_json_includes_loaded_models_and_display_fields() {
+        let mut ollama = test_snapshot("ollama-local");
+        ollama.display_name = "Ollama (local)".into();
+        ollama.source = "http".into();
+        ollama.loaded_models = Some(vec!["mistral:latest".into(), "llama3:8b".into()]);
+        let mut opencode = test_snapshot("opencode");
+        opencode.tokens_used = Some(1200);
+        opencode.cost_usd = Some(0.25);
+
+        let out = render_snapshots(&[ollama, opencode], true).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let rows = v["providers"].as_array().unwrap();
+        assert_eq!(rows[0]["name"], "ollama-local");
+        assert_eq!(rows[0]["display_name"], "Ollama (local)");
+        assert_eq!(rows[0]["source"], "http");
+        assert_eq!(
+            rows[0]["loaded_models"],
+            serde_json::json!(["mistral:latest", "llama3:8b"])
+        );
+        assert_eq!(rows[1]["tokens_used"], 1200);
+        assert_eq!(rows[1]["cost_usd"], 0.25);
+        assert!(rows[1].get("loaded_models").is_none());
     }
 
     #[test]
