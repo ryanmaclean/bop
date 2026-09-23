@@ -69,7 +69,6 @@ crates/jc-zellij-plugin/target/ echo .auto-claude/dispatch-lock.json ./target/de
 
 # Auto Claude data directory
 .auto-claude/
-
 # Secrets — Auto-Claude env files hold API keys / OAuth tokens. Listed
 # explicitly so they stay ignored even if the .auto-claude/ rule above is
 # narrowed. The committed template is .auto-claude/.env.example (tracked via
@@ -81,3 +80,7 @@ crates/jc-zellij-plugin/target/ echo .auto-claude/dispatch-lock.json ./target/de
 # token and a Linear API key). Runtime output, not source — never track.
 .auto-claude/specs/*/task_logs.json
 .auto-claude/**/task_logs.json
+
+# H1 hygiene: Auto-Claude runtime files must never be tracked, even if the
+# broad ignore above is narrowed later. .env.example is force-added below.
+!.auto-claude/.env.example

@@ -1,8 +1,13 @@
 # cargo-deny configuration
 # Everything not in the allow list is denied by default (cargo-deny >= 0.14).
-# GPL/LGPL/AGPL are blocked by omission — they are not in the allow list.
+# GPL/LGPL/AGPL/MPL/CDDL/BSD-4-Clause are blocked by omission from the
+# allow list and are never added there, even via exception, per fleet
+# licensing policy (see ~/.claude/CLAUDE.md "Licensing").
 
 [licenses]
+# Policy set only: MIT, BSD-2/3, Apache-2.0 (+ LLVM exception variant),
+# plus the transitive set the fleet policy documents as pre-approved:
+# ISC, Zlib, Unicode-3.0.
 allow = [
   "MIT",
   "Apache-2.0",
@@ -10,13 +15,51 @@ allow = [
   "BSD-2-Clause",
   "BSD-3-Clause",
   "ISC",
-  "Unlicense",
-  "Unicode-DFS-2016",
+  "Zlib",
   "Unicode-3.0",
-  "CC0-1.0",
-  "OpenSSL",
-  "MPL-2.0",  # Mozilla Public License 2.0 — weak copyleft (file-level), not GPL
 ]
+
+# Every license outside the policy set above gets a narrowly-scoped,
+# dated exception here instead of a blanket allow-list entry. Each
+# exception names the exact dependency path it covers and a review date
+# for re-evaluating whether the dependency (and its license) is still
+# needed.
+[[licenses.exceptions]]
+# CDLA-Permissive-2.0: permissive data license, not on the banned
+# copyleft list. Pulled in by the TLS root store used for HTTPS clients.
+# Path: bop -> reqwest -> hyper-rustls -> webpki-roots.
+# Review by: 2026-12-31
+allow = ["CDLA-Permissive-2.0"]
+name = "webpki-roots"
+
+[[licenses.exceptions]]
+# MPL-2.0: weak (file-level) copyleft. Fleet policy names MPL among the
+# licenses to avoid; these three crates are the only source of it in the
+# tree today. Scoped here (not added to the base allow list) so no future
+# dependency can pick up MPL-2.0 silently. TODO(owner): replace `nucleo`
+# (fuzzy matcher) and drop the `dirs` -> `dirs-sys` -> `option-ext` chain
+# to remove MPL-2.0 entirely; this exception should not be renewed past
+# its review date without that work being re-scoped.
+# Path: bop -> nucleo -> nucleo-matcher; bop(-core) -> dirs -> dirs-sys -> option-ext.
+# Review by: 2026-12-31
+allow = ["MPL-2.0"]
+name = "nucleo"
+
+[[licenses.exceptions]]
+allow = ["MPL-2.0"]
+name = "nucleo-matcher"
+
+[[licenses.exceptions]]
+allow = ["MPL-2.0"]
+name = "option-ext"
+
+[[licenses.exceptions]]
+# CC0-1.0: public-domain-equivalent dedication, not copyleft. Used by the
+# file-watcher crate.
+# Path: bop -> notify.
+# Review by: 2026-12-31
+allow = ["CC0-1.0"]
+name = "notify"
 
 [bans]
 # No explicit bans needed — license check handles this.
@@ -25,3 +68,7 @@ deny = []
 [advisories]
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
+# No blanket ignores. Any future advisory ignore must be added here as
+# its own entry with the advisory id, the dependency path, and a review
+# date, e.g.:
+#   ignore = ["RUSTSEC-XXXX-NNNN"]  # <crate path> — reviewed YYYY-MM-DD, re-check by YYYY-MM-DD
