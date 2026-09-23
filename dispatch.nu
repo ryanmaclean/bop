@@ -13,15 +13,20 @@
 #   nu dispatch.nu reset --spec 001  # Mark a spec as pending again
 #   nu dispatch.nu mark-done 001     # Manually mark complete
 #   nu dispatch.nu mark-failed 001   # Manually mark failed
+#   nu dispatch.nu cmd 038 [--json]  # Print the exact command run would spawn
+#   nu dispatch.nu test              # Self-test (effort mapping, flags, paths)
 #   nu dispatch.nu roadmap           # Spawn roadmap agent in Zellij pane
 #   nu dispatch.nu ideate            # Spawn ideation agent in Zellij pane
 
 const PYTHON      = "/Applications/Auto-Claude.app/Contents/Resources/python/bin/python3"
 const SITE_PKGS   = "/Applications/Auto-Claude.app/Contents/Resources/python-site-packages"
 const BACKEND     = "/Applications/Auto-Claude.app/Contents/Resources/backend"
-const PROJECT_DIR = "/Users/studio/bop"
-const STATE_FILE  = "/Users/studio/bop/.auto-claude/dispatch-state.json"
-const LOCK_FILE   = "/Users/studio/bop/.auto-claude/dispatch-lock.json"
+# Resolve the checkout this script lives in (parse-time const), so a jj
+# workspace / git worktree dispatches and records state in *its own* tree
+# instead of silently writing into /Users/studio/bop.
+const PROJECT_DIR = (path self | path dirname)
+const STATE_FILE  = ($PROJECT_DIR | path join ".auto-claude" "dispatch-state.json")
+const LOCK_FILE   = ($PROJECT_DIR | path join ".auto-claude" "dispatch-lock.json")
 
 def zellij_session [] {
   if "ZELLIJ_SESSION_NAME" in $env {
@@ -233,14 +238,19 @@ def spec_shell_cmd [spec_id: string, flag: string] {
   $"PYTHONPATH=($SITE_PKGS) env -u CLAUDECODE ($PYTHON) ($BACKEND)/run.py --spec ($spec_id) --project-dir ($PROJECT_DIR) ($flag) && nu ($PROJECT_DIR)/dispatch.nu mark-done ($spec_id) || nu ($PROJECT_DIR)/dispatch.nu mark-failed ($spec_id)"
 }
 
-# Codex CLI dispatch — non-interactive exec using OpenAI OAuth from ~/.codex/auth.json
-def codex_shell_cmd [spec_id: string, cost: int] {
-  let effort = match $cost {
+# Spec 038: spec cost (1-4) -> codex model_reasoning_effort.
+def effort_for_cost [cost: int] {
+  match $cost {
     1 => "low"
     2 => "medium"
     3 => "high"
     _ => "xhigh"
   }
+}
+
+# Codex CLI dispatch — non-interactive exec using OpenAI OAuth from ~/.codex/auth.json
+def codex_shell_cmd [spec_id: string, cost: int] {
+  let effort = (effort_for_cost $cost)
   let base = $"($PROJECT_DIR)/.auto-claude/specs"
   let spec_dir = (ls $base | where name =~ $"/($spec_id)-" | get name | first)
   $"cd ($PROJECT_DIR) && env -u CLAUDECODE AC_PROJECT_DIR=($PROJECT_DIR) codex exec --full-auto -m gpt-5.3-codex -c model_reasoning_effort=($effort) -c 'mcp_servers.auto-codex.env.AC_PROJECT_DIR=\"($PROJECT_DIR)\"' - < ($spec_dir)/spec.md && /opt/homebrew/bin/nu ($PROJECT_DIR)/dispatch.nu mark-done ($spec_id) || /opt/homebrew/bin/nu ($PROJECT_DIR)/dispatch.nu mark-failed ($spec_id)"
@@ -366,9 +376,20 @@ def wait_done [spec_id: string, timeout_min: int = 120] {
   }
 }
 
+# The exact shell command `run` spawns for a spec (codex or Auto-Claude).
+def spawn_cmd [spec_id: string, mode: string, cost: int] {
+  if $mode == "codex" {
+    codex_shell_cmd $spec_id $cost
+  } else {
+    let flag = if $mode == "direct" { "--direct" } else { "--isolated" }
+    spec_shell_cmd $spec_id $flag
+  }
+}
+
 def run_spec [spec_id: string, mode: string, cost: int, dry_run: bool] {
   if $dry_run {
     print $"  would spawn: (ansi yellow)zellij pane bop-($spec_id) — ($mode)(ansi reset)"
+    print $"    (ansi light_gray)(spawn_cmd $spec_id $mode $cost)(ansi reset)"
     return {ok: true}
   }
 
@@ -384,12 +405,7 @@ def run_spec [spec_id: string, mode: string, cost: int, dry_run: bool] {
 
   link_card_to_spec $spec_id
 
-  let cmd = if $mode == "codex" {
-    codex_shell_cmd $spec_id $cost
-  } else {
-    let flag = if $mode == "direct" { "--direct" } else { "--isolated" }
-    spec_shell_cmd $spec_id $flag
-  }
+  let cmd = (spawn_cmd $spec_id $mode $cost)
   spawn_pane $"bop-($spec_id)" $cmd
 
   print $"  (ansi light_gray)pane bop-($spec_id) running, polling...(ansi reset)"
@@ -559,6 +575,42 @@ def "main mark-failed" [spec_id: string] {
   print $"(ansi red)✗ ($spec_id) marked failed(ansi reset)"
 }
 
+# Print the command `run` would spawn for one spec, without running it.
+# `--json` emits {spec, mode, cost, effort, cmd} for agents.
+def "main cmd" [spec_id: string, --json] {
+  let rows = (specs | where id == $spec_id)
+  if ($rows | is-empty) { error make { msg: $"unknown spec ($spec_id) — not in the dispatch.nu spec table" } }
+  let s = ($rows | first)
+  let effort = if $s.mode == "codex" { effort_for_cost $s.cost } else { null }
+  let cmd = (spawn_cmd $s.id $s.mode $s.cost)
+  if $json {
+    {spec: $s.id, mode: $s.mode, cost: $s.cost, effort: $effort, cmd: $cmd} | to json
+  } else {
+    $cmd
+  }
+}
+
+# Self-test (no side effects): spec 038 effort mapping + codex flags.
+def "main test" [] {
+  use std/assert
+  assert equal (effort_for_cost 1) "low"
+  assert equal (effort_for_cost 2) "medium"
+  assert equal (effort_for_cost 3) "high"
+  assert equal (effort_for_cost 4) "xhigh"
+  let low = (main cmd "038" --json | from json)
+  assert equal $low.cost 1
+  assert ($low.cmd | str contains "model_reasoning_effort=low") "cost=1 -> low"
+  assert ($low.cmd | str contains "--full-auto") "uses --full-auto"
+  assert (not ($low.cmd | str contains "dangerously-bypass")) "no sandbox bypass"
+  assert ($low.cmd | str contains "-m gpt-5.3-codex") "explicit model"
+  let high = (main cmd "056" --json | from json)
+  assert equal $high.cost 4
+  assert ($high.cmd | str contains "model_reasoning_effort=xhigh") "cost=4 -> xhigh"
+  assert equal $STATE_FILE ($PROJECT_DIR | path join ".auto-claude" "dispatch-state.json")
+  assert (($PROJECT_DIR | path join "dispatch.nu") | path exists) "PROJECT_DIR is this checkout"
+  print "PASS: dispatch.nu"
+}
+
 # ---------------------------------------------------------------------------
 # Roadmap + ideation agents
 # ---------------------------------------------------------------------------
@@ -597,7 +649,7 @@ def "main agents" [] {
 
 def main [] {
   print $"(ansi green_bold)bop dispatch.nu(ansi reset)"
-  print "Commands: plan | run | status | reset | retry | mark-done | mark-failed"
+  print "Commands: plan | run | status | reset | retry | mark-done | mark-failed | cmd | test"
   print "          roadmap | ideate | agents"
   print ""
   print "Quick start:"
