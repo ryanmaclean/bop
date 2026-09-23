@@ -97,7 +97,7 @@ def main [
     exit $rc
 }
 
-def is_network_error [stderr_text: string]: string -> bool {
+def is_network_error [stderr_text: string]: nothing -> bool {
     $NETWORK_ERROR_PATTERNS | any { |pattern|
         $stderr_text | str contains --ignore-case $pattern
     }
