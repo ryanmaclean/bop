@@ -440,7 +440,7 @@ pub fn select_provider(
     let mut eligible: Vec<String> = Vec::new();
     let mut fallback: Option<String> = None;
 
-    for name in chain {
+    for name in chain.iter().cloned() {
         let Some(p) = pf.providers.get(&name) else {
             continue;
         };
@@ -482,6 +482,22 @@ pub fn select_provider(
                     ),
                 )));
             }
+        }
+        // Spec 036: a chain naming only providers that providers.json does not
+        // know (e.g. ["grok"]) used to be requeued forever. Run it with the
+        // global --adapter instead (empty `command` → dispatcher fallback).
+        if !chain.is_empty() && chain.iter().all(|n| !pf.providers.contains_key(n)) {
+            return Ok(Some(ProviderSelection {
+                name: chain[0].clone(),
+                command: String::new(),
+                rate_limit_exit: 75,
+                env: BTreeMap::new(),
+                model: None,
+                reason: format!(
+                    "stage={}, provider '{}' not in providers.json; using global --adapter",
+                    stage, chain[0]
+                ),
+            }));
         }
         return Ok(None);
     }
@@ -1333,6 +1349,26 @@ mod tests {
         .unwrap();
         let selected = result.unwrap();
         assert_eq!(selected.name, "b");
+    }
+
+    #[test]
+    fn select_provider_unknown_only_chain_falls_back_to_global_adapter() {
+        let td = tempdir().unwrap();
+        seed_providers(td.path()).unwrap();
+        let mut meta = Meta {
+            provider_chain: vec!["grok".into(), "also-unknown".into()],
+            ..Default::default()
+        };
+        let cfg = DispatchProviderConfig {
+            auto_select_provider: false,
+            ..DispatchProviderConfig::default()
+        };
+        let sel = select_provider(td.path(), Some(&mut meta), "implement", &cfg)
+            .unwrap()
+            .expect("unknown-only chain must still dispatch");
+        assert_eq!(sel.name, "grok");
+        assert!(sel.command.is_empty(), "empty command = global --adapter");
+        assert!(sel.reason.contains("not in providers.json"));
     }
 
     #[test]
