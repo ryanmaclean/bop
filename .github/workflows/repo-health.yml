@@ -22,5 +22,15 @@ jobs:
       - name: Install Nushell
         run: brew install nushell
 
+      - name: Verify Nushell version matches pin
+        run: |
+          pinned=$(cat .github/nu-version)
+          actual=$(nu --version | head -1)
+          echo "pinned=$pinned actual=$actual"
+          case "$actual" in
+            "$pinned"*) ;;
+            *) echo "Nushell version $actual does not match pinned version $pinned (.github/nu-version)"; exit 1 ;;
+          esac
+
       - name: Policy check (staged scope)
         run: nu scripts/policy_check.nu --staged --cards-dir .cards
