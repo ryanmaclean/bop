@@ -69,3 +69,10 @@ crates/jc-zellij-plugin/target/ echo .auto-claude/dispatch-lock.json ./target/de
 
 # Auto Claude data directory
 .auto-claude/
+
+# H1 hygiene: Auto-Claude runtime files must never be tracked, even if the
+# broad ignore above is narrowed later. .env.example is force-added below.
+.auto-claude/.env
+.auto-claude/**/.env
+.auto-claude/**/task_logs.json
+!.auto-claude/.env.example
