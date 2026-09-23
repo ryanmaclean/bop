@@ -654,3 +654,148 @@ fn dispatcher_emits_lineage_events() {
         "COMPLETE event should have a run_id"
     );
 }
+
+// ── spec 036 / 052: the adapter follows the *selected* provider ─────────────
+
+/// Adapter that records which provider entry actually ran, then succeeds.
+fn write_marker_adapter(dir: &Path, name: &str) -> PathBuf {
+    let path = dir.join(format!("marker-{name}.nu"));
+    fs::write(
+        &path,
+        format!(
+            "def main [workdir: string, prompt_file: string, stdout_log: string, stderr_log: string, ...rest] {{\n    \"ran:{name}\\n\" | save --append $stdout_log\n    exit 0\n}}\n"
+        ),
+    )
+    .unwrap();
+    path
+}
+
+fn write_template_with_chain(cards: &Path, template: &str, chain_json: &str) {
+    let tdir = cards.join("templates").join(format!("{}.bop", template));
+    fs::create_dir_all(tdir.join("logs")).unwrap();
+    fs::create_dir_all(tdir.join("output")).unwrap();
+    fs::write(
+        tdir.join("meta.json"),
+        format!("{{\"id\":\"t\",\"created\":\"2026-03-01T00:00:00Z\",\"stage\":\"implement\",\"provider_chain\":{chain_json},\"stages\":{{}},\"acceptance_criteria\":[]}}"),
+    )
+    .unwrap();
+    fs::write(tdir.join("spec.md"), "").unwrap();
+    fs::write(tdir.join("prompt.md"), "{{spec}}\n").unwrap();
+}
+
+/// init + template + one pending card; auto-select off so the test never
+/// probes real provider quotas.
+fn setup_routing_case(cards: &Path, chain_json: &str, providers_json: &str, id: &str) {
+    let status = Command::new(bop_bin())
+        .args(["--cards-dir", cards.to_str().unwrap(), "init"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    fs::write(cards.join("providers.json"), providers_json).unwrap();
+    fs::create_dir_all(cards.join(".bop")).unwrap();
+    fs::write(
+        cards.join(".bop").join("config.json"),
+        r#"{"dispatch":{"auto_select_provider":false}}"#,
+    )
+    .unwrap();
+    write_template_with_chain(cards, "implement", chain_json);
+    let status = Command::new(bop_bin())
+        .args([
+            "--cards-dir",
+            cards.to_str().unwrap(),
+            "new",
+            "implement",
+            id,
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+fn run_dispatch_once(cards: &Path, global_adapter: &Path) {
+    let status = Command::new(bop_bin())
+        .args([
+            "--cards-dir",
+            cards.to_str().unwrap(),
+            "dispatcher",
+            "--adapter",
+            global_adapter.to_str().unwrap(),
+            "--once",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+fn done_stdout(cards: &Path, id: &str) -> String {
+    let card = find_card_in(cards, "done", id);
+    assert!(card.exists(), "card {id} should be in done/");
+    fs::read_to_string(card.join("logs").join("stdout.log")).unwrap_or_default()
+}
+
+#[test]
+fn dispatcher_runs_adapter_of_selected_provider_not_chain_head() {
+    build_jc();
+    let td = tempfile::tempdir().unwrap();
+    let cards = td.path().join(".cards");
+    let cold = write_marker_adapter(td.path(), "cold");
+    let warm = write_marker_adapter(td.path(), "warm");
+    let global = write_marker_adapter(td.path(), "global");
+    let providers = format!(
+        r#"{{"providers":{{"cold":{{"command":"{}","rate_limit_exit":75,"cooldown_until_epoch_s":4102444800}},"warm":{{"command":"{}","rate_limit_exit":75}}}}}}"#,
+        cold.display(),
+        warm.display()
+    );
+    setup_routing_case(&cards, r#"["cold","warm"]"#, &providers, "route1");
+    run_dispatch_once(&cards, &global);
+
+    let out = done_stdout(&cards, "route1");
+    assert!(
+        out.contains("ran:warm"),
+        "selected provider's adapter must run: {out}"
+    );
+    assert!(
+        !out.contains("ran:cold"),
+        "cooled-down chain head must not run: {out}"
+    );
+}
+
+#[test]
+fn dispatcher_unknown_provider_uses_global_adapter() {
+    build_jc();
+    let td = tempfile::tempdir().unwrap();
+    let cards = td.path().join(".cards");
+    let global = write_marker_adapter(td.path(), "global");
+    let providers = format!(
+        r#"{{"providers":{{"mock":{{"command":"{}","rate_limit_exit":75}}}}}}"#,
+        mock_adapter().display()
+    );
+    setup_routing_case(&cards, r#"["grok"]"#, &providers, "route2");
+    run_dispatch_once(&cards, &global);
+
+    let out = done_stdout(&cards, "route2");
+    assert!(
+        out.contains("ran:global"),
+        "unknown provider → global --adapter: {out}"
+    );
+}
+
+#[test]
+fn dispatcher_empty_chain_uses_global_adapter() {
+    build_jc();
+    let td = tempfile::tempdir().unwrap();
+    let cards = td.path().join(".cards");
+    let global = write_marker_adapter(td.path(), "global");
+    let providers = format!(
+        r#"{{"providers":{{"mock":{{"command":"{0}","rate_limit_exit":75}},"mock2":{{"command":"{0}","rate_limit_exit":75}}}}}}"#,
+        mock_adapter().display()
+    );
+    setup_routing_case(&cards, "[]", &providers, "route3");
+    run_dispatch_once(&cards, &global);
+
+    let out = done_stdout(&cards, "route3");
+    assert!(
+        out.contains("ran:global"),
+        "empty chain → global --adapter: {out}"
+    );
+}

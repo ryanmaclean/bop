@@ -41,6 +41,8 @@ mod replay;
 mod serve;
 mod stats;
 mod termcaps;
+#[cfg(test)]
+mod test_env;
 mod tls;
 mod ui;
 mod util;
