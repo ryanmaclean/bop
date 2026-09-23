@@ -1609,6 +1609,112 @@ mod tests {
         assert!(cd <= now + 301);
     }
 
+    fn test_snapshot(provider: &str) -> ProviderSnapshot {
+        ProviderSnapshot {
+            provider: provider.into(),
+            display_name: provider.into(),
+            primary_pct: None,
+            secondary_pct: None,
+            primary_label: None,
+            secondary_label: None,
+            tokens_used: None,
+            cost_usd: None,
+            reset_at: None,
+            source: "test".into(),
+            error: None,
+            loaded_models: None,
+        }
+    }
+
+    #[test]
+    fn upsert_snapshot_inserts_new_provider() {
+        let order = vec!["alpha".to_string(), "beta".to_string()];
+        let mut snapshots: Vec<ProviderSnapshot> = Vec::new();
+
+        upsert_snapshot(&mut snapshots, test_snapshot("alpha"), &order);
+
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].provider, "alpha");
+    }
+
+    #[test]
+    fn upsert_snapshot_updates_existing_provider() {
+        let order = vec!["alpha".to_string(), "beta".to_string()];
+        let mut snapshots = vec![test_snapshot("alpha")];
+        assert!(snapshots[0].primary_pct.is_none());
+
+        let mut updated = test_snapshot("alpha");
+        updated.primary_pct = Some(42);
+        upsert_snapshot(&mut snapshots, updated, &order);
+
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].provider, "alpha");
+        assert_eq!(snapshots[0].primary_pct, Some(42));
+    }
+
+    #[test]
+    fn upsert_snapshot_maintains_sort_order() {
+        let order = vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()];
+        let mut snapshots: Vec<ProviderSnapshot> = Vec::new();
+
+        // Insert in reverse order — result should still follow provider_order
+        upsert_snapshot(&mut snapshots, test_snapshot("gamma"), &order);
+        upsert_snapshot(&mut snapshots, test_snapshot("alpha"), &order);
+        upsert_snapshot(&mut snapshots, test_snapshot("beta"), &order);
+
+        assert_eq!(snapshots.len(), 3);
+        assert_eq!(snapshots[0].provider, "alpha");
+        assert_eq!(snapshots[1].provider, "beta");
+        assert_eq!(snapshots[2].provider, "gamma");
+    }
+
+    #[test]
+    fn sort_snapshots_sorts_by_provider_order() {
+        let order = vec![
+            "claude".to_string(),
+            "codex".to_string(),
+            "gemini".to_string(),
+        ];
+        let mut snapshots = vec![
+            test_snapshot("gemini"),
+            test_snapshot("claude"),
+            test_snapshot("codex"),
+        ];
+
+        sort_snapshots(&mut snapshots, &order);
+
+        assert_eq!(snapshots[0].provider, "claude");
+        assert_eq!(snapshots[1].provider, "codex");
+        assert_eq!(snapshots[2].provider, "gemini");
+    }
+
+    #[test]
+    fn sort_snapshots_unknown_providers_go_last() {
+        let order = vec!["claude".to_string(), "codex".to_string()];
+        let mut snapshots = vec![
+            test_snapshot("unknown_z"),
+            test_snapshot("claude"),
+            test_snapshot("unknown_a"),
+            test_snapshot("codex"),
+        ];
+
+        sort_snapshots(&mut snapshots, &order);
+
+        assert_eq!(snapshots[0].provider, "claude");
+        assert_eq!(snapshots[1].provider, "codex");
+        // Unknown providers land after all known ones (both get usize::MAX key)
+        assert!(
+            snapshots[2].provider == "unknown_z" || snapshots[2].provider == "unknown_a",
+            "expected unknown provider at index 2, got {}",
+            snapshots[2].provider
+        );
+        assert!(
+            snapshots[3].provider == "unknown_z" || snapshots[3].provider == "unknown_a",
+            "expected unknown provider at index 3, got {}",
+            snapshots[3].provider
+        );
+    }
+
     #[test]
     fn render_snapshots_json_is_wrapped_and_parseable() {
         let snapshots = vec![
@@ -1668,5 +1774,81 @@ mod tests {
         );
         assert!(codex.get("reset_in_secs").unwrap().is_null());
         assert_eq!(codex.get("error").and_then(|v| v.as_str()), Some("note"));
+    }
+
+    #[test]
+    fn render_snapshots_table_contains_provider_names_and_bars() {
+        let snapshots = vec![
+            ProviderSnapshot {
+                provider: "claude".into(),
+                display_name: "Claude Code".into(),
+                primary_pct: Some(61),
+                secondary_pct: Some(30),
+                primary_label: Some("5h".into()),
+                secondary_label: Some("7d".into()),
+                tokens_used: None,
+                cost_usd: None,
+                reset_at: Some(Utc::now() + chrono::Duration::minutes(20)),
+                source: "oauth".into(),
+                error: None,
+                loaded_models: None,
+            },
+            ProviderSnapshot {
+                provider: "codex".into(),
+                display_name: "Codex CLI".into(),
+                primary_pct: Some(92),
+                secondary_pct: None,
+                primary_label: Some("5h".into()),
+                secondary_label: Some("7d".into()),
+                tokens_used: None,
+                cost_usd: None,
+                reset_at: None,
+                source: "oauth".into(),
+                error: Some("rate limited".into()),
+                loaded_models: None,
+            },
+        ];
+
+        let out = render_snapshots(&snapshots, false).unwrap();
+
+        // Provider display names appear in the table
+        assert!(
+            out.contains("Claude Code"),
+            "expected 'Claude Code' in table output"
+        );
+        assert!(
+            out.contains("Codex CLI"),
+            "expected 'Codex CLI' in table output"
+        );
+
+        // Source labels are present
+        assert!(out.contains("oauth"), "expected 'oauth' source label");
+
+        // Header row includes column labels
+        assert!(out.contains("Provider"), "expected 'Provider' header");
+        assert!(out.contains("5h"), "expected '5h' header label");
+        assert!(out.contains("7d"), "expected '7d' header label");
+
+        // Percentage values appear with their % suffix
+        assert!(out.contains("61%"), "expected '61%' in table output");
+        assert!(out.contains("30%"), "expected '30%' in table output");
+        assert!(out.contains("92%"), "expected '92%' in table output");
+
+        // Bar characters are present (filled and empty blocks)
+        assert!(out.contains('█'), "expected filled bar character '█'");
+        assert!(out.contains('░'), "expected empty bar character '░'");
+
+        // Error annotation line is rendered
+        assert!(
+            out.contains("rate limited"),
+            "expected error annotation in output"
+        );
+        assert!(
+            out.contains('⚠'),
+            "expected warning glyph for error snapshot"
+        );
+
+        // Reset time for Claude should show a relative duration (e.g. "in 20m" or "in 19m")
+        assert!(out.contains("in "), "expected relative reset time");
     }
 }
