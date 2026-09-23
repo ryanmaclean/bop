@@ -41,6 +41,7 @@ mod replay;
 mod serve;
 mod stats;
 mod termcaps;
+mod tls;
 mod ui;
 mod util;
 mod watch;
@@ -639,6 +640,9 @@ fn install_hooks_linux(cards_root: &std::path::Path, uninstall: bool) -> anyhow:
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Before any reqwest client is built: reqwest 0.12 uses the process-default
+    // rustls provider and only falls back to ring when none is installed.
+    let _ = tls::install_crypto_provider();
     let cli = Cli::parse();
     let Cli {
         project: project_arg,
