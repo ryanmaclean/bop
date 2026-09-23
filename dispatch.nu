@@ -11,6 +11,8 @@
 #   nu dispatch.nu run --yes         # Skip confirmation prompts
 #   nu dispatch.nu status            # Show what's done / pending / failed
 #   nu dispatch.nu reset --spec 001  # Mark a spec as pending again
+#   nu dispatch.nu reset --spec 001 --reason "..."  # ...and record why (needs_recheck)
+#   nu dispatch.nu status --json     # Machine-readable state incl. needs_recheck
 #   nu dispatch.nu mark-done 001     # Manually mark complete
 #   nu dispatch.nu mark-failed 001   # Manually mark failed
 #   nu dispatch.nu cmd 038 [--json]  # Print the exact command run would spawn
@@ -197,12 +199,17 @@ def cooldown [cost: int] {
 # State helpers
 # ---------------------------------------------------------------------------
 
+# State shape: {completed: [id], failed: [id], skipped: [id],
+#               needs_recheck: {id: {reason: string, since: string}}}
+# needs_recheck records *why* a spec was taken out of completed (e.g. an
+# acceptance audit found it unimplemented); mark-done clears the entry.
 def load_state [] {
-  if ($STATE_FILE | path exists) {
+  let s = if ($STATE_FILE | path exists) {
     open $STATE_FILE
   } else {
     {completed: [], failed: [], skipped: []}
   }
+  $s | upsert needs_recheck ($s | get -o needs_recheck | default {})
 }
 
 def save_state [state: record] {
@@ -211,7 +218,9 @@ def save_state [state: record] {
 
 def mark_done [spec_id: string] {
   let s = load_state
-  let s2 = $s | update completed ($s.completed | append $spec_id | uniq)
+  let s2 = $s
+    | update completed ($s.completed | append $spec_id | uniq)
+    | update needs_recheck ($s.needs_recheck | reject -o $spec_id)
   save_state $s2
 }
 
@@ -470,13 +479,28 @@ def "main plan" [--wave: int = -1] {
 # status
 # ---------------------------------------------------------------------------
 
-def "main status" [] {
+def "main status" [--json] {
   let state = load_state
   let all = specs
+  let recheck = ($state.needs_recheck | transpose id info | sort-by id)
+
+  if $json {
+    return ({
+      total: ($all | length)
+      completed: ($state.completed | sort)
+      failed: ($state.failed | sort)
+      needs_recheck: $state.needs_recheck
+      pending: ($all | get id | where { |id| not ($id in $state.completed) and not ($id in $state.failed) } | sort)
+    } | to json)
+  }
 
   print $"\n(ansi green_bold)── bop Dispatch Status ─────────────────────────────────(ansi reset)"
   print $"  Completed : (ansi green)($state.completed | length)(ansi reset) / ($all | length)"
   print $"  Failed    : (ansi red)($state.failed | length)(ansi reset)"
+  print $"  Recheck   : (ansi yellow)($recheck | length)(ansi reset)"
+  for $r in $recheck {
+    print $"    (ansi yellow)($r.id)(ansi reset)  ($r.info.reason)"
+  }
   print ""
 }
 
@@ -543,15 +567,23 @@ def "main run" [
 # management commands
 # ---------------------------------------------------------------------------
 
-def "main reset" [--spec: string = ""] {
+# Reset a spec (or all) to pending. With --reason, the spec is also recorded
+# under needs_recheck so the next operator/agent knows what is missing.
+def "main reset" [--spec: string = "", --reason: string = ""] {
   let s = load_state
   if ($spec | is-empty) {
-    save_state {completed: [], failed: [], skipped: []}
+    save_state {completed: [], failed: [], skipped: [], needs_recheck: {}}
     print $"(ansi yellow)All specs reset to pending.(ansi reset)"
   } else {
+    let recheck = if ($reason | is-empty) {
+      $s.needs_recheck
+    } else {
+      $s.needs_recheck | upsert $spec {reason: $reason, since: (date now | format date "%Y-%m-%d")}
+    }
     let s2 = $s
       | update completed ($s.completed | where { |id| $id != $spec })
       | update failed    ($s.failed    | where { |id| $id != $spec })
+      | update needs_recheck $recheck
     save_state $s2
     print $"(ansi yellow)($spec) reset to pending.(ansi reset)"
   }
@@ -608,6 +640,8 @@ def "main test" [] {
   assert ($high.cmd | str contains "model_reasoning_effort=xhigh") "cost=4 -> xhigh"
   assert equal $STATE_FILE ($PROJECT_DIR | path join ".auto-claude" "dispatch-state.json")
   assert (($PROJECT_DIR | path join "dispatch.nu") | path exists) "PROJECT_DIR is this checkout"
+  let st = (main status --json | from json)
+  assert (($st | columns) == [total completed failed needs_recheck pending]) "status --json shape"
   print "PASS: dispatch.nu"
 }
 
