@@ -17,7 +17,7 @@ def detect_arch [arch_flag: string]: nothing -> string {
     return $arch_flag
   }
 
-  let host_arch = ($nu.os-info.arch | str downcase)
+  let host_arch = ($nu.os-info.arch | str lowercase)
   if ($host_arch == "aarch64") or ($host_arch == "arm64") {
     "aarch64"
   } else {

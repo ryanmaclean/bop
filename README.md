@@ -257,6 +257,11 @@ cargo fmt --check            # Format check
 make check                   # All three at once
 ```
 
+New helper/adapter scripts are written in [Nushell](https://www.nushell.sh/)
+(`.nu`), pinned to the version in [`.github/nu-version`](.github/nu-version)
+(currently 0.115.1). CI installs and verifies that version before running
+any `.nu` script; install the same version locally to match.
+
 ## License
 
 [MIT](LICENSE)

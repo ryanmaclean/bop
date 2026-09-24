@@ -384,20 +384,13 @@ mod tests {
         // will resolve (Keychain check is a no-op in test context on non-macOS,
         // and even on macOS won't find the item under a fake home).
         let td = tempfile::tempdir().unwrap();
-        let saved = std::env::var("HOME").ok();
-        std::env::set_var("HOME", td.path());
+        let _home = crate::test_env::HomeGuard::set(td.path());
 
         let provider = ClaudeProvider::new();
         assert!(
             !provider.detect(),
             "detect() should return false when credentials are missing"
         );
-
-        // Restore original HOME.
-        match saved {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
     }
 
     #[test]

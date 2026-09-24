@@ -1,36 +1,12 @@
 {
   "completed": [
-    "001",
-    "002",
-    "004",
-    "005",
-    "006",
-    "007",
     "008",
-    "011",
-    "012",
-    "013",
-    "009",
-    "003",
-    "010",
-    "014",
     "015",
-    "016",
     "017",
     "018",
     "019",
-    "020",
-    "021",
     "022",
-    "023",
-    "024",
-    "025",
     "026",
-    "028",
-    "029",
-    "027",
-    "030",
-    "031",
     "032",
     "035",
     "033",
@@ -40,10 +16,8 @@
     "034",
     "039",
     "040",
-    "041",
     "042",
     "043",
-    "044",
     "045",
     "047",
     "048",
@@ -51,16 +25,131 @@
     "049",
     "052",
     "053",
-    "050",
     "051",
-    "054",
     "055",
     "056",
     "057",
-    "058",
     "059",
     "060"
   ],
   "failed": [],
-  "skipped": []
+  "skipped": [],
+  "needs_recheck": {
+    "001": {
+      "reason": "partial: test-real-adapters.nu never skips missing tools (is_adapter_available only used by --test); no passed/skipped/failed summary",
+      "since": "2026-09-23"
+    },
+    "002": {
+      "reason": "partial: no recorded passing ollama e2e run through scripts/test-real-adapters.nu",
+      "since": "2026-09-23"
+    },
+    "003": {
+      "reason": "partial: no recorded passing claude e2e run (claude.nu crash fixed 2026-09-23; rerun needed)",
+      "since": "2026-09-23"
+    },
+    "004": {
+      "reason": "no: codex skip-without-OPENAI_API_KEY never called by run path; script exits 1",
+      "since": "2026-09-23"
+    },
+    "005": {
+      "reason": "no: /Users/studio/bop/.cards done/ still holds 10 cards + 1 per team-*/done (operational)",
+      "since": "2026-09-23"
+    },
+    "006": {
+      "reason": "partial: find_card ignores team-*/ dirs; logs --follow never attaches to a log created after start",
+      "since": "2026-09-23"
+    },
+    "007": {
+      "reason": "partial: default --older-than is 30d not 7d; orphan detection ignores PID (can delete a running card)",
+      "since": "2026-09-23"
+    },
+    "009": {
+      "reason": "partial: install/ templates unused; no ThrottleInterval; live card-drop trigger unverified (merge-gate --once fixed 2026-09-23)",
+      "since": "2026-09-23"
+    },
+    "010": {
+      "reason": "partial: no ThrottleInterval in generated plists",
+      "since": "2026-09-23"
+    },
+    "011": {
+      "reason": "partial: GitHub CI red on main (086fec5 and 2026-05-06 runs)",
+      "since": "2026-09-23"
+    },
+    "012": {
+      "reason": "partial: only 3 of 7 seed cards exist in .cards/pending",
+      "since": "2026-09-23"
+    },
+    "013": {
+      "reason": "partial: qemu.nu diverged from spec (cloud-init image, not zam); exits 127 not 1; README stale",
+      "since": "2026-09-23"
+    },
+    "014": {
+      "reason": "partial: Linux install never verified live (merge-gate oneshot now has --once, 2026-09-23); uninstall always prints (not installed)",
+      "since": "2026-09-23"
+    },
+    "016": {
+      "reason": "no: claude e2e never passed; rerun after claude.nu fix",
+      "since": "2026-09-23"
+    },
+    "020": {
+      "reason": "partial: --poll-ms ignored; watcher failure makes the loop spin with no polling fallback",
+      "since": "2026-09-23"
+    },
+    "021": {
+      "reason": "partial: doctor lacks inside-Zellij, :8082 listener, claude CLI checks; --fast is a no-op",
+      "since": "2026-09-23"
+    },
+    "023": {
+      "reason": "partial: bop pause <id> pauses every running card; dispatcher ignores paused_at; no tests",
+      "since": "2026-09-23"
+    },
+    "024": {
+      "reason": "partial: IOKit sleep/wake watcher and pause_all_running are stubs; providers.json probe never read",
+      "since": "2026-09-23"
+    },
+    "025": {
+      "reason": "partial: running cards show no elapsed/progress; stale lines not cleared on redraw",
+      "since": "2026-09-23"
+    },
+    "027": {
+      "reason": "partial: dispatch.nu link_card_to_spec scans *.jobcard (cards are .bop) and writes locked meta.json",
+      "since": "2026-09-23"
+    },
+    "028": {
+      "reason": "partial: two-column layout only halves box width; unknown TERM falls back too low",
+      "since": "2026-09-23"
+    },
+    "029": {
+      "reason": "partial: nucleo unused (substring filter, no highlight); sparkline never updates; F3 unbound",
+      "since": "2026-09-23"
+    },
+    "030": {
+      "reason": "partial: --json shape changed so spec jq check fails; no OAuth token refresh",
+      "since": "2026-09-23"
+    },
+    "031": {
+      "reason": "partial: no token refresh; PTY fallback is piped stdin; spec jq check fails on current --json shape",
+      "since": "2026-09-23"
+    },
+    "041": {
+      "reason": "partial: Shift+L repurposed to log pane (move-right is Shift+.); filter is substring not fuzzy",
+      "since": "2026-09-23"
+    },
+    "044": {
+      "reason": "partial: GitHub CI red on main after the fix merge",
+      "since": "2026-09-23"
+    },
+    "050": {
+      "reason": "partial: guest never mounts 9P /card so vm_exit_code cannot reach the host",
+      "since": "2026-09-23"
+    },
+    "054": {
+      "reason": "partial: no 9P mount in guest; seed lacks cidata label; no aarch64 firmware",
+      "since": "2026-09-23"
+    },
+    "058": {
+      "reason": "partial: pool_inject is a no-op; pooled VMs never run the card",
+      "since": "2026-09-23"
+    }
+  }
 }

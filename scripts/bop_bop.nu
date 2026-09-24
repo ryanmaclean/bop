@@ -5,7 +5,7 @@
 
 def slugify [text: string]: nothing -> string {
   $text
-    | str downcase
+    | str lowercase
     | str replace --all " " "-"
     | str replace --all --regex "[^a-z0-9-]" ""
     | str substring 0..40

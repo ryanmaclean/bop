@@ -2,7 +2,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::{Provider, ProviderSnapshot};
@@ -162,21 +162,33 @@ impl OllamaCloudProvider {
     }
 
     fn read_cloud_credentials() -> anyhow::Result<Option<String>> {
-        if let Ok(key) = std::env::var("OLLAMA_API_KEY") {
+        Self::resolve_cloud_credentials(
+            std::env::var("OLLAMA_API_KEY").ok(),
+            Self::config_path().as_deref(),
+        )
+    }
+
+    /// Pure credential resolution: `OLLAMA_API_KEY` wins, then
+    /// `api_key` in `~/.ollama/config.json`. Blank values count as absent.
+    /// Taking the inputs as arguments keeps the unit tests free of
+    /// process-wide env mutation (the flake that failed AC review of 032).
+    fn resolve_cloud_credentials(
+        env_key: Option<String>,
+        config_path: Option<&Path>,
+    ) -> anyhow::Result<Option<String>> {
+        if let Some(key) = env_key {
             if !key.trim().is_empty() {
                 return Ok(Some(key));
             }
         }
 
-        if let Some(path) = Self::config_path() {
+        if let Some(path) = config_path {
             if path.exists() {
-                let raw = std::fs::read_to_string(&path)
+                let raw = std::fs::read_to_string(path)
                     .with_context(|| format!("cannot read Ollama config: {}", path.display()))?;
                 let cfg: OllamaCloudConfig = serde_json::from_str(&raw)
                     .with_context(|| format!("malformed Ollama config at {}", path.display()))?;
-                let key = cfg
-                    .api_key
-                    .and_then(|k| if k.trim().is_empty() { None } else { Some(k) });
+                let key = cfg.api_key.filter(|k| !k.trim().is_empty());
                 return Ok(key);
             }
         }
@@ -257,10 +269,7 @@ impl Provider for OllamaCloudProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
     use tempfile::tempdir;
-
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn parse_ps_response_with_models() {
@@ -325,44 +334,57 @@ mod tests {
     }
 
     #[test]
-    fn cloud_detect_with_env_var() {
-        let _lock = ENV_MUTEX.lock().expect("lock env mutex");
-        std::env::set_var("OLLAMA_API_KEY", "test-key");
-
-        let provider = OllamaCloudProvider::new();
-        assert!(provider.detect());
-
-        std::env::remove_var("OLLAMA_API_KEY");
-    }
-
-    #[test]
-    fn cloud_detect_without_credentials() {
-        let _lock = ENV_MUTEX.lock().expect("lock env mutex");
+    fn cloud_credentials_env_var_wins() {
         let td = tempdir().expect("create tempdir");
-        let original_home = std::env::var("HOME").ok();
-
-        std::env::remove_var("OLLAMA_API_KEY");
-        std::env::set_var("HOME", td.path());
-
-        let provider = OllamaCloudProvider::new();
-        assert!(!provider.detect());
-
-        if let Some(home) = original_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
+        let cfg = td.path().join("config.json");
+        std::fs::write(&cfg, r#"{"api_key": "from-config"}"#).unwrap();
+        let creds = OllamaCloudProvider::resolve_cloud_credentials(
+            Some("env-var-key".to_string()),
+            Some(&cfg),
+        )
+        .expect("resolve credentials");
+        assert_eq!(creds, Some("env-var-key".to_string()));
     }
 
     #[test]
-    fn cloud_read_credentials_from_env_var() {
-        let _lock = ENV_MUTEX.lock().expect("lock env mutex");
-        std::env::set_var("OLLAMA_API_KEY", "env-var-key");
+    fn cloud_credentials_blank_env_falls_back_to_config() {
+        let td = tempdir().expect("create tempdir");
+        let cfg = td.path().join("config.json");
+        std::fs::write(&cfg, r#"{"api_key": "from-config"}"#).unwrap();
+        let creds =
+            OllamaCloudProvider::resolve_cloud_credentials(Some("  ".to_string()), Some(&cfg))
+                .expect("resolve credentials");
+        assert_eq!(creds, Some("from-config".to_string()));
+    }
 
-        let creds = OllamaCloudProvider::read_cloud_credentials().expect("read credentials");
-        assert_eq!(creds, Some("env-var-key".to_string()));
+    #[test]
+    fn cloud_credentials_absent_without_env_or_config() {
+        let td = tempdir().expect("create tempdir");
+        let missing = td.path().join("config.json");
+        let creds = OllamaCloudProvider::resolve_cloud_credentials(None, Some(&missing))
+            .expect("resolve credentials");
+        assert_eq!(creds, None);
+        let creds = OllamaCloudProvider::resolve_cloud_credentials(None, None)
+            .expect("resolve credentials");
+        assert_eq!(creds, None);
+    }
 
-        std::env::remove_var("OLLAMA_API_KEY");
+    #[test]
+    fn cloud_credentials_blank_config_key_is_absent() {
+        let td = tempdir().expect("create tempdir");
+        let cfg = td.path().join("config.json");
+        std::fs::write(&cfg, r#"{"api_key": ""}"#).unwrap();
+        let creds = OllamaCloudProvider::resolve_cloud_credentials(None, Some(&cfg))
+            .expect("resolve credentials");
+        assert_eq!(creds, None);
+    }
+
+    #[test]
+    fn cloud_credentials_malformed_config_is_error() {
+        let td = tempdir().expect("create tempdir");
+        let cfg = td.path().join("config.json");
+        std::fs::write(&cfg, "{not json").unwrap();
+        assert!(OllamaCloudProvider::resolve_cloud_credentials(None, Some(&cfg)).is_err());
     }
 
     #[test]

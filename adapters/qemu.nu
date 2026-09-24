@@ -40,7 +40,7 @@ def parse_timeout [arg?: string]: nothing -> int {
 }
 
 def detect_arch []: nothing -> string {
-    let host_arch = ($nu.os-info.arch | str downcase)
+    let host_arch = ($nu.os-info.arch | str lowercase)
     if ($host_arch == "aarch64") or ($host_arch == "arm64") {
         "aarch64"
     } else {
