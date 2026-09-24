@@ -654,3 +654,72 @@ fn dispatcher_emits_lineage_events() {
         "COMPLETE event should have a run_id"
     );
 }
+
+/// bop#9: with BOP_TRANSLOG=1 the dispatcher and `bop retry` shadow-write
+/// immutable transition facts, and the replayed state matches the directory.
+#[test]
+fn dispatcher_shadow_translog_matches_directory_state() {
+    build_jc();
+
+    let td = tempfile::tempdir().unwrap();
+    let cards = td.path().join(".cards");
+    let cards_s = cards.to_str().unwrap();
+
+    let bop = |args: &[&str]| {
+        Command::new(bop_bin())
+            .env("BOP_TRANSLOG", "1")
+            .env("MOCK_EXIT", "0")
+            .args(["--cards-dir", cards_s])
+            .args(args)
+            .output()
+            .unwrap()
+    };
+
+    assert!(bop(&["init"]).status.success());
+    write_providers(&cards);
+    write_template(&cards, "implement");
+    assert!(bop(&["new", "implement", "tl1"]).status.success());
+    let adapter = mock_adapter();
+    assert!(bop(&[
+        "dispatcher",
+        "--adapter",
+        adapter.to_str().unwrap(),
+        "--once"
+    ])
+    .status
+    .success());
+    assert!(find_card_in(&cards, "done", "tl1").exists());
+
+    let out = bop(&["translog", "verify", "tl1"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let rep: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(rep["schema"], "bop.translog.verify.v1");
+    assert_eq!(rep["log_state"], "done");
+    assert_eq!(rep["consistent"], true);
+
+    // Operator retry keeps request identity and appends a Retry fact.
+    assert!(bop(&["retry", "tl1"]).status.success());
+    let out = bop(&["translog", "show", "tl1"]);
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["view"]["state"], "pending");
+    let ops: Vec<&str> = v["view"]["lineage"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["op"].as_str().unwrap())
+        .collect();
+    assert_eq!(ops, ["create", "claim", "complete", "retry"]);
+    assert_eq!(v["torn_tail"], serde_json::Value::Null);
+
+    let out = bop(&["translog", "verify", "--all"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}

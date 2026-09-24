@@ -298,6 +298,14 @@ pub async fn run_dispatcher(
             if let Some(dir) = card_dir {
                 bop_core::lineage::write_ics(dir, meta, to);
             }
+            // Shadow-write the transition as an immutable fact (bop#9 experiment).
+            if bop_core::translog::shadow_enabled() {
+                if let Some(dir) = card_dir {
+                    if let Err(e) = bop_core::translog::shadow_transition(dir, meta, from, to) {
+                        eprintln!("[translog] {}: {from}->{to}: {e}", meta.id);
+                    }
+                }
+            }
         };
 
         let running_count = fs::read_dir(&running_dir)

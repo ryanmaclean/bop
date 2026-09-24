@@ -41,6 +41,7 @@ mod replay;
 mod serve;
 mod stats;
 mod termcaps;
+mod translog_cmd;
 mod ui;
 mod util;
 mod watch;
@@ -127,6 +128,12 @@ enum Command {
         /// VCS engine used for finalize/publish flow.
         #[arg(short = 'v', long, value_enum, default_value_t = VcsEngine::GitGt)]
         vcs_engine: VcsEngine,
+    },
+    /// Inspect the immutable per-card transition log (bop#9 experiment; JSON).
+    /// Shadow writes are enabled with BOP_TRANSLOG=1.
+    Translog {
+        #[command(subcommand)]
+        action: TranslogAction,
     },
     /// Move a card back to pending/ so the dispatcher picks it up again.
     Retry {
@@ -412,6 +419,20 @@ enum Command {
     Project {
         #[command(subcommand)]
         action: ProjectAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum TranslogAction {
+    /// Replay a card's log and print the projected state + lineage.
+    Show { id: String },
+    /// Compare the replayed state with the directory the card lives in.
+    /// Exits 1 on divergence or a torn tail.
+    Verify {
+        id: Option<String>,
+        /// Verify every card under the cards root.
+        #[arg(long)]
+        all: bool,
     },
 }
 
@@ -854,6 +875,12 @@ async fn main() -> anyhow::Result<()> {
             once,
             vcs_engine,
         } => merge_gate::run_merge_gate(&root, poll_ms, once, vcs_engine).await,
+        Command::Translog { action } => match action {
+            TranslogAction::Show { id } => translog_cmd::cmd_show(&root, &id),
+            TranslogAction::Verify { id, all } => {
+                translog_cmd::cmd_verify(&root, id.as_deref(), all)
+            }
+        },
         Command::Retry { id } => cards::cmd_retry(&root, &id),
         Command::RetryTransient { id, all } => {
             cards::cmd_retry_transient(&root, id.as_deref(), all)
