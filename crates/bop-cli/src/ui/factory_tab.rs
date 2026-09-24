@@ -329,6 +329,11 @@ fn query_launchd_status(label: &str) -> FactoryServiceStatus {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
+fn query_launchd_status(_label: &str) -> FactoryServiceStatus {
+    FactoryServiceStatus::Unsupported
+}
+
 fn query_systemd_status(label: &str) -> FactoryServiceStatus {
     if label == ICONWATCHER_LABEL {
         return FactoryServiceStatus::Unsupported;
@@ -436,6 +441,16 @@ fn stop_launchd_service(label: &str) -> Result<()> {
         let err = String::from_utf8_lossy(&out.stderr);
         bail!("launchctl stop failed: {}", err.trim())
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn start_launchd_service(_label: &str) -> Result<()> {
+    bail!("launchd is only supported on macOS")
+}
+
+#[cfg(not(target_os = "macos"))]
+fn stop_launchd_service(_label: &str) -> Result<()> {
+    bail!("launchd is only supported on macOS")
 }
 
 fn start_systemd_service(label: &str) -> Result<()> {
