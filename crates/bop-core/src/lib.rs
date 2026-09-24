@@ -1,7 +1,10 @@
+pub mod bench;
 pub mod cardchars;
 pub mod config;
+pub mod fsversion;
 pub mod lineage;
 pub mod realtime;
+pub mod translog;
 pub mod worktree;
 
 pub use config::{load_config, Config};
