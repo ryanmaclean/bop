@@ -1605,6 +1605,11 @@ pub fn retry_card(root: &Path, id: &str) -> anyhow::Result<String> {
     fs::rename(&card, &target)
         .with_context(|| format!("failed to move card to pending/: {}", id))?;
     if let Ok(m) = bop_core::read_meta(&target) {
+        if bop_core::translog::shadow_enabled() {
+            if let Err(e) = bop_core::translog::shadow_transition(&target, &m, state, "pending") {
+                eprintln!("[translog] {id}: {state}->pending: {e}");
+            }
+        }
         if bop_core::lineage::is_enabled(root) {
             let ev = bop_core::lineage::build_run_event(
                 bop_core::lineage::EventType::Other,

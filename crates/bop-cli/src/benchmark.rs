@@ -129,9 +129,16 @@ pub async fn cmd_benchmark(
     for provider in &providers {
         for run in 1..=runs {
             let cfg = providers_file.providers.get(provider);
-            let run_result =
-                execute_provider_run(&temp_cards_dir, &template_dir, provider, run, cfg, None)
-                    .await;
+            let run_result = execute_provider_run(
+                &temp_cards_dir,
+                &template_dir,
+                "bench",
+                provider,
+                run,
+                cfg,
+                None,
+            )
+            .await;
             all_runs.push(run_result);
         }
     }
@@ -256,9 +263,12 @@ fn build_benchmark_template(cards_dir: &Path, spec_text: &str) -> anyhow::Result
     Ok(template_dir)
 }
 
+/// `card_prefix` keeps judge cards (`judge-…`) from colliding with the
+/// benchmark run cards (`bench-…`) when the judge is also a benchmarked provider.
 async fn execute_provider_run(
     temp_cards_dir: &Path,
     template_dir: &Path,
+    card_prefix: &str,
     provider: &str,
     run: usize,
     provider_cfg: Option<&providers::AdapterConfig>,
@@ -282,7 +292,8 @@ async fn execute_provider_run(
     };
 
     let safe_provider = sanitize_for_filename(provider);
-    let card_name = format!("bench-{}-run-{}.bop", safe_provider, run);
+    let card_id = format!("{}-{}-run-{}", card_prefix, safe_provider, run);
+    let card_name = format!("{card_id}.bop");
     let card_dir = temp_cards_dir.join("running").join(card_name);
 
     if let Err(err) = paths::clone_template(template_dir, &card_dir) {
@@ -296,7 +307,7 @@ async fn execute_provider_run(
     }
 
     let mut meta = bop_core::read_meta(&card_dir).unwrap_or_default();
-    meta.id = format!("bench-{}-run-{}", safe_provider, run);
+    meta.id = card_id;
     meta.created = Utc::now();
     meta.stage = BENCHMARK_STAGE.to_string();
     meta.provider_chain = vec![provider.to_string()];
@@ -401,6 +412,7 @@ async fn run_judge(
     let judge_run = execute_provider_run(
         temp_cards_dir,
         template_dir,
+        "judge",
         judge_provider,
         1,
         Some(judge_cfg),
@@ -416,7 +428,7 @@ async fn run_judge(
         );
     }
 
-    parse_scores_map(&judge_run.output_text)
+    parse_scores_map(&judge_run.output_text, providers)
         .with_context(|| "judge output did not include a valid scores JSON object")
 }
 
@@ -473,22 +485,33 @@ fn truncate_for_judge(text: &str) -> String {
     out
 }
 
-fn parse_scores_map(text: &str) -> Option<BTreeMap<String, f64>> {
+/// Extracts the judge's `{"scores": {...}}` object from free-form output.
+///
+/// The judge prompt itself contains an example scores object, and adapters
+/// such as `mock.nu` echo the prompt, so the *last* candidate wins, and a
+/// candidate naming at least one benchmarked provider beats one that does not.
+fn parse_scores_map(text: &str, providers: &[String]) -> Option<BTreeMap<String, f64>> {
     if let Ok(value) = serde_json::from_str::<Value>(text) {
         if let Some(scores) = extract_scores_from_value(&value) {
             return Some(scores);
         }
     }
 
-    for candidate in json_object_candidates(text) {
-        if let Ok(value) = serde_json::from_str::<Value>(candidate) {
-            if let Some(scores) = extract_scores_from_value(&value) {
-                return Some(scores);
-            }
+    let mut fallback: Option<BTreeMap<String, f64>> = None;
+    for candidate in json_object_candidates(text).into_iter().rev() {
+        let Ok(value) = serde_json::from_str::<Value>(candidate) else {
+            continue;
+        };
+        let Some(scores) = extract_scores_from_value(&value) else {
+            continue;
+        };
+        if scores.keys().any(|name| providers.contains(name)) {
+            return Some(scores);
         }
+        fallback.get_or_insert(scores);
     }
 
-    None
+    fallback
 }
 
 fn json_object_candidates(text: &str) -> Vec<&str> {
@@ -621,6 +644,7 @@ fn pick_recommendation(aggregates: &[ProviderAggregate]) -> Option<Recommendatio
                 if score <= 0.0 {
                     return None;
                 }
+                // Unknown cost ranks after every known ratio.
                 let cost = agg.avg_cost_usd.unwrap_or(f64::INFINITY);
                 Some((agg, cost / score))
             })
@@ -646,9 +670,17 @@ fn pick_recommendation(aggregates: &[ProviderAggregate]) -> Option<Recommendatio
         });
 
         if let Some((best, ratio)) = ranked.first() {
+            let detail = if ratio.is_finite() {
+                format!("best cost/quality ratio: ${:.3}/point", ratio)
+            } else {
+                format!(
+                    "highest judge score {:.1}/10 (cost unknown)",
+                    best.score.unwrap_or(0.0)
+                )
+            };
             return Some(Recommendation {
                 provider: best.provider.clone(),
-                detail: format!("best cost/quality ratio: ${:.3}/point", ratio),
+                detail,
             });
         }
     }
@@ -677,11 +709,40 @@ fn pick_recommendation(aggregates: &[ProviderAggregate]) -> Option<Recommendatio
 }
 
 fn write_results_file(doc: &BenchmarkJson) -> anyhow::Result<PathBuf> {
-    let ts = Local::now().format("%Y%m%d-%H%M%S");
-    let path = std::env::current_dir()?.join(format!("bop-benchmark-{}.json", ts));
-    fs::write(&path, serde_json::to_vec_pretty(doc)?)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(path)
+    write_results_file_in(&std::env::current_dir()?, doc)
+}
+
+/// Writes `bop-benchmark-<timestamp>.json` without ever clobbering an earlier
+/// result: two benchmarks finishing in the same millisecond get `-2`, `-3`, ...
+fn write_results_file_in(dir: &Path, doc: &BenchmarkJson) -> anyhow::Result<PathBuf> {
+    use std::io::Write;
+
+    let ts = Local::now().format("%Y%m%d-%H%M%S-%3f");
+    let body = serde_json::to_vec_pretty(doc)?;
+    for n in 1..1000 {
+        let name = if n == 1 {
+            format!("bop-benchmark-{ts}.json")
+        } else {
+            format!("bop-benchmark-{ts}-{n}.json")
+        };
+        let path = dir.join(name);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                file.write_all(&body)
+                    .with_context(|| format!("failed to write {}", path.display()))?;
+                return Ok(path);
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => {
+                return Err(err).with_context(|| format!("failed to create {}", path.display()))
+            }
+        }
+    }
+    anyhow::bail!("could not find a free bop-benchmark-{ts}-N.json name")
 }
 
 fn print_table(spec_path: &Path, rows: &[ProviderAggregate]) {
@@ -787,7 +848,7 @@ mod tests {
     #[test]
     fn parse_scores_map_from_direct_json() {
         let input = r#"{"scores":{"codex":8.2,"claude":"9.1"}}"#;
-        let scores = parse_scores_map(input).expect("scores");
+        let scores = parse_scores_map(input, &[]).expect("scores");
         assert_eq!(scores.get("codex").copied(), Some(8.2));
         assert_eq!(scores.get("claude").copied(), Some(9.1));
     }
@@ -795,7 +856,7 @@ mod tests {
     #[test]
     fn parse_scores_map_from_embedded_json_object() {
         let input = "Judge summary:\n```json\n{\"scores\":{\"codex\":7.5,\"claude\":8.0}}\n```";
-        let scores = parse_scores_map(input).expect("scores");
+        let scores = parse_scores_map(input, &[]).expect("scores");
         assert_eq!(scores.get("codex").copied(), Some(7.5));
         assert_eq!(scores.get("claude").copied(), Some(8.0));
     }
@@ -858,5 +919,49 @@ mod tests {
 
         let rec = pick_recommendation(&rows).expect("recommendation");
         assert_eq!(rec.provider, "codex");
+    }
+
+    #[test]
+    fn parse_scores_map_prefers_judge_answer_over_echoed_prompt_example() {
+        let providers = vec!["codex".to_string(), "claude".to_string()];
+        let prompt = build_judge_prompt("spec", &providers, &[]);
+        let output =
+            format!("{prompt}\n\nAnswer:\n{{\"scores\": {{\"codex\": 6.5, \"claude\": 9.0}}}}");
+        let scores = parse_scores_map(&output, &providers).expect("scores");
+        assert_eq!(scores.get("codex").copied(), Some(6.5));
+        assert_eq!(scores.get("claude").copied(), Some(9.0));
+        assert!(!scores.contains_key("provider-name"));
+    }
+
+    #[test]
+    fn pick_recommendation_with_unknown_cost_is_not_inf() {
+        let rows = vec![ProviderAggregate {
+            provider: "ollama-local".to_string(),
+            avg_duration_secs: 60.0,
+            avg_tokens: None,
+            avg_cost_usd: None,
+            score: Some(7.0),
+            runs_total: 1,
+            failed_runs: 0,
+        }];
+        let rec = pick_recommendation(&rows).expect("recommendation");
+        assert_eq!(rec.provider, "ollama-local");
+        assert!(!rec.detail.contains("inf"), "detail was {}", rec.detail);
+    }
+
+    #[test]
+    fn write_results_file_never_overwrites() {
+        let td = tempfile::tempdir().unwrap();
+        let doc = BenchmarkJson {
+            spec: "s.md".to_string(),
+            runs: Vec::new(),
+            recommendation: String::new(),
+        };
+        let a = write_results_file_in(td.path(), &doc).unwrap();
+        let b = write_results_file_in(td.path(), &doc).unwrap();
+        assert_ne!(a, b);
+        assert!(a.exists() && b.exists());
+        let name = a.file_name().unwrap().to_string_lossy().to_string();
+        assert!(name.starts_with("bop-benchmark-") && name.ends_with(".json"));
     }
 }

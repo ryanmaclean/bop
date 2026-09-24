@@ -1407,19 +1407,12 @@ mod tests {
     fn test_detect_missing_creds_and_binary() {
         // Set HOME to a temp dir so credentials file won't resolve.
         let td = tempfile::tempdir().unwrap();
-        let saved = std::env::var("HOME").ok();
-        std::env::set_var("HOME", td.path());
+        let _home = crate::test_env::HomeGuard::set(td.path());
 
         let provider = CodexProvider::new();
         // detect() may still return true if `codex` is on PATH.
         // We can at least verify it doesn't panic.
         let _ = provider.detect();
-
-        // Restore original HOME.
-        match saved {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
     }
 
     #[test]
@@ -1429,18 +1422,12 @@ mod tests {
         std::fs::create_dir_all(&codex_dir).unwrap();
         std::fs::write(codex_dir.join("auth.json"), r#"{"access_token":"test"}"#).unwrap();
 
-        let saved = std::env::var("HOME").ok();
-        std::env::set_var("HOME", td.path());
+        let _home = crate::test_env::HomeGuard::set(td.path());
 
         let provider = CodexProvider::new();
         assert!(
             provider.detect(),
             "detect() should return true when auth.json exists"
         );
-
-        match saved {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
     }
 }
