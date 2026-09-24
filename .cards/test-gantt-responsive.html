@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>bop · agent timeline - Responsive Test</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box }
+body {
+  background:#0D0D0D; color:#B0B0B0;
+  font-family:'SF Mono','JetBrains Mono','Menlo',monospace;
+  font-size:12px; padding:24px 32px;
+}
+h1 { font-size:13px; font-weight:500; letter-spacing:.08em; text-transform:uppercase; color:#666; margin-bottom:6px }
+h1 span { color:#999; font-weight:400 }
+.cluster { margin-bottom:28px }
+.cluster-hdr { font-size:10px; color:#444; text-transform:uppercase; letter-spacing:.1em; margin-bottom:8px; padding-left:2px }
+.chart-wrap { max-width:100%; overflow-x:auto; }
+.chart { display:flex; min-width:0 }
+.labels { flex-shrink:0; width:190px; padding-top:26px }
+.label { height:24px; display:flex; align-items:center; font-size:11px; color:#666; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:1px }
+.label .g { margin-right:4px }
+.bars-area { flex:1; min-width:0; overflow:visible; position:relative }
+.axis { height:22px; border-bottom:1px solid #1F1F1F; position:relative; margin-bottom:2px }
+.axis-label { position:absolute; top:2px; font-size:10px; color:#444; transform:translateX(-50%); white-space:nowrap }
+.grid { position:absolute; top:24px; bottom:0; width:1px; background:#151515; pointer-events:none }
+.row { height:24px; position:relative; margin-bottom:1px }
+.bar { position:absolute; height:16px; top:4px; border-radius:3px; min-width:4px; cursor:default; opacity:.85 }
+.bar:hover { opacity:1; filter:brightness(1.3) }
+.legend { display:flex; gap:16px; margin-top:16px; padding-top:10px; border-top:1px solid #1A1A1A; flex-wrap:wrap }
+.legend-item { display:flex; align-items:center; gap:5px; font-size:10px; color:#555; text-transform:uppercase; letter-spacing:.05em }
+.sw { width:10px; height:10px; border-radius:2px }
+.summary { margin-top:14px; width:100%; max-width:640px; border-collapse:collapse; font-size:11px; }
+.summary th, .summary td { border:1px solid #1F1F1F; padding:6px 8px; text-align:left; }
+.summary th { color:#777; font-weight:500; width:190px; }
+.summary td { color:#B0B0B0; }
+.viewport-info {
+  position: fixed; top: 10px; right: 10px;
+  background: rgba(255,255,255,0.1); padding: 8px 12px;
+  border-radius: 4px; font-size: 11px; color: #999;
+  border: 1px solid #333;
+}
+</style>
+</head>
+<body>
+<div class="viewport-info">Viewport: <span id="vw">0</span>px × <span id="vh">0</span>px</div>
+<h1>bop · agent timeline <span>— 5 runs (responsive test)</span></h1>
+
+<div class="cluster">
+<div class="cluster-hdr">Mar 21, 14:00 — 14:45 · 5 runs</div>
+<div class="chart-wrap"><div class="chart">
+<div class="labels">
+  <div class="label"><span class="g">♠</span>task-001-implement</div>
+  <div class="label"><span class="g">♥</span>task-002-qa-review</div>
+  <div class="label"><span class="g">♣</span>task-003-refactor</div>
+  <div class="label"><span class="g">♦</span>task-004-bugfix</div>
+  <div class="label"><span class="g">♠</span>task-005-polish</div>
+</div>
+<div class="bars-area">
+<div class="axis">
+  <span class="axis-label" style="left:20%">14:10</span>
+  <span class="axis-label" style="left:40%">14:20</span>
+  <span class="axis-label" style="left:60%">14:30</span>
+  <span class="axis-label" style="left:80%">14:40</span>
+</div>
+<div class="grid" style="left:20%"></div>
+<div class="grid" style="left:40%"></div>
+<div class="grid" style="left:60%"></div>
+<div class="grid" style="left:80%"></div>
+<div class="row"><div class="bar" style="left:5%;width:35%;background:#4caf50" title="task-001"></div></div>
+<div class="row"><div class="bar" style="left:15%;width:25%;background:#ff9800" title="task-002"></div></div>
+<div class="row"><div class="bar" style="left:42%;width:30%;background:#4caf50" title="task-003"></div></div>
+<div class="row"><div class="bar" style="left:25%;width:45%;background:#f44336" title="task-004"></div></div>
+<div class="row"><div class="bar" style="left:72%;width:20%;background:#4caf50" title="task-005"></div></div>
+</div>
+</div></div>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="sw" style="background:#4caf50"></div>≤ p50 duration</div>
+  <div class="legend-item"><div class="sw" style="background:#ff9800"></div>p50–p80</div>
+  <div class="legend-item"><div class="sw" style="background:#f44336"></div>&gt; p80</div>
+</div>
+
+<table class="summary">
+<tr><th>Total runs</th><td>5</td></tr>
+<tr><th>Completed</th><td>3 (60.0%)</td></tr>
+<tr><th>Failed</th><td>0</td></tr>
+<tr><th>Total duration</th><td>42m 30s</td></tr>
+<tr><th>Average duration</th><td>8m 30s</td></tr>
+<tr><th>Total cost</th><td>$2.45</td></tr>
+<tr><th>Parallelism peak</th><td>3 concurrent</td></tr>
+</table>
+
+<script>
+function updateViewport() {
+  document.getElementById('vw').textContent = window.innerWidth;
+  document.getElementById('vh').textContent = window.innerHeight;
+}
+updateViewport();
+window.addEventListener('resize', updateViewport);
+</script>
+</body>
+</html>
