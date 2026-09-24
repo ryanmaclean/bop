@@ -12,7 +12,9 @@ use ratatui::widgets::{
     Block, Borders, List, ListItem, ListState, Paragraph, StatefulWidget, Widget, Wrap,
 };
 
-use crate::factory::{plist_path, systemd_path_path, systemd_service_path};
+#[cfg(target_os = "macos")]
+use crate::factory::plist_path;
+use crate::factory::{systemd_path_path, systemd_service_path};
 
 /// 250ms tick × 8 = 2s refresh cadence for factory status/logs.
 pub const FACTORY_REFRESH_TICKS: u64 = 8;
@@ -329,6 +331,11 @@ fn query_launchd_status(label: &str) -> FactoryServiceStatus {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
+fn query_launchd_status(_label: &str) -> FactoryServiceStatus {
+    FactoryServiceStatus::Unsupported
+}
+
 fn query_systemd_status(label: &str) -> FactoryServiceStatus {
     if label == ICONWATCHER_LABEL {
         return FactoryServiceStatus::Unsupported;
@@ -436,6 +443,16 @@ fn stop_launchd_service(label: &str) -> Result<()> {
         let err = String::from_utf8_lossy(&out.stderr);
         bail!("launchctl stop failed: {}", err.trim())
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn start_launchd_service(_label: &str) -> Result<()> {
+    bail!("launchd is only supported on macOS")
+}
+
+#[cfg(not(target_os = "macos"))]
+fn stop_launchd_service(_label: &str) -> Result<()> {
+    bail!("launchd is only supported on macOS")
 }
 
 fn start_systemd_service(label: &str) -> Result<()> {
