@@ -21,6 +21,8 @@ pub struct DispatchConfig {
     pub auto_select_provider: Option<bool>,
     pub quota_block_threshold: Option<f64>,
     pub prefer_cheap_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision_adapter: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -74,6 +76,7 @@ fn merge_dispatch(
             auto_select_provider: overlay.auto_select_provider.or(base.auto_select_provider),
             quota_block_threshold: overlay.quota_block_threshold.or(base.quota_block_threshold),
             prefer_cheap_provider: overlay.prefer_cheap_provider.or(base.prefer_cheap_provider),
+            decision_adapter: overlay.decision_adapter.or(base.decision_adapter),
         }),
     }
 }
@@ -195,7 +198,8 @@ mod tests {
   "dispatch": {
     "auto_select_provider": true,
     "quota_block_threshold": 0.9,
-    "prefer_cheap_provider": "ollama-local"
+    "prefer_cheap_provider": "ollama-local",
+    "decision_adapter": "system-one-prototype"
   }
 }"#;
         let cfg = parse_config(json).unwrap();
@@ -212,7 +216,8 @@ mod tests {
             Some(DispatchConfig {
                 auto_select_provider: Some(true),
                 quota_block_threshold: Some(0.9),
-                prefer_cheap_provider: Some("ollama-local".to_string())
+                prefer_cheap_provider: Some("ollama-local".to_string()),
+                decision_adapter: Some("system-one-prototype".to_string())
             })
         );
     }
@@ -252,6 +257,7 @@ mod tests {
                 auto_select_provider: Some(true),
                 quota_block_threshold: Some(0.9),
                 prefer_cheap_provider: None,
+                decision_adapter: Some("system-one-prototype".to_string()),
             }),
             ..Default::default()
         };
@@ -262,6 +268,7 @@ mod tests {
                 auto_select_provider: None,
                 quota_block_threshold: Some(0.8),
                 prefer_cheap_provider: Some("ollama-local".to_string()),
+                decision_adapter: None,
             }),
             ..Default::default()
         };
@@ -275,6 +282,7 @@ mod tests {
                 auto_select_provider: Some(true),
                 quota_block_threshold: Some(0.8),
                 prefer_cheap_provider: Some("ollama-local".to_string()),
+                decision_adapter: Some("system-one-prototype".to_string()),
             })
         );
     }

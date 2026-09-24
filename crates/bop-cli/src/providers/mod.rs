@@ -20,6 +20,8 @@ use std::time::{Duration, Instant};
 
 use bop_core::Meta;
 
+use crate::decision::{self, DecisionPlaneConfig};
+
 fn default_probe() -> bool {
     true
 }
@@ -68,6 +70,7 @@ pub struct DispatchProviderConfig {
     pub auto_select_provider: bool,
     pub quota_block_threshold: f64,
     pub prefer_cheap_provider: Option<String>,
+    pub decision_adapter: Option<String>,
 }
 
 impl Default for DispatchProviderConfig {
@@ -76,6 +79,7 @@ impl Default for DispatchProviderConfig {
             auto_select_provider: true,
             quota_block_threshold: 0.90,
             prefer_cheap_provider: None,
+            decision_adapter: None,
         }
     }
 }
@@ -101,6 +105,7 @@ impl DispatchProviderConfig {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string());
+            out.decision_adapter = DecisionPlaneConfig::from_dispatch_config(Some(cfg)).adapter;
         }
         out
     }
@@ -398,7 +403,7 @@ pub fn load_dispatch_provider_config(cards_dir: &Path) -> anyhow::Result<Dispatc
 
 pub fn select_provider(
     cards_dir: &Path,
-    meta: Option<&mut Meta>,
+    mut meta: Option<&mut Meta>,
     stage: &str,
     cfg: &DispatchProviderConfig,
 ) -> anyhow::Result<Option<ProviderSelection>> {
@@ -414,7 +419,7 @@ pub fn select_provider(
         None
     };
 
-    let chain: Vec<String> = match meta {
+    let chain: Vec<String> = match meta.as_deref_mut() {
         Some(m) => {
             if m.provider_chain.is_empty() {
                 m.provider_chain = vec!["mock".to_string(), "mock2".to_string()];
@@ -439,6 +444,9 @@ pub fn select_provider(
 
     let mut eligible: Vec<String> = Vec::new();
     let mut fallback: Option<String> = None;
+    let decision_cfg = DecisionPlaneConfig {
+        adapter: cfg.decision_adapter.clone(),
+    };
 
     for name in chain {
         let Some(p) = pf.providers.get(&name) else {
@@ -494,10 +502,24 @@ pub fn select_provider(
             cfg.prefer_cheap_provider.as_deref(),
         );
     }
+    let ordered_candidates = ordered.clone();
     let selected_name = ordered.remove(0);
     let Some(provider) = pf.providers.get(&selected_name) else {
         return Ok(None);
     };
+
+    if let Some(meta) = meta {
+        decision::record_provider_selection(
+            meta,
+            &decision_cfg,
+            stage,
+            &ordered_candidates,
+            &selected_name,
+            cost_tier,
+            cfg.prefer_cheap_provider.as_deref(),
+            avoid_provider.as_deref(),
+        );
+    }
 
     let utilization_note = quota_utilization(&quota_snapshots, &selected_name)
         .map(|u| {
@@ -1456,6 +1478,7 @@ mod tests {
             auto_select_provider: true,
             quota_block_threshold: 0.90,
             prefer_cheap_provider: None,
+            decision_adapter: None,
         };
         let selected = select_provider(td.path(), Some(&mut meta), "implement", &cfg)
             .unwrap()
@@ -1521,6 +1544,7 @@ mod tests {
             auto_select_provider: true,
             quota_block_threshold: 0.90,
             prefer_cheap_provider: Some("ollama-local".into()),
+            decision_adapter: None,
         };
         let selected = select_provider(td.path(), Some(&mut meta), "implement", &cfg)
             .unwrap()
@@ -1553,11 +1577,40 @@ mod tests {
             auto_select_provider: true,
             quota_block_threshold: 0.90,
             prefer_cheap_provider: Some("ollama-local".into()),
+            decision_adapter: None,
         };
         let selected = select_provider(td.path(), Some(&mut meta), "implement", &cfg)
             .unwrap()
             .unwrap();
         assert_eq!(selected.name, "ollama-local");
+    }
+
+    #[test]
+    fn select_provider_records_advisory_decision_when_enabled() {
+        let td = tempdir().unwrap();
+        let mut pf = ProvidersFile::default();
+        pf.providers.insert("a".to_string(), mock_provider("cmd_a"));
+        pf.providers.insert("b".to_string(), mock_provider("cmd_b"));
+        write_providers(td.path(), &pf).unwrap();
+
+        let mut meta = Meta {
+            provider_chain: vec!["a".into(), "b".into()],
+            ..Default::default()
+        };
+        let cfg = DispatchProviderConfig {
+            auto_select_provider: false,
+            quota_block_threshold: 0.90,
+            prefer_cheap_provider: None,
+            decision_adapter: Some("system-one-prototype".into()),
+        };
+
+        let selected = select_provider(td.path(), Some(&mut meta), "implement", &cfg)
+            .unwrap()
+            .unwrap();
+        assert_eq!(selected.name, "a");
+        assert_eq!(meta.decisions.len(), 1);
+        assert_eq!(meta.decisions[0].site, "provider_selection");
+        assert!(!meta.decisions[0].adopted);
     }
 
     #[test]
