@@ -37,5 +37,11 @@ jobs:
       - name: Build and quality gates
         run: make check
 
+      # scripts/policy_check.nu delegates to `^bop policy check`, so the
+      # binary `cargo test` just produced (via `make check`) needs to be
+      # resolvable on PATH for the next step.
+      - name: Add target/debug to PATH
+        run: echo "$PWD/target/debug" >> "$GITHUB_PATH"
+
       - name: Policy check (staged scope)
         run: nu scripts/policy_check.nu --staged --cards-dir .cards
