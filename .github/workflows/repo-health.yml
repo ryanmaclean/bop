@@ -16,9 +16,6 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build and quality gates
-        run: make check
-
       - name: Install Nushell
         run: brew install nushell
 
@@ -31,6 +28,14 @@ jobs:
             "$pinned"*) ;;
             *) echo "Nushell version $actual does not match pinned version $pinned (.github/nu-version)"; exit 1 ;;
           esac
+
+      # Nushell must be on PATH before `make check`: the dispatcher integration
+      # tests (crates/bop-cli/tests/dispatcher_harness.rs) spawn
+      # adapters/mock.nu, whose #!/usr/bin/env nu shebang fails with ENOENT
+      # if nu isn't installed yet, which cascades into missing-card assertion
+      # failures further down each test.
+      - name: Build and quality gates
+        run: make check
 
       - name: Policy check (staged scope)
         run: nu scripts/policy_check.nu --staged --cards-dir .cards
