@@ -437,6 +437,38 @@ enum TranslogAction {
         #[arg(long)]
         all: bool,
     },
+    /// Run the common state-machine benchmark workload (bop#8) in an empty
+    /// scratch dir and print one ryanlab.bench.v1 JSON record.
+    /// Exits 1 if any card fails crash recovery or deterministic replay.
+    Bench {
+        /// Scratch directory on the filesystem under test (must be empty or absent).
+        #[arg(long)]
+        dir: std::path::PathBuf,
+        #[arg(long, default_value_t = 16)]
+        cards: usize,
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+        #[arg(long, default_value_t = 4096)]
+        artifact_bytes: usize,
+        #[arg(long, default_value_t = 32)]
+        log_lines: usize,
+        /// Runtime label (e.g. host, rump, microvm).
+        #[arg(long)]
+        runtime: Option<String>,
+        /// Filesystem label (e.g. ffs, lfs, hammer2).
+        #[arg(long)]
+        filesystem: Option<String>,
+        /// Git commit of the code under test.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Executable called as `<cmd> <dir>` before and after the run; its
+        /// trimmed stdout is the filesystem-native version id.
+        #[arg(long)]
+        version_cmd: Option<std::path::PathBuf>,
+        /// Also write the JSON record to this file.
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -886,6 +918,32 @@ async fn main() -> anyhow::Result<()> {
             TranslogAction::Verify { id, all } => {
                 translog_cmd::cmd_verify(&root, id.as_deref(), all)
             }
+            TranslogAction::Bench {
+                dir,
+                cards,
+                seed,
+                artifact_bytes,
+                log_lines,
+                runtime,
+                filesystem,
+                commit,
+                version_cmd,
+                out,
+            } => translog_cmd::cmd_bench(
+                &dir,
+                bop_core::bench::Config {
+                    cards,
+                    seed,
+                    artifact_bytes,
+                    log_lines,
+                    project: "bop".into(),
+                    runtime,
+                    filesystem,
+                    commit,
+                },
+                version_cmd.as_deref(),
+                out.as_deref(),
+            ),
         },
         Command::Retry { id } => cards::cmd_retry(&root, &id),
         Command::RetryTransient { id, all } => {

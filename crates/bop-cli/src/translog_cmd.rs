@@ -117,6 +117,72 @@ pub fn cmd_verify(root: &Path, id: Option<&str>, all: bool) -> anyhow::Result<()
     Ok(())
 }
 
+/// `--version-cmd` adapter: runs `<cmd> <dir>` and uses its trimmed stdout as
+/// the filesystem-native version id. A failing or silent command reports none.
+struct CommandProbe<'a> {
+    cmd: &'a Path,
+    name: String,
+}
+
+impl bop_core::bench::VersionProbe for CommandProbe<'_> {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn version(&self, root: &Path) -> Option<String> {
+        let out = std::process::Command::new(self.cmd)
+            .arg(root)
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        (!v.is_empty()).then_some(v)
+    }
+}
+
+pub fn bench_json(
+    dir: &Path,
+    cfg: bop_core::bench::Config,
+    version_cmd: Option<&Path>,
+) -> anyhow::Result<(serde_json::Value, bool)> {
+    let outcome = match version_cmd {
+        Some(cmd) => {
+            let probe = CommandProbe {
+                cmd,
+                name: cmd
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("command")
+                    .to_string(),
+            };
+            bop_core::bench::run(dir, &cfg, &probe)?
+        }
+        None => bop_core::bench::run(dir, &cfg, &bop_core::bench::NoVersion)?,
+    };
+    Ok((outcome.record, outcome.ok))
+}
+
+pub fn cmd_bench(
+    dir: &Path,
+    cfg: bop_core::bench::Config,
+    version_cmd: Option<&Path>,
+    out: Option<&Path>,
+) -> anyhow::Result<()> {
+    let (v, ok) = bench_json(dir, cfg, version_cmd)?;
+    let text = serde_json::to_string_pretty(&v)?;
+    if let Some(out) = out {
+        fs::write(out, format!("{text}\n"))
+            .with_context(|| format!("failed to write {}", out.display()))?;
+    }
+    println!("{text}");
+    if !ok {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,6 +236,31 @@ mod tests {
         assert_eq!(all["summary"]["consistent"], 1);
         assert_eq!(all["summary"]["unlogged"], 1);
         assert_eq!(all["summary"]["divergent"], 1);
+    }
+
+    #[test]
+    fn bench_emits_bench_v1_and_uses_version_cmd() {
+        let d = tempdir().unwrap();
+        let dir = d.path().join("bench");
+        let cfg = bop_core::bench::Config {
+            cards: 3,
+            artifact_bytes: 64,
+            log_lines: 2,
+            filesystem: Some("test".into()),
+            ..Default::default()
+        };
+        // `echo <dir>` stands in for a native version probe.
+        let (v, ok) = bench_json(&dir, cfg, Some(Path::new("echo"))).unwrap();
+        assert!(ok, "{v}");
+        assert_eq!(v["schema"], "ryanlab.bench.v1");
+        assert_eq!(v["workload"], "bop.state-machine.v1");
+        assert_eq!(v["tags"]["version_probe"], "echo");
+        assert_eq!(v["tags"]["fs_version_before"], dir.to_str().unwrap());
+        assert_eq!(v["metrics"]["cards"], 3);
+        assert_eq!(v["raw"]["cards"].as_array().unwrap().len(), 3);
+        // A second run into the same (now non-empty) dir is refused.
+        let again = bop_core::bench::Config::default();
+        assert!(bench_json(&dir, again, None).is_err());
     }
 
     #[test]

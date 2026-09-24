@@ -1,3 +1,4 @@
+pub mod bench;
 pub mod cardchars;
 pub mod config;
 pub mod lineage;
