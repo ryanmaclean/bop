@@ -558,10 +558,9 @@ impl GeminiProvider {
         // Find the opening quote and strip it.
         let (quote_char, after_quote) = if let Some(rest) = after_eq.strip_prefix('"') {
             ('"', rest)
-        } else if let Some(rest) = after_eq.strip_prefix('\'') {
-            ('\'', rest)
         } else {
-            return None;
+            let rest = after_eq.strip_prefix('\'')?;
+            ('\'', rest)
         };
 
         // Read until matching closing quote.

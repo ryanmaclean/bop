@@ -2,15 +2,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf()
-}
-
 fn build_jc() {
     // No-op: env!("CARGO_BIN_EXE_bop") below makes cargo test build the
     // `bop` binary itself before any test runs, exactly once, in the

@@ -153,10 +153,19 @@ pub fn cmd_icons_watch(root: &Path) -> anyhow::Result<()> {
 pub fn cmd_icons_install(root: &Path) -> anyhow::Result<()> {
     #[cfg(not(target_os = "macos"))]
     {
+        let _ = root;
         println!("icons install: macOS only");
         return Ok(());
     }
 
+    #[cfg(target_os = "macos")]
+    {
+        cmd_icons_install_macos(root)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn cmd_icons_install_macos(root: &Path) -> anyhow::Result<()> {
     let bop_bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("/usr/local/bin/bop"));
     let cards_dir = root.to_string_lossy().to_string();
 

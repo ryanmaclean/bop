@@ -12,7 +12,9 @@ use ratatui::widgets::{
     Block, Borders, List, ListItem, ListState, Paragraph, StatefulWidget, Widget, Wrap,
 };
 
-use crate::factory::{plist_path, systemd_path_path, systemd_service_path};
+#[cfg(target_os = "macos")]
+use crate::factory::plist_path;
+use crate::factory::{systemd_path_path, systemd_service_path};
 
 /// 250ms tick × 8 = 2s refresh cadence for factory status/logs.
 pub const FACTORY_REFRESH_TICKS: u64 = 8;

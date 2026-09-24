@@ -188,9 +188,7 @@ impl OllamaCloudProvider {
                     .with_context(|| format!("cannot read Ollama config: {}", path.display()))?;
                 let cfg: OllamaCloudConfig = serde_json::from_str(&raw)
                     .with_context(|| format!("malformed Ollama config at {}", path.display()))?;
-                let key = cfg
-                    .api_key
-                    .and_then(|k| if k.trim().is_empty() { None } else { Some(k) });
+                let key = cfg.api_key.filter(|k| !k.trim().is_empty());
                 return Ok(key);
             }
         }
