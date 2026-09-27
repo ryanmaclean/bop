@@ -1,0 +1,12 @@
+schema = "ryanlab.project.v1"
+name = "bop"
+status = "active"
+role = "Work identity and filesystem-as-state-machine orchestrator"
+
+canonical_for = ["run-identity", "card-state-machine", "dispatcher-lifecycle"]
+integrates_with = ["smolfire", "moth", "skills", "genoa"]
+do_not_implement = ["os-runtime", "image-builder", "lineage-database", "actor-runtime"]
+
+registry = "ryanmaclean/skills:docs/PROJECTS.md"
+glossary = "ryanmaclean/skills:docs/GLOSSARY.md"
+benchmark_schema = "ryanmaclean/skills:schemas/bench.v1.schema.json"
