@@ -12,7 +12,9 @@ use ratatui::widgets::{
     Block, Borders, List, ListItem, ListState, Paragraph, StatefulWidget, Widget, Wrap,
 };
 
-use crate::factory::{plist_path, systemd_path_path, systemd_service_path};
+#[cfg(target_os = "macos")]
+use crate::factory::plist_path;
+use crate::factory::{systemd_path_path, systemd_service_path};
 
 /// 250ms tick × 8 = 2s refresh cadence for factory status/logs.
 pub const FACTORY_REFRESH_TICKS: u64 = 8;
@@ -299,11 +301,17 @@ impl Widget for FactoryTabWidget<'_> {
 }
 
 fn query_service_status(label: &str) -> FactoryServiceStatus {
-    if cfg!(target_os = "macos") {
-        query_launchd_status(label)
-    } else if cfg!(target_os = "linux") {
-        query_systemd_status(label)
-    } else {
+    #[cfg(target_os = "macos")]
+    {
+        return query_launchd_status(label);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return query_systemd_status(label);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = label;
         FactoryServiceStatus::Unsupported
     }
 }
@@ -366,21 +374,33 @@ fn query_systemd_status(label: &str) -> FactoryServiceStatus {
 }
 
 fn start_service(label: &str) -> Result<()> {
-    if cfg!(target_os = "macos") {
-        start_launchd_service(label)
-    } else if cfg!(target_os = "linux") {
-        start_systemd_service(label)
-    } else {
+    #[cfg(target_os = "macos")]
+    {
+        return start_launchd_service(label);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return start_systemd_service(label);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = label;
         bail!("factory controls are not supported on this OS")
     }
 }
 
 fn stop_service(label: &str) -> Result<()> {
-    if cfg!(target_os = "macos") {
-        stop_launchd_service(label)
-    } else if cfg!(target_os = "linux") {
-        stop_systemd_service(label)
-    } else {
+    #[cfg(target_os = "macos")]
+    {
+        return stop_launchd_service(label);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return stop_systemd_service(label);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = label;
         bail!("factory controls are not supported on this OS")
     }
 }

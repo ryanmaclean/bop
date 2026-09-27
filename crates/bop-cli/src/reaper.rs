@@ -6,7 +6,7 @@ use tokio::process::Command as TokioCommand;
 
 use bop_core::{write_meta, StageStatus};
 
-use crate::{lock, quicklook};
+use crate::{decision::DecisionPlaneConfig, lock, quicklook};
 
 pub async fn reap_orphans(
     running_dir: &Path,
@@ -15,6 +15,9 @@ pub async fn reap_orphans(
     max_retries: u32,
     stale_lease_after: Duration,
 ) -> anyhow::Result<()> {
+    let config = bop_core::load_config().ok();
+    let decision_cfg =
+        DecisionPlaneConfig::from_dispatch_config(config.as_ref().and_then(|cfg| cfg.dispatch.as_ref()));
     let stale_after_chrono =
         ChronoDuration::from_std(stale_lease_after).unwrap_or_else(|_| ChronoDuration::seconds(30));
     let entries = match fs::read_dir(running_dir) {
@@ -70,6 +73,13 @@ pub async fn reap_orphans(
                     stage.blocked_by = None;
                 }
             }
+            crate::decision::record_orphan_recovery(
+                m,
+                &decision_cfg,
+                pid_dead,
+                lease_stale,
+                move_to_failed,
+            );
             let _ = write_meta(&card_dir, m);
         }
 
@@ -134,6 +144,9 @@ pub async fn recover_orphans(
     pending_dir: &Path,
 ) -> anyhow::Result<Vec<String>> {
     let mut recovered = Vec::new();
+    let config = bop_core::load_config().ok();
+    let decision_cfg =
+        DecisionPlaneConfig::from_dispatch_config(config.as_ref().and_then(|cfg| cfg.dispatch.as_ref()));
     let entries = match fs::read_dir(running_dir) {
         Ok(e) => e,
         Err(_) => return Ok(recovered),
@@ -177,6 +190,15 @@ pub async fn recover_orphans(
                 minimal_meta
             }
         };
+        let mut meta = meta;
+        crate::decision::record_orphan_recovery(
+            &mut meta,
+            &decision_cfg,
+            pid_dead,
+            false,
+            false,
+        );
+        let _ = bop_core::write_meta(&card_dir, &meta);
 
         let name = match card_dir.file_name().and_then(|s| s.to_str()) {
             Some(n) => n.to_string(),

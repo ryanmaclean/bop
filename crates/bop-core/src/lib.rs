@@ -102,6 +102,37 @@ pub struct StageRecord {
     pub blocked_by: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DecisionValue {
+    Choice { value: String },
+    Score { value: f64 },
+    YesNo { value: bool },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DecisionRecord {
+    /// RFC3339 timestamp
+    pub ts: String,
+    /// Decision site, e.g. "provider_selection" or "orphan_recovery".
+    pub site: String,
+    /// Advisory adapter name, e.g. "system-one-prototype".
+    pub adapter: String,
+    /// System One advisory output.
+    pub suggested: DecisionValue,
+    /// Deterministic baseline outcome, when one exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline: Option<DecisionValue>,
+    /// Confidence score in the range 0.0..=1.0.
+    pub confidence: f64,
+    /// Whether the advisory result changed authoritative behavior.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub adopted: bool,
+    /// Compact decision context for replay/debugging.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
 /// A label/tag attached to a card (e.g. {"name":"High Impact","kind":"effort"}).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Label {
@@ -305,6 +336,10 @@ pub struct Meta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub validation_summary: Option<realtime::ValidationSummary>,
 
+    /// Advisory System One / Jev-style decision records.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub decisions: Vec<DecisionRecord>,
+
     // ── planning poker ────────────────────────────────────────────────────────
     /// "open" | "revealed" | None (no active round)
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -405,6 +440,7 @@ impl Default for Meta {
             exit_code: None,
             paused_at: None,
             validation_summary: None,
+            decisions: Vec::new(),
             poker_round: None,
             estimates: BTreeMap::new(),
             zellij_session: None,

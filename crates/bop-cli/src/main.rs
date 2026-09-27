@@ -12,6 +12,7 @@ mod benchmark;
 mod bridge;
 mod cards;
 mod colors;
+mod decision;
 mod diff;
 mod dispatcher;
 mod doctor;
@@ -398,6 +399,12 @@ enum Command {
         /// Optional judge provider for qualitative scoring.
         #[arg(long)]
         judge: Option<String>,
+        /// Emit machine-readable JSON to stdout.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Benchmark advisory System One decision sites against current deterministic behavior.
+    DecisionBenchmark {
         /// Emit machine-readable JSON to stdout.
         #[arg(long)]
         json: bool,
@@ -1092,6 +1099,28 @@ async fn main() -> anyhow::Result<()> {
             json,
         } => benchmark::cmd_benchmark(&root, &spec_file, providers, runs, judge.as_deref(), json)
             .await,
+        Command::DecisionBenchmark { json } => {
+            let report = decision::build_benchmark_report();
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("System One advisory benchmark ({})", report.adapter);
+                for site in report.sites {
+                    println!(
+                        "  {:<20} cases={} agreement={:.0}% confidence={:.2} latency={:.2}µs cost=${:.2} replayable={} fallback={}",
+                        site.site,
+                        site.cases,
+                        site.agreement_rate * 100.0,
+                        site.mean_confidence,
+                        site.mean_latency_us,
+                        site.advisory_cost_usd,
+                        site.replayable,
+                        site.fallback_behavior
+                    );
+                }
+            }
+            Ok(())
+        }
         Command::Watch { all } => watch::cmd_watch(&root, all).await,
         Command::Project { .. } => unreachable!("project command handled before cards root resolution"),
     }
