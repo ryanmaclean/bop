@@ -158,7 +158,7 @@ impl OllamaCloudProvider {
     }
 
     fn config_path() -> Option<PathBuf> {
-        std::env::home_dir().map(|h| h.join(".ollama").join("config.json"))
+        bop_core::home::directory().map(|h| h.join(".ollama").join("config.json"))
     }
 
     fn read_cloud_credentials() -> anyhow::Result<Option<String>> {

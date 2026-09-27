@@ -25,7 +25,7 @@ pub fn uninstall_claude_hooks() -> anyhow::Result<()> {
 }
 
 fn claude_settings_path() -> Option<PathBuf> {
-    std::env::home_dir().map(|h| h.join(".claude").join("settings.json"))
+    bop_core::home::directory().map(|h| h.join(".claude").join("settings.json"))
 }
 
 fn install_claude_hooks_at(settings_path: &Path, bop_bin: &Path) -> anyhow::Result<()> {
