@@ -82,11 +82,16 @@ This is additive — one-shot `bop providers` still uses the REST snapshot.
 ## Acceptance criteria
 
 ```bash
-cargo build -p bop-cli
-cargo test -p bop-cli providers::ollama
-cargo test -p bop-cli providers::opencode
+cargo build -p bop
+cargo test -p bop providers::ollama
+cargo test -p bop providers::opencode
 ./target/debug/bop providers --json
 ```
+
+> 2026-09-23 reconciliation: the crate in `crates/bop-cli` is named `bop`, so the
+> original `-p bop-cli` commands failed with "package ID specification `bop-cli`
+> did not match any packages" — one of the two reasons AC's review of this spec
+> failed (the other was an env-var race in the ollama cloud tests).
 
 All pass. clippy clean. fmt clean.
 

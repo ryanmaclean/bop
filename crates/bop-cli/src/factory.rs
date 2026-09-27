@@ -71,6 +71,33 @@ pub fn systemd_path_path(label: &str) -> PathBuf {
     systemd_user_dir().join(format!("{}.path", label))
 }
 
+/// Arguments (after the binary) for a factory service, shared by the launchd
+/// plist and the systemd unit.
+///
+/// Both services are *event-triggered* (launchd WatchPaths / systemd
+/// PathChanged + `Type=oneshot`), so each run must exit: `--once` is required
+/// for merge-gate as well as the dispatcher (spec 037/009/014). Without it a
+/// WatchPaths trigger left `bop merge-gate` polling forever, and on Linux
+/// `systemctl start` on the oneshot unit never returned.
+/// `--adapter` stays on the dispatcher as the explicit fallback; per-card
+/// routing is resolved by the dispatcher (spec 036).
+pub fn service_args(subcommand: &str) -> Vec<String> {
+    let mut args = vec![subcommand.to_string(), "--vcs-engine".into(), "jj".into()];
+    if subcommand == "dispatcher" {
+        args.extend([
+            "--adapter".to_string(),
+            DISPATCHER_ADAPTER_FALLBACK.to_string(),
+            "--max-workers".to_string(),
+            "3".to_string(),
+        ]);
+    }
+    args.push("--once".into());
+    if subcommand == "dispatcher" {
+        args.extend(["--max-retries".to_string(), "3".to_string()]);
+    }
+    args
+}
+
 pub fn generate_plist(label: &str, subcommand: &str, repo_root: &Path) -> String {
     let bop_bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("/usr/local/bin/bop"));
     let cards_dir = repo_root.join(".cards");
@@ -106,41 +133,11 @@ pub fn generate_plist(label: &str, subcommand: &str, repo_root: &Path) -> String
         .collect::<Vec<_>>()
         .join("\n");
 
-    // Extra args for dispatcher.
-    // --adapter is kept as an explicit fallback; per-card routing is resolved by dispatcher.
-    let mut extra_args = String::new();
-    if subcommand == "dispatcher" {
-        extra_args = format!(
-            r#"    <string>--vcs-engine</string>
-    <string>jj</string>
-    <string>--adapter</string>
-    <string>{}</string>
-    <string>--max-workers</string>
-    <string>3</string>
-    <string>--once</string>
-    <string>--max-retries</string>
-    <string>3</string>"#,
-            DISPATCHER_ADAPTER_FALLBACK
-        );
-    }
-
-    let args_block = if extra_args.is_empty() {
-        format!(
-            r#"    <string>{bin}</string>
-    <string>{sub}</string>"#,
-            bin = bop_bin.display(),
-            sub = subcommand,
-        )
-    } else {
-        format!(
-            r#"    <string>{bin}</string>
-    <string>{sub}</string>
-{extra}"#,
-            bin = bop_bin.display(),
-            sub = subcommand,
-            extra = extra_args,
-        )
-    };
+    let args_block = std::iter::once(bop_bin.display().to_string())
+        .chain(service_args(subcommand))
+        .map(|arg| format!("    <string>{arg}</string>"))
+        .collect::<Vec<_>>()
+        .join("\n");
 
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -212,24 +209,10 @@ pub fn generate_systemd_service(_label: &str, subcommand: &str, repo_root: &Path
     let log_base = format!("/tmp/bop-{}", subcommand);
     let cargo_bin = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cargo/bin");
 
-    // Build command line with args
-    let mut cmd_args = vec![bop_bin.display().to_string(), subcommand.to_string()];
-
-    if subcommand == "dispatcher" {
-        cmd_args.extend([
-            "--vcs-engine".to_string(),
-            "jj".to_string(),
-            "--adapter".to_string(),
-            DISPATCHER_ADAPTER_FALLBACK.to_string(),
-            "--max-workers".to_string(),
-            "3".to_string(),
-            "--once".to_string(),
-            "--max-retries".to_string(),
-            "3".to_string(),
-        ]);
-    }
-
-    let exec_start = cmd_args.join(" ");
+    let exec_start = std::iter::once(bop_bin.display().to_string())
+        .chain(service_args(subcommand))
+        .collect::<Vec<_>>()
+        .join(" ");
     let log_file = format!("{log_base}.log");
     let err_file = format!("{log_base}.err");
 
@@ -770,4 +753,97 @@ pub fn cmd_factory_pool_release(
     exit_code: i32,
 ) -> anyhow::Result<()> {
     pool::cmd_pool_release(cards_root, slot, card_id, exit_code)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plist_args(plist: &str) -> Vec<String> {
+        let start = plist.find("<key>ProgramArguments</key>").unwrap();
+        let block = &plist[start..plist[start..].find("</array>").unwrap() + start];
+        block
+            .lines()
+            .filter_map(|l| {
+                l.trim()
+                    .strip_prefix("<string>")
+                    .and_then(|r| r.strip_suffix("</string>"))
+                    .map(str::to_string)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn factory_installs_both_services() {
+        let subs: Vec<&str> = FACTORY_LABELS.iter().map(|(_, s)| *s).collect();
+        assert_eq!(subs, vec!["dispatcher", "merge-gate"]);
+    }
+
+    #[test]
+    fn merge_gate_plist_is_event_triggered_one_shot_on_done() {
+        let td = tempfile::tempdir().unwrap();
+        fs::create_dir_all(td.path().join(".cards/team-cli/done")).unwrap();
+        let plist = generate_plist("sh.bop.merge-gate", "merge-gate", td.path());
+        let args = plist_args(&plist);
+        assert_eq!(args[1..], ["merge-gate", "--vcs-engine", "jj", "--once"]);
+        assert!(plist.contains(&format!(
+            "<string>{}</string>",
+            td.path().join(".cards/done").display()
+        )));
+        assert!(plist.contains(&format!(
+            "<string>{}</string>",
+            td.path().join(".cards/team-cli/done").display()
+        )));
+        assert!(!plist.contains("KeepAlive"), "must be WatchPaths-triggered");
+        assert!(plist.contains("<string>/tmp/bop-merge-gate.log</string>"));
+    }
+
+    #[test]
+    fn dispatcher_plist_keeps_adapter_fallback_and_once() {
+        let td = tempfile::tempdir().unwrap();
+        let plist = generate_plist("sh.bop.dispatcher", "dispatcher", td.path());
+        let args = plist_args(&plist);
+        assert_eq!(args[1], "dispatcher");
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--adapter", DISPATCHER_ADAPTER_FALLBACK]));
+        assert!(args.iter().any(|a| a == "--once"));
+        assert!(plist.contains(&td.path().join(".cards/pending").display().to_string()));
+    }
+
+    #[test]
+    fn merge_gate_systemd_units_watch_done_and_exit() {
+        let td = tempfile::tempdir().unwrap();
+        let service = generate_systemd_service("sh.bop.merge-gate", "merge-gate", td.path());
+        let exec = service
+            .lines()
+            .find_map(|l| l.strip_prefix("ExecStart="))
+            .unwrap();
+        assert!(
+            exec.ends_with(" merge-gate --vcs-engine jj --once"),
+            "{exec}"
+        );
+        assert!(service.contains("Type=oneshot"));
+        let path_unit = generate_systemd_path("sh.bop.merge-gate", "merge-gate", td.path());
+        assert!(path_unit.contains(&format!(
+            "PathChanged={}",
+            td.path().join(".cards/done").display()
+        )));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn generated_plists_pass_plutil_lint() {
+        let td = tempfile::tempdir().unwrap();
+        for (label, sub) in FACTORY_LABELS {
+            let path = td.path().join(format!("{label}.plist"));
+            fs::write(&path, generate_plist(label, sub, td.path())).unwrap();
+            let out = std::process::Command::new("plutil")
+                .arg("-lint")
+                .arg(&path)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{label}: {out:?}");
+        }
+    }
 }

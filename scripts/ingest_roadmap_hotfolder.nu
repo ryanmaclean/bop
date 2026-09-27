@@ -11,7 +11,7 @@ def usage [] {
 
 def slugify [raw: string] {
   let ascii = ($raw
-    | str downcase
+    | str lowercase
     | str replace --all --regex '[^a-z0-9._-]' '-'
     | str replace --all '--' '-'
     | str trim --char '-'
@@ -20,7 +20,7 @@ def slugify [raw: string] {
 }
 
 def supports_request_file [ext: string] {
-  let lower = ($ext | str downcase)
+  let lower = ($ext | str lowercase)
   $lower in ["roadmap" "md" "txt" "json" "yaml" "yml"]
 }
 

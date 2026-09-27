@@ -3,7 +3,7 @@
 
 def check_gate1 [check_history_file: string]: nothing -> bool {
   if not ($check_history_file | path exists) { return false }
-  let lines = (open --raw $check_history_file | lines | where { |ln| ($ln | str trim) != "" } | each { |ln| $ln | str trim | str downcase })
+  let lines = (open --raw $check_history_file | lines | where { |ln| ($ln | str trim) != "" } | each { |ln| $ln | str trim | str lowercase })
   let last5 = ($lines | last 5)
   ($last5 | length) == 5 and ($last5 | all { |x| $x == "pass" })
 }

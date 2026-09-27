@@ -117,24 +117,49 @@ async fn provider_reachable(provider: &str) -> bool {
     }
 }
 
-fn resolve_adapter(meta: &Meta, fallback: &str) -> String {
-    let provider = meta
-        .provider_chain
-        .first()
-        .map(|s| s.as_str())
-        .unwrap_or("");
+/// Built-in provider -> adapter defaults, used only when `providers.json` has no
+/// usable `command` for the selected provider.
+fn builtin_adapter(provider: &str) -> Option<&'static str> {
     match provider {
-        "claude" => "adapters/claude.nu".to_string(),
-        "codex" => "adapters/codex.nu".to_string(),
-        "gemini" => "adapters/gemini.nu".to_string(),
-        "ollama" => "adapters/ollama-local.nu".to_string(),
-        "ollama-local" => "adapters/ollama-local.nu".to_string(),
-        "mock" => "adapters/mock.nu".to_string(),
-        "opencode" => "adapters/opencode.nu".to_string(),
-        "goose" => "adapters/goose.nu".to_string(),
-        "aider" => "adapters/aider.nu".to_string(),
-        _ => fallback.to_string(),
+        "claude" => Some("adapters/claude.nu"),
+        "codex" => Some("adapters/codex.nu"),
+        "gemini" => Some("adapters/gemini.nu"),
+        "ollama" | "ollama-local" => Some("adapters/ollama.nu"),
+        "mock" => Some("adapters/mock.nu"),
+        "opencode" => Some("adapters/opencode.nu"),
+        "goose" => Some("adapters/goose.nu"),
+        "aider" => Some("adapters/aider.nu"),
+        _ => None,
     }
+}
+
+/// Spec 036 + 052: the adapter must belong to the provider the dispatcher
+/// actually *selected* (after cooldown / quota / QA-avoidance / cost-tier
+/// reordering), not blindly to `provider_chain[0]`.
+///
+/// Resolution order, first existing file wins:
+/// 1. the selected provider's `command` in `providers.json`
+///    (so custom entries like `codex-5.3` or `ollama-qwen3-30b` work, and the
+///    legacy `mock` entry keeps meaning "the global `--adapter`");
+/// 2. the built-in adapter for the provider name;
+/// 3. the global `--adapter` fallback.
+///
+/// Returns the adapter path and a short machine-readable reason for the log.
+fn resolve_adapter(
+    selected_provider: &str,
+    configured_command: &str,
+    fallback: &str,
+    exists: impl Fn(&str) -> bool,
+) -> (String, &'static str) {
+    if !configured_command.is_empty() && exists(configured_command) {
+        return (configured_command.to_string(), "providers.json");
+    }
+    if let Some(adapter) = builtin_adapter(selected_provider) {
+        if exists(adapter) {
+            return (adapter.to_string(), "builtin");
+        }
+    }
+    (fallback.to_string(), "global --adapter")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -576,15 +601,14 @@ pub async fn run_dispatcher(
                         continue;
                     }
 
-                    let resolved_adapter = meta
-                        .as_ref()
-                        .map(|m| resolve_adapter(m, global_adapter))
-                        .unwrap_or_else(|| global_adapter.to_string());
-                    let card_adapter = if std::path::Path::new(&resolved_adapter).exists() {
-                        resolved_adapter
-                    } else {
-                        global_adapter.to_string()
-                    };
+                    let (card_adapter, adapter_source) =
+                        resolve_adapter(&provider_name, &selected.command, global_adapter, |p| {
+                            std::path::Path::new(p).exists()
+                        });
+                    eprintln!(
+                        "[dispatcher] card '{}' → adapter {} (provider '{}', via {})",
+                        name, card_adapter, provider_name, adapter_source
+                    );
 
                     let (exit_code, mut meta) = run_card(
                         cards_dir,
@@ -1418,40 +1442,50 @@ mod tests {
     // ── resolve_adapter ───────────────────────────────────────────────────────
 
     #[test]
-    fn resolve_adapter_returns_known_provider_adapter_paths() {
+    fn resolve_adapter_uses_builtin_for_known_providers() {
         let fallback = "adapters/fallback.nu";
         let known = [
             ("claude", "adapters/claude.nu"),
             ("codex", "adapters/codex.nu"),
             ("gemini", "adapters/gemini.nu"),
-            ("ollama", "adapters/ollama-local.nu"),
-            ("ollama-local", "adapters/ollama-local.nu"),
+            ("ollama", "adapters/ollama.nu"),
+            ("ollama-local", "adapters/ollama.nu"),
             ("mock", "adapters/mock.nu"),
             ("opencode", "adapters/opencode.nu"),
             ("goose", "adapters/goose.nu"),
             ("aider", "adapters/aider.nu"),
         ];
-
         for (provider, adapter) in known {
-            let mut meta = Meta::default();
-            meta.provider_chain = vec![provider.to_string()];
-            assert_eq!(resolve_adapter(&meta, fallback), adapter.to_string());
+            let (got, why) = resolve_adapter(provider, "", fallback, |_| true);
+            assert_eq!(got, adapter, "provider {provider}");
+            assert_eq!(why, "builtin");
         }
     }
 
     #[test]
-    fn resolve_adapter_returns_fallback_for_empty_provider_chain() {
-        let fallback = "adapters/fallback.nu";
-        let meta = Meta::default();
-        assert_eq!(resolve_adapter(&meta, fallback), fallback.to_string());
+    fn resolve_adapter_prefers_providers_json_command() {
+        // e.g. "codex-5.3" → adapters/codex.nu, "ollama-local" → adapters/ollama.nu
+        let (got, why) = resolve_adapter("codex-5.3", "adapters/codex.nu", "fb.nu", |_| true);
+        assert_eq!((got.as_str(), why), ("adapters/codex.nu", "providers.json"));
     }
 
     #[test]
-    fn resolve_adapter_returns_fallback_for_unknown_provider() {
-        let fallback = "adapters/fallback.nu";
-        let mut meta = Meta::default();
-        meta.provider_chain = vec!["grok".to_string()];
-        assert_eq!(resolve_adapter(&meta, fallback), fallback.to_string());
+    fn resolve_adapter_skips_missing_files() {
+        // configured command missing → builtin; builtin missing → global fallback
+        let only_builtin = |p: &str| p == "adapters/codex.nu";
+        let (got, why) = resolve_adapter("codex", "/gone/codex.nu", "fb.nu", only_builtin);
+        assert_eq!((got.as_str(), why), ("adapters/codex.nu", "builtin"));
+        let (got, why) = resolve_adapter("gemini", "", "fb.nu", |_| false);
+        assert_eq!((got.as_str(), why), ("fb.nu", "global --adapter"));
+    }
+
+    #[test]
+    fn resolve_adapter_unknown_provider_falls_back_to_global() {
+        let (got, why) = resolve_adapter("grok", "", "adapters/fallback.nu", |_| true);
+        assert_eq!(
+            (got.as_str(), why),
+            ("adapters/fallback.nu", "global --adapter")
+        );
     }
 
     // ── model_from_provider_env ───────────────────────────────────────────────
@@ -1836,25 +1870,25 @@ mod tests {
         // This test attempts to connect to api.anthropic.com:443
         // It may succeed or fail depending on network availability
         // We're just testing that the function doesn't panic and returns a bool
-        let result = provider_reachable("claude").await;
+        let _result = provider_reachable("claude").await;
         // Result can be true or false depending on actual network state
-        assert!(result || !result); // Always passes, just ensures function executes
+        // Function executed without panicking - test passes
     }
 
     #[tokio::test]
     async fn provider_reachable_checks_codex_endpoint() {
         // This test attempts to connect to api.openai.com:443
         // We're just testing that the function doesn't panic and returns a bool
-        let result = provider_reachable("codex").await;
-        assert!(result || !result); // Always passes, just ensures function executes
+        let _result = provider_reachable("codex").await;
+        // Function executed without panicking - test passes
     }
 
     #[tokio::test]
     async fn provider_reachable_checks_opencode_endpoint() {
         // This test attempts to connect to api.openai.com:443
         // We're just testing that the function doesn't panic and returns a bool
-        let result = provider_reachable("opencode").await;
-        assert!(result || !result); // Always passes, just ensures function executes
+        let _result = provider_reachable("opencode").await;
+        // Function executed without panicking - test passes
     }
 
     #[tokio::test]

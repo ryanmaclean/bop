@@ -61,7 +61,10 @@ def main [
         exit 1
     }
 
-    let meta_path = [$workdir "meta.json"] | path join
+    # meta.json lives in the card dir (exported by the dispatcher as
+    # BOP_CARD_DIR); $workdir is the card's workspace/worktree, which has no
+    # meta.json whenever a workspace exists (spec 035).
+    let meta_path = card_meta_path $workdir
     let priority = if ($meta_path | path exists) {
         (open $meta_path | get -o priority | default null)
     } else { null }
@@ -98,6 +101,16 @@ def main [
     }
 
     exit $rc
+}
+
+# Prefer $env.BOP_CARD_DIR/meta.json; fall back to <workdir>/meta.json for
+# manual invocations where the workdir *is* the card dir.
+def card_meta_path [workdir: string]: nothing -> string {
+    if ("BOP_CARD_DIR" in $env) and (($env.BOP_CARD_DIR | path join "meta.json") | path exists) {
+        $env.BOP_CARD_DIR | path join "meta.json"
+    } else {
+        [$workdir "meta.json"] | path join
+    }
 }
 
 def run_tests []: nothing -> nothing {
@@ -163,6 +176,17 @@ def run_tests []: nothing -> nothing {
 
     # test 16: effort mapping — out-of-range defaults to high
     assert ((effort_for_priority (-1)) == "high") "out-of-range priority should default to high"
+
+    # test 17: meta.json is read from BOP_CARD_DIR, not the workspace (spec 035)
+    let card = (^mktemp -d /tmp/bop-codex-card.XXXXXX)
+    let ws = (^mktemp -d /tmp/bop-codex-ws.XXXXXX)
+    {priority: 1} | to json | save ($card | path join "meta.json")
+    let via_env = (with-env {BOP_CARD_DIR: $card} { card_meta_path $ws })
+    assert ($via_env == ($card | path join "meta.json")) "BOP_CARD_DIR meta.json should win"
+    assert ((effort_for_priority (open $via_env | get priority)) == "xhigh") "card priority 1 should reach xhigh"
+    let no_env = (with-env {BOP_CARD_DIR: $ws} { card_meta_path $ws })
+    assert ($no_env == ($ws | path join "meta.json")) "falls back to workdir when card dir has no meta"
+    rm -rf $card $ws
 
     print "PASS: codex.nu"
 }

@@ -558,10 +558,9 @@ impl GeminiProvider {
         // Find the opening quote and strip it.
         let (quote_char, after_quote) = if let Some(rest) = after_eq.strip_prefix('"') {
             ('"', rest)
-        } else if let Some(rest) = after_eq.strip_prefix('\'') {
-            ('\'', rest)
         } else {
-            return None;
+            let rest = after_eq.strip_prefix('\'')?;
+            ('\'', rest)
         };
 
         // Read until matching closing quote.
@@ -1187,9 +1186,6 @@ impl Provider for GeminiProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    static HOME_ENV_LOCK: Mutex<()> = Mutex::new(());
 
     // -----------------------------------------------------------------------
     // Credential parsing tests
@@ -1475,27 +1471,18 @@ exports.refreshToken = refreshToken;
 
     #[test]
     fn test_detect_missing_creds_and_binary() {
-        let _guard = HOME_ENV_LOCK.lock().unwrap();
         // Set HOME to a temp dir so credentials file won't resolve.
         let td = tempfile::tempdir().unwrap();
-        let saved = std::env::var("HOME").ok();
-        std::env::set_var("HOME", td.path());
+        let _home = crate::test_env::HomeGuard::set(td.path());
 
         let provider = GeminiProvider::new();
         // detect() may still return true if `gemini` is on PATH.
         // We can at least verify it doesn't panic.
         let _ = provider.detect();
-
-        // Restore original HOME.
-        match saved {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
     }
 
     #[test]
     fn test_detect_with_creds_file() {
-        let _guard = HOME_ENV_LOCK.lock().unwrap();
         let td = tempfile::tempdir().unwrap();
         let gemini_dir = td.path().join(".gemini");
         std::fs::create_dir_all(&gemini_dir).unwrap();
@@ -1505,19 +1492,13 @@ exports.refreshToken = refreshToken;
         )
         .unwrap();
 
-        let saved = std::env::var("HOME").ok();
-        std::env::set_var("HOME", td.path());
+        let _home = crate::test_env::HomeGuard::set(td.path());
 
         let provider = GeminiProvider::new();
         assert!(
             provider.detect(),
             "detect() should return true when oauth_creds.json exists"
         );
-
-        match saved {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
     }
 
     // -----------------------------------------------------------------------

@@ -13,5 +13,17 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      # Nushell must be on PATH before `make check`: the dispatcher integration
+      # tests (crates/bop-cli/tests/dispatcher_harness.rs) spawn
+      # adapters/mock.nu, whose #!/usr/bin/env nu shebang fails with ENOENT
+      # if nu isn't installed, which cascades into missing-card assertion
+      # failures further down each test.
+      - name: Install Nushell
+        run: |
+          v=$(cat .github/nu-version)
+          curl -fsSL "https://github.com/nushell/nushell/releases/download/${v}/nu-${v}-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/nu.tar.gz
+          tar -xzf /tmp/nu.tar.gz -C /tmp
+          sudo install -m 755 "/tmp/nu-${v}-x86_64-unknown-linux-gnu/nu" /usr/local/bin/nu
+          nu --version
       - name: make check
         run: make check
