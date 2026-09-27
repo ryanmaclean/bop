@@ -9,12 +9,12 @@ pub use cmd::{cmd_bridge, BridgeSubcommand};
 
 /// Unix socket path: `~/.bop/bridge.sock`.
 pub fn socket_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".bop").join("bridge.sock"))
+    std::env::home_dir().map(|h| h.join(".bop").join("bridge.sock"))
 }
 
 /// JSONL event log path: `~/.bop/bridge-events.jsonl`.
 pub fn events_log_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".bop").join("bridge-events.jsonl"))
+    std::env::home_dir().map(|h| h.join(".bop").join("bridge-events.jsonl"))
 }
 
 /// Five canonical card stages (BopDeck state machine).

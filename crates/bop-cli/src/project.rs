@@ -20,7 +20,7 @@ pub struct WatchProject {
 }
 
 fn registry_path() -> anyhow::Result<PathBuf> {
-    dirs::home_dir()
+    std::env::home_dir()
         .map(|home| home.join(".bop").join(PROJECTS_FILE))
         .context("HOME is not set; cannot resolve ~/.bop/projects.json")
 }

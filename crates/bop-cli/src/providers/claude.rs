@@ -58,7 +58,7 @@ impl ClaudeProvider {
 
     /// Path to the Claude Code credentials file: `~/.claude/.credentials.json`.
     fn credentials_path() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".claude").join(".credentials.json"))
+        std::env::home_dir().map(|h| h.join(".claude").join(".credentials.json"))
     }
 
     /// Read and parse credentials — tries file first, then macOS Keychain.
