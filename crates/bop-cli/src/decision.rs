@@ -212,7 +212,11 @@ fn benchmark_provider_selection(scenarios: Vec<ProviderScenario<'_>>) -> Benchma
     let mut latency_us_sum = 0.0;
 
     for scenario in &scenarios {
-        let eligible: Vec<String> = scenario.eligible.iter().map(|value| value.to_string()).collect();
+        let eligible: Vec<String> = scenario
+            .eligible
+            .iter()
+            .map(|value| value.to_string())
+            .collect();
         let started = Instant::now();
         let suggested = prototype_provider_choice(
             scenario.stage,
