@@ -2,7 +2,8 @@
 resolver = "2"
 members = [
   "crates/bop-core",
-  "crates/bop-cli",
+    "crates/bop-cli",
+    "vendor/unicode-ident-xid",
 ]
 # bop-zellij-plugin is a WASM-only cdylib and must be built separately:
 #   cargo build -p bop-zellij-plugin --target wasm32-wasip1 --release
@@ -23,6 +24,11 @@ serde_json = "1"
 thiserror = "2"
 walkdir = "2"
 url = "2"
+
+# Full Unicode 17 implementation with explicit upstream MIT/Apache grants.
+# See vendor/unicode-ident-xid/README.md for provenance and maintenance.
+[patch.crates-io]
+unicode-ident = { path = "vendor/unicode-ident-xid" }
 
 [profile.release]
 opt-level = 3
