@@ -1,0 +1,39 @@
+{
+  "id": "cli-unused-matcher-0928",
+  "created": "2026-09-27T19:39:56.436245-07:00",
+  "agent_type": "codex",
+  "stage": "implement",
+  "workflow_mode": "default-feature",
+  "step_index": 1,
+  "priority": 2,
+  "glyph": "🂭",
+  "token": "⚁",
+  "stage_chain": [
+    "implement",
+    "qa"
+  ],
+  "stage_models": {
+    "implement": "opus",
+    "qa": "sonnet"
+  },
+  "stage_providers": {
+    "implement": "claude",
+    "qa": "claude"
+  },
+  "stage_budgets": {
+    "implement": 32000,
+    "qa": 8000
+  },
+  "provider_chain": [
+    "claude"
+  ],
+  "acceptance_criteria": [
+    "Selected metadata excludes unused nucleo and nucleo-matcher",
+    "Native existing ID substring filter tests pass",
+    "Full make check and actual dispatcher card processing remain required"
+  ],
+  "worktree_branch": "fix/cli-unused-matcher-0928",
+  "timeout_seconds": 3600,
+  "retry_count": 0,
+  "failure_reason": "Unused matcher source remediation validated: offline root-workspace metadata/locked native tree and six actual native filter tests pass. Full CLI dependency license closure, make check and actual dispatcher workflow remain unverified; no QA or done transition. See docs/unused-matcher-acceptance.md."
+}
