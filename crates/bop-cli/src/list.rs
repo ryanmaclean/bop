@@ -391,12 +391,9 @@ pub async fn list_cards_watch(root: &Path, state_filter: &str) -> anyhow::Result
                 return Ok(());
             }
             event = rx.recv() => {
-                match event {
-                    None => {
-                        // Channel closed, watcher thread exited
-                        return Ok(());
-                    }
-                    Some(()) => {}
+                if event.is_none() {
+                    // Channel closed, watcher thread exited
+                    return Ok(());
                 }
 
                 // Calculate current stats
