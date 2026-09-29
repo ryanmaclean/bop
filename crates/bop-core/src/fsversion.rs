@@ -168,6 +168,13 @@ pub struct RunBinder<'a> {
 
 impl<'a> RunBinder<'a> {
     pub fn begin(backend: &'a mut dyn FsVersionBackend, run: RunIdentity) -> anyhow::Result<Self> {
+        anyhow::ensure!(run.attempt > 0, "run attempt must be 1-based");
+        let expected = RunIdentity::for_attempt(&run.card_id, &run.request_id, run.attempt);
+        anyhow::ensure!(
+            run.run_id == expected.run_id && run.parent_run_id == expected.parent_run_id,
+            "run id or parent does not match card, request, and attempt"
+        );
+
         let before = backend.begin_run(&run)?;
         let name = backend.name().to_string();
         Ok(RunBinder {
@@ -412,6 +419,57 @@ mod tests {
         let x = drive(a.path(), &mut mk(), true);
         let y = drive(b.path(), &mut mk(), true);
         (x, y)
+    }
+
+    #[derive(Default)]
+    struct BeginCountBackend {
+        begins: usize,
+    }
+
+    impl FsVersionBackend for BeginCountBackend {
+        fn name(&self) -> &str {
+            "counting"
+        }
+
+        fn begin_run(&mut self, _run: &RunIdentity) -> anyhow::Result<Option<FsVersion>> {
+            self.begins += 1;
+            Ok(None)
+        }
+
+        fn commit_transition(
+            &mut self,
+            _run: &RunIdentity,
+            _rec: &Record,
+        ) -> anyhow::Result<Option<FsVersion>> {
+            Ok(None)
+        }
+
+        fn end_run(&mut self, _run: &RunIdentity) -> anyhow::Result<Option<FsVersion>> {
+            Ok(None)
+        }
+    }
+
+    #[test]
+    fn malformed_run_identity_is_rejected_before_backend_begin() {
+        let run = RunIdentity::for_attempt("card-fsv", "00112233445566778899aabbccddeeff", 1);
+        let mut attempt_zero = run.clone();
+        attempt_zero.attempt = 0;
+        attempt_zero.run_id = run_id_for(&run.card_id, &run.request_id, 0);
+
+        let mut wrong_run_id = run.clone();
+        wrong_run_id.run_id = "forged".into();
+
+        let mut wrong_parent = RunIdentity::for_attempt(&run.card_id, &run.request_id, 2);
+        wrong_parent.parent_run_id = None;
+
+        let mut backend = BeginCountBackend::default();
+        for invalid in [attempt_zero, wrong_run_id, wrong_parent] {
+            assert!(RunBinder::begin(&mut backend, invalid).is_err());
+            assert_eq!(backend.begins, 0);
+        }
+
+        RunBinder::begin(&mut backend, run).unwrap().end().unwrap();
+        assert_eq!(backend.begins, 1);
     }
 
     #[test]
