@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Local;
@@ -13,6 +15,21 @@ use crate::colors::{state_ansi, DIM, RESET};
 use crate::lock;
 use crate::render;
 use crate::termcaps::TermCaps;
+
+/// Own the notify thread so every watch return path drops its watcher.
+struct WatchWorker {
+    stop: Arc<AtomicBool>,
+    join: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for WatchWorker {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
 
 fn resolve_states(state_filter: &str) -> Vec<&str> {
     match state_filter {
@@ -193,6 +210,9 @@ fn collect_card_views(
         }
     }
 
+    // A stable order makes the rendered board a reliable redraw comparison.
+    cards.sort_by(|a, b| a.id.cmp(&b.id));
+
     Ok(cards)
 }
 
@@ -223,9 +243,20 @@ fn print_clock_header() {
     println!("{}bop · {} · watching .cards/{}", DIM, time_str, RESET);
 }
 
+/// A notify path may name the card directory itself or a child such as
+/// meta.json. Both .bop and .jobcard are accepted card bundle suffixes.
+fn is_card_event_path(path: &Path) -> bool {
+    path.ancestors().any(|part| {
+        matches!(
+            part.extension().and_then(|extension| extension.to_str()),
+            Some("bop") | Some("jobcard")
+        )
+    })
+}
+
 /// Watch for filesystem changes and continuously redraw the card list.
-/// This function sets up watchers on all state directories and redraws
-/// the display whenever cards are added, removed, or modified.
+/// This function watches the card root recursively and redraws only when
+/// the rendered board changes.
 pub async fn list_cards_watch(root: &Path, state_filter: &str) -> anyhow::Result<()> {
     // Singleton guard — only one watch instance per cards dir.
     // Uses mkdir-atomicity (same pattern as dispatcher lock).
@@ -235,32 +266,9 @@ pub async fn list_cards_watch(root: &Path, state_filter: &str) -> anyhow::Result
         e
     })?;
 
-    // Collect all state directories to watch
-    let states = ["drafts", "pending", "running", "done", "failed", "merged"];
-    let mut watch_dirs = Vec::new();
-
-    // Add root-level state directories
-    for state in &states {
-        let state_dir = root.join(state);
-        if state_dir.exists() {
-            watch_dirs.push(state_dir);
-        }
-    }
-
-    // Add team-* state directories
-    if let Ok(entries) = fs::read_dir(root) {
-        for entry in entries.flatten() {
-            let team_path = entry.path();
-            if team_path.is_dir() && entry.file_name().to_string_lossy().starts_with("team-") {
-                for state in &states {
-                    let state_dir = team_path.join(state);
-                    if state_dir.exists() {
-                        watch_dirs.push(state_dir);
-                    }
-                }
-            }
-        }
-    }
+    // Watching the root also covers card, state, and team directories created
+    // after startup; only card/plan paths below will trigger a render attempt.
+    let mut watch_dirs = vec![root.to_path_buf()];
 
     // Also watch .auto-claude/specs/ for implementation_plan.json changes
     if let Some(git_root) = acplan::find_git_root(root) {
@@ -271,12 +279,14 @@ pub async fn list_cards_watch(root: &Path, state_filter: &str) -> anyhow::Result
     }
 
     // Set up filesystem watcher with 100ms debounce.
-    // Channel carries a bool: true = plan changed (force redraw),
-    // false = card changed (redraw only if stats differ).
-    let (tx, mut rx) = tokio_mpsc::unbounded_channel::<bool>();
+    // Channel is only a wake signal. The rendered board decides if a redraw
+    // is needed, so metadata/progress changes are not lost to count-only stats.
+    let (tx, mut rx) = tokio_mpsc::unbounded_channel::<()>();
     let watch_dirs_clone = watch_dirs.clone();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_worker = Arc::clone(&stop);
 
-    std::thread::spawn(move || {
+    let watcher_join = std::thread::spawn(move || {
         let (std_tx, std_rx) = std::sync::mpsc::channel();
         let mut debouncer = match new_debouncer(Duration::from_millis(100), std_tx) {
             Ok(d) => d,
@@ -299,7 +309,14 @@ pub async fn list_cards_watch(root: &Path, state_filter: &str) -> anyhow::Result
             }
         }
 
-        for res in std_rx {
+        while !stop_worker.load(Ordering::Acquire) {
+            // The debouncer owns a sender, so recv() cannot end on Ctrl-C.
+            // A bounded receive lets the owning task join and drop it.
+            let res = match std_rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(res) => res,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            };
             match res {
                 Ok(events) => {
                     let is_event = |e: &notify_debouncer_mini::DebouncedEvent| -> bool {
@@ -309,22 +326,21 @@ pub async fn list_cards_watch(root: &Path, state_filter: &str) -> anyhow::Result
                         )
                     };
 
-                    // Plan file changed — force redraw even if card stats are unchanged
+                    // Plan changes may alter the visible phase/progress fields.
                     let plan_changed = events.iter().any(|e| {
                         is_event(e)
                             && e.path.file_name().and_then(|s| s.to_str())
                                 == Some("implementation_plan.json")
                     });
 
-                    // Card directory changed (.bop extension)
+                    // Recursive events can name meta.json below a card, or
+                    // the newly-created bundle directory itself.
                     let card_changed = events.iter().any(|e| {
-                        is_event(e) && e.path.extension().and_then(|s| s.to_str()) == Some("bop")
+                        is_event(e) && is_card_event_path(&e.path)
                     });
 
-                    if plan_changed {
-                        let _ = tx.send(true);
-                    } else if card_changed {
-                        let _ = tx.send(false);
+                    if plan_changed || card_changed {
+                        let _ = tx.send(());
                     }
                 }
                 Err(e) => {
@@ -333,9 +349,14 @@ pub async fn list_cards_watch(root: &Path, state_filter: &str) -> anyhow::Result
             }
         }
     });
+    let _watch_worker = WatchWorker {
+        stop,
+        join: Some(watcher_join),
+    };
 
-    // Track previous state for minimal redraw
-    let mut prev_stats;
+    // Compare the actual board rather than only card counts: stage, progress,
+    // title and plan changes can leave counts unchanged.
+    let mut prev_output;
     let mut prev_line_count;
 
     // Initial render
@@ -354,7 +375,7 @@ pub async fn list_cards_watch(root: &Path, state_filter: &str) -> anyhow::Result
         io::stdout().flush().ok();
 
         prev_line_count = line_count;
-        prev_stats = Some(current_stats);
+        prev_output = output;
     }
 
     loop {
@@ -370,13 +391,13 @@ pub async fn list_cards_watch(root: &Path, state_filter: &str) -> anyhow::Result
                 return Ok(());
             }
             event = rx.recv() => {
-                let force_redraw = match event {
+                match event {
                     None => {
                         // Channel closed, watcher thread exited
                         return Ok(());
                     }
-                    Some(force) => force,
-                };
+                    Some(()) => {}
+                }
 
                 // Calculate current stats
                 let current_stats = match calculate_stats(root) {
@@ -387,46 +408,34 @@ pub async fn list_cards_watch(root: &Path, state_filter: &str) -> anyhow::Result
                     }
                 };
 
-                // Redraw if stats changed or plan data changed (force_redraw).
-                // Plan changes update the enriched card views but don't affect
-                // card counts, so they need to force a redraw.
-                let stats_changed = prev_stats
-                    .as_ref()
-                    .map(|prev| {
-                        prev.total != current_stats.total || prev.by_state != current_stats.by_state
-                    })
-                    .unwrap_or(true);
-
-                if force_redraw || stats_changed {
-                    // Move cursor up to previous position if not first render
-                    if prev_line_count > 0 {
-                        print!("\x1b[{}A", prev_line_count);
-                        io::stdout().flush().ok();
+                let groups = match collect_card_groups(root, state_filter) {
+                    Ok(g) => g,
+                    Err(e) => {
+                        eprintln!("[list_cards_watch] error collecting cards: {}", e);
+                        continue;
                     }
-
-                    // Re-detect terminal capabilities on every redraw (never cache)
-                    let caps = TermCaps::detect();
-                    print_clock_header();
-
-                    let groups = match collect_card_groups(root, state_filter) {
-                        Ok(g) => g,
-                        Err(e) => {
-                            eprintln!("[list_cards_watch] error collecting cards: {}", e);
-                            prev_stats = Some(current_stats);
-                            continue;
-                        }
-                    };
-                    let rstats = stats_to_render_stats(&current_stats);
-                    let output = render::render_board(&caps, &groups, &rstats);
-
-                    // Count lines for cursor-up positioning (1 for clock header + rendered output)
-                    let line_count = 1 + output.lines().count();
-                    print!("{}", output);
-                    io::stdout().flush().ok();
-
-                    prev_line_count = line_count;
-                    prev_stats = Some(current_stats);
+                };
+                // Re-detect width/capabilities for each possible redraw.
+                let caps = TermCaps::detect();
+                let rstats = stats_to_render_stats(&current_stats);
+                let output = render::render_board(&caps, &groups, &rstats);
+                if output == prev_output {
+                    continue;
                 }
+
+                // Collect and render succeeded; only now move the cursor.
+                if prev_line_count > 0 {
+                    // Clear the old region before a shorter board is printed,
+                    // otherwise deleted cards leave stale terminal rows.
+                    print!("\x1b[{}A\x1b[J", prev_line_count);
+                }
+                print_clock_header();
+                let line_count = 1 + output.lines().count();
+                print!("{}", output);
+                io::stdout().flush().ok();
+
+                prev_line_count = line_count;
+                prev_output = output;
             }
         }
     }
@@ -619,6 +628,46 @@ fn emit_state_json(
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn watch_recognizes_card_metadata_and_both_bundle_suffixes() {
+        assert!(is_card_event_path(Path::new("/cards/running/one.bop/meta.json")));
+        assert!(is_card_event_path(Path::new("/cards/team-cli/pending/two.jobcard/meta.json")));
+        assert!(is_card_event_path(Path::new("/cards/pending/new.jobcard")));
+        assert!(!is_card_event_path(Path::new("/cards/.locks/dispatcher.lock")));
+    }
+
+    #[test]
+    fn watch_board_changes_when_progress_changes_without_count_change() {
+        let caps = TermCaps {
+            level: crate::termcaps::TermLevel::Dumb,
+            width: 80,
+            two_column: false,
+        };
+        let stats = render::Stats {
+            total: 1,
+            by_state: HashMap::from([("running".to_string(), 1)]),
+            avg_duration_s: None,
+            success_rate_pct: None,
+        };
+        let mut meta = bop_core::Meta {
+            id: "one".into(),
+            progress: Some(10),
+            ..Default::default()
+        };
+        let before = render::render_board(
+            &caps,
+            &[("running".into(), vec![render::from_meta(&meta, "running")])],
+            &stats,
+        );
+        meta.progress = Some(20);
+        let after = render::render_board(
+            &caps,
+            &[("running".into(), vec![render::from_meta(&meta, "running")])],
+            &stats,
+        );
+        assert_ne!(before, after);
+    }
 
     fn setup_card_in_state(root: &Path, state: &str, id: &str) {
         let card_dir = root.join(state).join(format!("{}.bop", id));
