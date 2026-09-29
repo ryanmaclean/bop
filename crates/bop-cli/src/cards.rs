@@ -621,7 +621,7 @@ pub fn create_card(
         retry_count: Some(0),
         failure_reason: None,
         validation_summary: None,
-            decisions: vec![],
+        decisions: vec![],
         glyph: None,
         token: None,
         title: None,

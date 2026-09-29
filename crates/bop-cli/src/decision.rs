@@ -12,10 +12,6 @@ pub struct DecisionPlaneConfig {
 }
 
 impl DecisionPlaneConfig {
-    pub fn disabled() -> Self {
-        Self { adapter: None }
-    }
-
     pub fn from_dispatch_config(cfg: Option<&bop_core::config::DispatchConfig>) -> Self {
         Self {
             adapter: cfg
@@ -128,16 +124,28 @@ pub fn build_benchmark_report() -> BenchmarkReport {
     }
 }
 
+pub struct ProviderSelection<'a> {
+    pub stage: &'a str,
+    pub eligible: &'a [String],
+    pub baseline: &'a str,
+    pub cost_tier: u8,
+    pub prefer_cheap_provider: Option<&'a str>,
+    pub avoid_provider: Option<&'a str>,
+}
+
 pub fn record_provider_selection(
     meta: &mut Meta,
     cfg: &DecisionPlaneConfig,
-    stage: &str,
-    eligible: &[String],
-    baseline: &str,
-    cost_tier: u8,
-    prefer_cheap_provider: Option<&str>,
-    avoid_provider: Option<&str>,
+    selection: ProviderSelection<'_>,
 ) {
+    let ProviderSelection {
+        stage,
+        eligible,
+        baseline,
+        cost_tier,
+        prefer_cheap_provider,
+        avoid_provider,
+    } = selection;
     if !cfg.advisory_enabled() || eligible.is_empty() {
         return;
     }
@@ -212,7 +220,11 @@ fn benchmark_provider_selection(scenarios: Vec<ProviderScenario<'_>>) -> Benchma
     let mut latency_us_sum = 0.0;
 
     for scenario in &scenarios {
-        let eligible: Vec<String> = scenario.eligible.iter().map(|value| value.to_string()).collect();
+        let eligible: Vec<String> = scenario
+            .eligible
+            .iter()
+            .map(|value| value.to_string())
+            .collect();
         let started = Instant::now();
         let suggested = prototype_provider_choice(
             scenario.stage,
@@ -362,12 +374,14 @@ mod tests {
             &DecisionPlaneConfig {
                 adapter: Some(SYSTEM_ONE_PROTOTYPE.to_string()),
             },
-            "implement",
-            &["codex".to_string(), "ollama-local".to_string()],
-            "ollama-local",
-            1,
-            Some("ollama-local"),
-            None,
+            ProviderSelection {
+                stage: "implement",
+                eligible: &["codex".to_string(), "ollama-local".to_string()],
+                baseline: "ollama-local",
+                cost_tier: 1,
+                prefer_cheap_provider: Some("ollama-local"),
+                avoid_provider: None,
+            },
         );
 
         assert_eq!(meta.decisions.len(), 1);

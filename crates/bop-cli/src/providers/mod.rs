@@ -528,12 +528,14 @@ pub fn select_provider(
         decision::record_provider_selection(
             meta,
             &decision_cfg,
-            stage,
-            &ordered_candidates,
-            &selected_name,
-            cost_tier,
-            cfg.prefer_cheap_provider.as_deref(),
-            avoid_provider.as_deref(),
+            decision::ProviderSelection {
+                stage,
+                eligible: &ordered_candidates,
+                baseline: &selected_name,
+                cost_tier,
+                prefer_cheap_provider: cfg.prefer_cheap_provider.as_deref(),
+                avoid_provider: avoid_provider.as_deref(),
+            },
         );
     }
 
