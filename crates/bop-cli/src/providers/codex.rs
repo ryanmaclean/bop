@@ -101,12 +101,12 @@ impl CodexProvider {
 
     /// Path to the Codex credentials file: `~/.codex/auth.json`.
     fn credentials_path() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".codex").join("auth.json"))
+        bop_core::home_dir().map(|h| h.join(".codex").join("auth.json"))
     }
 
     /// Path to local Codex quota cache: `~/.codex/quota.json`.
     fn quota_path() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".codex").join("quota.json"))
+        bop_core::home_dir().map(|h| h.join(".codex").join("quota.json"))
     }
 
     /// Check if the `codex` binary is on PATH.

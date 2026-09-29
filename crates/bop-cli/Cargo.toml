@@ -33,7 +33,6 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # aws-lc-rs + prefer-post-quantum: offer X25519MLKEM768 hybrid key exchange first.
 rustls = { version = "0.23", features = ["aws-lc-rs", "prefer-post-quantum"] }
 async-trait = "0.1"
-dirs.workspace = true
 uuid = { version = "1", features = ["v5"] }
 
 [dev-dependencies]
