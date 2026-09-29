@@ -33,23 +33,10 @@ allow = ["CDLA-Permissive-2.0"]
 name = "webpki-roots"
 
 [[licenses.exceptions]]
-# MPL-2.0: weak (file-level) copyleft. Fleet policy names MPL among the
-# licenses to avoid; these three crates are the only source of it in the
-# tree today. Scoped here (not added to the base allow list) so no future
-# dependency can pick up MPL-2.0 silently. TODO(owner): replace `nucleo`
-# (fuzzy matcher) and drop the `dirs` -> `dirs-sys` -> `option-ext` chain
-# to remove MPL-2.0 entirely; this exception should not be renewed past
-# its review date without that work being re-scoped.
-# Path: bop -> nucleo -> nucleo-matcher; bop(-core) -> dirs -> dirs-sys -> option-ext.
+# MPL-2.0: `option-ext` remains through `dirs` -> `dirs-sys`. Keep its
+# exception scoped until that path is removed in a separately reviewed change.
+# Path: bop(-core) -> dirs -> dirs-sys -> option-ext.
 # Review by: 2026-12-31
-allow = ["MPL-2.0"]
-name = "nucleo"
-
-[[licenses.exceptions]]
-allow = ["MPL-2.0"]
-name = "nucleo-matcher"
-
-[[licenses.exceptions]]
 allow = ["MPL-2.0"]
 name = "option-ext"
 
