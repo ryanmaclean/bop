@@ -20,7 +20,6 @@ notify = "6"
 notify-debouncer-mini = "0.4"
 subtle = "2"
 tower = { version = "0.4", features = ["util"] }
-tower_governor = "0.4"
 rand = "0.8"
 core-foundation = "0.9"
 terminal_size = "0.4"
