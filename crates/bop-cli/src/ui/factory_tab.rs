@@ -14,6 +14,7 @@ use ratatui::widgets::{
 
 #[cfg(target_os = "macos")]
 use crate::factory::plist_path;
+#[cfg(target_os = "linux")]
 use crate::factory::{systemd_path_path, systemd_service_path};
 
 /// 250ms tick × 8 = 2s refresh cadence for factory status/logs.
@@ -57,9 +58,12 @@ impl FactoryLogSource {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FactoryServiceStatus {
-    Running { pid: Option<u32> },
+    Running {
+        pid: Option<u32>,
+    },
     Stopped,
     NotInstalled,
+    #[cfg(not(target_os = "macos"))]
     Unsupported,
     Error(String),
 }
@@ -87,6 +91,7 @@ impl FactoryServiceRow {
         match self.status {
             FactoryServiceStatus::Running { .. } => ("●", Color::Green),
             FactoryServiceStatus::Error(_) => ("!", Color::Red),
+            #[cfg(not(target_os = "macos"))]
             FactoryServiceStatus::Unsupported => ("?", Color::DarkGray),
             _ => ("□", Color::DarkGray),
         }
@@ -98,6 +103,7 @@ impl FactoryServiceRow {
             FactoryServiceStatus::Running { pid: None } => "running".to_string(),
             FactoryServiceStatus::Stopped => "stopped".to_string(),
             FactoryServiceStatus::NotInstalled => "not installed".to_string(),
+            #[cfg(not(target_os = "macos"))]
             FactoryServiceStatus::Unsupported => "unsupported".to_string(),
             FactoryServiceStatus::Error(ref err) => format!("error: {err}"),
         }
@@ -303,11 +309,11 @@ impl Widget for FactoryTabWidget<'_> {
 fn query_service_status(label: &str) -> FactoryServiceStatus {
     #[cfg(target_os = "macos")]
     {
-        return query_launchd_status(label);
+        query_launchd_status(label)
     }
     #[cfg(target_os = "linux")]
     {
-        return query_systemd_status(label);
+        query_systemd_status(label)
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
@@ -337,11 +343,7 @@ fn query_launchd_status(label: &str) -> FactoryServiceStatus {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-fn query_launchd_status(_label: &str) -> FactoryServiceStatus {
-    FactoryServiceStatus::Unsupported
-}
-
+#[cfg(target_os = "linux")]
 fn query_systemd_status(label: &str) -> FactoryServiceStatus {
     if label == ICONWATCHER_LABEL {
         return FactoryServiceStatus::Unsupported;
@@ -381,11 +383,11 @@ fn query_systemd_status(label: &str) -> FactoryServiceStatus {
 fn start_service(label: &str) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
-        return start_launchd_service(label);
+        start_launchd_service(label)
     }
     #[cfg(target_os = "linux")]
     {
-        return start_systemd_service(label);
+        start_systemd_service(label)
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
@@ -397,11 +399,11 @@ fn start_service(label: &str) -> Result<()> {
 fn stop_service(label: &str) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
-        return stop_launchd_service(label);
+        stop_launchd_service(label)
     }
     #[cfg(target_os = "linux")]
     {
-        return stop_systemd_service(label);
+        stop_systemd_service(label)
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
@@ -463,16 +465,7 @@ fn stop_launchd_service(label: &str) -> Result<()> {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-fn start_launchd_service(_label: &str) -> Result<()> {
-    bail!("launchd is only supported on macOS")
-}
-
-#[cfg(not(target_os = "macos"))]
-fn stop_launchd_service(_label: &str) -> Result<()> {
-    bail!("launchd is only supported on macOS")
-}
-
+#[cfg(target_os = "linux")]
 fn start_systemd_service(label: &str) -> Result<()> {
     if label == ICONWATCHER_LABEL {
         bail!("iconwatcher is macOS-only")
@@ -492,6 +485,7 @@ fn start_systemd_service(label: &str) -> Result<()> {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn stop_systemd_service(label: &str) -> Result<()> {
     if label == ICONWATCHER_LABEL {
         bail!("iconwatcher is macOS-only")
@@ -564,6 +558,7 @@ fn parse_launchctl_pid(stdout: &str) -> Option<u32> {
     None
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn parse_systemd_pid(stdout: &str) -> Option<u32> {
     stdout
         .trim()
