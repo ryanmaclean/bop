@@ -53,7 +53,7 @@ pub enum AppEvent {
 pub enum Mode {
     /// Default: column/card navigation, action keys active.
     Normal,
-    /// `/` filter active — keystrokes go to nucleo query input.
+    /// `/` filter active — keystrokes go to the card-ID query input.
     Filter,
     /// Enter key opened the action popup overlay.
     ActionPopup,
@@ -162,9 +162,9 @@ pub struct App {
     pub columns: Vec<KanbanColumn>,
     /// Index into `columns` for the currently focused column.
     pub col_focus: usize,
-    /// Active nucleo filter query (None = no filter).
+    /// Active card-ID filter query (None = no filter).
     pub filter: Option<String>,
-    /// Nucleo filter state — holds the matcher and query for fuzzy filtering.
+    /// Filter state for case-insensitive card-ID substring matching.
     /// Present when filter mode is active or a confirmed filter is applied.
     pub filter_state: Option<FilterState>,
     /// Current interaction mode.
