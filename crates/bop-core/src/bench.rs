@@ -306,10 +306,19 @@ pub fn run(root: &Path, cfg: &Config, probe: &dyn VersionProbe) -> anyhow::Resul
         move_card(root, &mut live, end, &mut s)?;
         commit_step(&mut live, end, art_hash, &mut s)?;
 
-        // FSYNC (paths moved with the rename)
+        // FSYNC (paths moved with the rename). Windows requires a writable
+        // handle for sync_all, even though no further bytes are written here.
         let t0 = Instant::now();
-        fs::File::open(live.dir.join("output").join("result.bin"))?.sync_all()?;
-        fs::File::open(live.dir.join("logs").join("stdout.log"))?.sync_all()?;
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(live.dir.join("output").join("result.bin"))?
+            .sync_all()?;
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(live.dir.join("logs").join("stdout.log"))?
+            .sync_all()?;
         sync_dir(&root.join(end.as_str()));
         s.fsync_us.push(elapsed_us(t0));
 
