@@ -688,10 +688,7 @@ mod tests {
         assert_eq!(escape_html_attr("foo & bar"), "foo &amp; bar");
         assert_eq!(escape_html_attr("<script>"), "&lt;script&gt;");
         assert_eq!(escape_html_attr("a\"b'c"), "a&quot;b&#39;c");
-        assert_eq!(
-            escape_html_attr("&<>\"'"),
-            "&amp;&lt;&gt;&quot;&#39;"
-        );
+        assert_eq!(escape_html_attr("&<>\"'"), "&amp;&lt;&gt;&quot;&#39;");
         assert_eq!(escape_html_attr("safe-text_123"), "safe-text_123");
     }
 
