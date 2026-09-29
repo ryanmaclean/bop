@@ -126,7 +126,7 @@ pub fn find_repo_script(start: &Path, script_rel: &str) -> Option<PathBuf> {
 /// Works inside Zellij panes, tmux, and normal terminals.
 pub fn term_width() -> usize {
     // 1. Try ioctl TIOCGWINSZ (works in Zellij panes, tmux, etc.)
-    #[cfg(unix)]
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "freebsd"))]
     {
         use std::mem::MaybeUninit;
         #[repr(C)]
@@ -138,8 +138,8 @@ pub fn term_width() -> usize {
         }
         unsafe {
             let mut ws = MaybeUninit::<Winsize>::uninit();
-            // TIOCGWINSZ = 0x40087468 on macOS, 0x5413 on Linux
-            #[cfg(target_os = "macos")]
+            // TIOCGWINSZ = 0x40087468 on macOS/FreeBSD, 0x5413 on Linux.
+            #[cfg(any(target_os = "macos", target_os = "freebsd"))]
             let request = 0x40087468u64;
             #[cfg(target_os = "linux")]
             let request = 0x5413u64;
@@ -158,7 +158,7 @@ pub fn term_width() -> usize {
         .unwrap_or(100)
 }
 
-#[cfg(unix)]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "freebsd"))]
 unsafe fn libc_ioctl(fd: i32, request: u64, arg: *mut u8) -> i32 {
     extern "C" {
         fn ioctl(fd: i32, request: u64, ...) -> i32;
