@@ -335,9 +335,9 @@ pub async fn list_cards_watch(root: &Path, state_filter: &str) -> anyhow::Result
 
                     // Recursive events can name meta.json below a card, or
                     // the newly-created bundle directory itself.
-                    let card_changed = events.iter().any(|e| {
-                        is_event(e) && is_card_event_path(&e.path)
-                    });
+                    let card_changed = events
+                        .iter()
+                        .any(|e| is_event(e) && is_card_event_path(&e.path));
 
                     if plan_changed || card_changed {
                         let _ = tx.send(());
@@ -628,10 +628,16 @@ mod tests {
 
     #[test]
     fn watch_recognizes_card_metadata_and_both_bundle_suffixes() {
-        assert!(is_card_event_path(Path::new("/cards/running/one.bop/meta.json")));
-        assert!(is_card_event_path(Path::new("/cards/team-cli/pending/two.jobcard/meta.json")));
+        assert!(is_card_event_path(Path::new(
+            "/cards/running/one.bop/meta.json"
+        )));
+        assert!(is_card_event_path(Path::new(
+            "/cards/team-cli/pending/two.jobcard/meta.json"
+        )));
         assert!(is_card_event_path(Path::new("/cards/pending/new.jobcard")));
-        assert!(!is_card_event_path(Path::new("/cards/.locks/dispatcher.lock")));
+        assert!(!is_card_event_path(Path::new(
+            "/cards/.locks/dispatcher.lock"
+        )));
     }
 
     #[test]
