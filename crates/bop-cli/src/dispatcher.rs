@@ -905,7 +905,7 @@ pub async fn run_card(
     let _ = fs::remove_file(&memory_out_file);
 
     // Render prompt template with actual values
-    let mut meta = bop_core::read_meta(card_dir).ok();
+    let mut meta = Some(bop_core::read_meta(card_dir).context("failed to read card metadata")?);
     let memory_namespace = meta
         .as_ref()
         .map(memory::memory_namespace_from_meta)
@@ -1010,7 +1010,7 @@ pub async fn run_card(
             note: None,
         });
         run_idx = Some(m.runs.len().saturating_sub(1));
-        let _ = write_meta(card_dir, m);
+        write_meta(card_dir, m).context("failed to write run record before adapter spawn")?;
     }
 
     let mut cmd = if adapter.ends_with(".nu") {
