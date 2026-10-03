@@ -233,6 +233,7 @@ pub async fn run_dispatcher(
         validation_fail_threshold,
         &meta_io,
         &workspace_preparation,
+        &short_run_id,
     )
     .await
 }
@@ -251,6 +252,7 @@ async fn run_dispatcher_with_meta_io<I: RunMetadataIo, W: WorkspacePreparation>(
     validation_fail_threshold: f64,
     meta_io: &I,
     workspace_preparation: &W,
+    mint_run_id: &dyn Fn() -> anyhow::Result<String>,
 ) -> anyhow::Result<()> {
     paths::ensure_cards_layout(cards_dir)?;
     let dispatcher = Dispatcher::from_cards_dir(cards_dir)?;
@@ -704,6 +706,7 @@ async fn run_dispatcher_with_meta_io<I: RunMetadataIo, W: WorkspacePreparation>(
                         provider_model.as_deref(),
                         rate_limit_exit,
                         meta_io,
+                        mint_run_id,
                     )
                     .await
                     {
@@ -990,6 +993,7 @@ pub async fn run_card(
         provider_model,
         rate_limit_exit,
         &meta_io,
+        &short_run_id,
     )
     .await
 }
@@ -1004,6 +1008,7 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
     provider_model: Option<&str>,
     rate_limit_exit: i32,
     meta_io: &I,
+    mint_run_id: &dyn Fn() -> anyhow::Result<String>,
 ) -> anyhow::Result<(i32, Option<Meta>)> {
     fs::create_dir_all(card_dir.join("logs"))?;
     fs::create_dir_all(card_dir.join("output"))?;
@@ -1083,7 +1088,7 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
         .unwrap_or_else(|| "implement".to_string());
     let started_at = Utc::now();
     let started_at_iso = started_at.to_rfc3339();
-    let run_record_id = short_run_id().context("failed to mint run-record ID")?;
+    let run_record_id = mint_run_id().context("failed to mint run-record ID")?;
     let mut run_idx: Option<usize> = None;
     if let Some(ref mut m) = meta {
         let rec = m
@@ -2045,6 +2050,7 @@ mod tests {
     enum PreSpawnFault {
         Read,
         Write,
+        Entropy,
         Pass,
     }
 
@@ -2088,12 +2094,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn metadata_faults_fail_and_real_rate_limit_one_requeues() {
+    async fn pre_spawn_faults_fail_and_real_rate_limit_one_requeues() {
         for (fault, rate_limit_exit) in [
             (PreSpawnFault::Read, 1),
             (PreSpawnFault::Read, 75),
             (PreSpawnFault::Write, 1),
             (PreSpawnFault::Write, 75),
+            (PreSpawnFault::Entropy, 1),
+            (PreSpawnFault::Entropy, 75),
             (PreSpawnFault::Pass, 1),
         ] {
             let td = tempfile::tempdir().unwrap();
@@ -2152,6 +2160,14 @@ mod tests {
                 reads: std::sync::atomic::AtomicUsize::new(0),
                 writes: std::sync::atomic::AtomicUsize::new(0),
             };
+            let mint_calls = std::sync::atomic::AtomicUsize::new(0);
+            let mint_run_id = || {
+                mint_calls.fetch_add(1, Ordering::SeqCst);
+                if matches!(fault, PreSpawnFault::Entropy) {
+                    anyhow::bail!("injected run ID entropy failure");
+                }
+                Ok("0123456789abcdef0123456789abcdef".to_string())
+            };
             run_dispatcher_with_meta_io(
                 &cards,
                 VcsEngine::GitGt,
@@ -2165,6 +2181,7 @@ mod tests {
                 0.1,
                 &meta_io,
                 &NoWorkspacePreparation,
+                &mint_run_id,
             )
             .await
             .unwrap();
@@ -2172,8 +2189,13 @@ mod tests {
             assert_eq!(meta_io.reads.load(Ordering::SeqCst), 1, "{fault:?}");
             assert_eq!(
                 meta_io.writes.load(Ordering::SeqCst),
-                usize::from(!matches!(fault, PreSpawnFault::Read)),
+                usize::from(!matches!(fault, PreSpawnFault::Read | PreSpawnFault::Entropy)),
                 "{fault:?}"
+            );
+            assert_eq!(
+                mint_calls.load(Ordering::SeqCst),
+                usize::from(!matches!(fault, PreSpawnFault::Read)),
+                "{fault:?} minted the wrong number of IDs"
             );
             if matches!(fault, PreSpawnFault::Pass) {
                 assert!(marker.exists(), "real adapter rate-limit control did not launch");
@@ -2206,6 +2228,10 @@ mod tests {
                 }
                 let failed = cards.join("failed").join("fault.bop");
                 assert!(failed.is_dir(), "{fault:?} did not leave a failed card");
+                assert!(
+                    bop_core::read_meta(&failed).unwrap().runs.is_empty(),
+                    "{fault:?} persisted a run record before launch"
+                );
                 let failed_count = fs::read_dir(cards.join("failed"))
                     .unwrap()
                     .flatten()
