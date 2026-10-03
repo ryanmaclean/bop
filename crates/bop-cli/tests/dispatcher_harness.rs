@@ -445,6 +445,13 @@ fn dispatcher_quarantines_invalid_pending_meta_to_failed() {
 
     let td = tempfile::tempdir().unwrap();
     let cards = td.path().join(".cards");
+    let marker = td.path().join("adapter-ran");
+    let marker_adapter = td.path().join("bad-meta-marker.nu");
+    fs::write(
+        &marker_adapter,
+        "def main [workdir: string, prompt_file: string, stdout_log: string, stderr_log: string, ...rest] {\n    'ran' | save --force $env.BOP_TEST_MARKER\n}\n",
+    )
+    .unwrap();
 
     let status = Command::new(bop_bin())
         .args(["--cards-dir", cards.to_str().unwrap(), "init"])
@@ -452,15 +459,18 @@ fn dispatcher_quarantines_invalid_pending_meta_to_failed() {
         .unwrap();
     assert!(status.success());
 
+    fs::create_dir_all(cards.join(".bop")).unwrap();
+    fs::write(cards.join(".bop").join("config.json"), r#"{"webhooks":[]}"#).unwrap();
     write_invalid_pending_card(&cards, "bad-meta");
 
     let status = Command::new(bop_bin())
+        .env("BOP_TEST_MARKER", &marker)
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),
             "dispatcher",
             "--adapter",
-            mock_adapter().to_str().unwrap(),
+            marker_adapter.to_str().unwrap(),
             "--once",
         ])
         .status()
@@ -481,6 +491,19 @@ fn dispatcher_quarantines_invalid_pending_meta_to_failed() {
         rejected_log.contains("invalid_meta"),
         "rejected marker should include invalid_meta reason"
     );
+    assert!(!marker.exists(), "invalid metadata must not launch the adapter");
+    for state in ["pending", "running", "done"] {
+        assert!(
+            !find_card_in(&cards, state, "bad-meta").exists(),
+            "invalid card must not remain in {state}/"
+        );
+    }
+    let failed_count = fs::read_dir(cards.join("failed"))
+        .unwrap()
+        .flatten()
+        .filter(|entry| entry.path().extension().and_then(|s| s.to_str()) == Some("bop"))
+        .count();
+    assert_eq!(failed_count, 1, "invalid card must have one failed outcome");
 }
 
 #[test]
