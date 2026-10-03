@@ -162,6 +162,49 @@ fn resolve_adapter(
     (fallback.to_string(), "global --adapter")
 }
 
+trait RunMetadataIo {
+    fn read(&self, card_dir: &Path) -> anyhow::Result<Meta>;
+    fn write(&self, card_dir: &Path, meta: &Meta) -> anyhow::Result<()>;
+}
+
+struct FilesystemRunMetadataIo;
+
+impl RunMetadataIo for FilesystemRunMetadataIo {
+    fn read(&self, card_dir: &Path) -> anyhow::Result<Meta> {
+        bop_core::read_meta(card_dir)
+    }
+
+    fn write(&self, card_dir: &Path, meta: &Meta) -> anyhow::Result<()> {
+        write_meta(card_dir, meta)
+    }
+}
+
+trait WorkspacePreparation {
+    fn prepare(
+        &self,
+        vcs_engine: VcsEngine,
+        cards_dir: &Path,
+        card_dir: &Path,
+        card_id: &str,
+        meta: &mut Option<Meta>,
+    ) -> anyhow::Result<Option<workspace::WorkspaceInfo>>;
+}
+
+struct FilesystemWorkspacePreparation;
+
+impl WorkspacePreparation for FilesystemWorkspacePreparation {
+    fn prepare(
+        &self,
+        vcs_engine: VcsEngine,
+        cards_dir: &Path,
+        card_dir: &Path,
+        card_id: &str,
+        meta: &mut Option<Meta>,
+    ) -> anyhow::Result<Option<workspace::WorkspaceInfo>> {
+        workspace::prepare_workspace(vcs_engine, cards_dir, card_dir, card_id, meta)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run_dispatcher(
     cards_dir: &Path,
@@ -174,6 +217,40 @@ pub async fn run_dispatcher(
     no_reap: bool,
     once: bool,
     validation_fail_threshold: f64,
+) -> anyhow::Result<()> {
+    let meta_io = FilesystemRunMetadataIo;
+    let workspace_preparation = FilesystemWorkspacePreparation;
+    run_dispatcher_with_meta_io(
+        cards_dir,
+        vcs_engine,
+        global_adapter,
+        max_workers,
+        _poll_ms,
+        max_retries,
+        reap_ms,
+        no_reap,
+        once,
+        validation_fail_threshold,
+        &meta_io,
+        &workspace_preparation,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_dispatcher_with_meta_io<I: RunMetadataIo, W: WorkspacePreparation>(
+    cards_dir: &Path,
+    vcs_engine: VcsEngine,
+    global_adapter: &str,
+    max_workers: usize,
+    _poll_ms: u64,
+    max_retries: u32,
+    reap_ms: u64,
+    no_reap: bool,
+    once: bool,
+    validation_fail_threshold: f64,
+    meta_io: &I,
+    workspace_preparation: &W,
 ) -> anyhow::Result<()> {
     paths::ensure_cards_layout(cards_dir)?;
     let dispatcher = Dispatcher::from_cards_dir(cards_dir)?;
@@ -450,7 +527,7 @@ pub async fn run_dispatcher(
                         .as_ref()
                         .map(|m| m.id.clone())
                         .unwrap_or_else(|| name.trim_end_matches(".bop").to_string());
-                    let ws_info = match workspace::prepare_workspace(
+                    let ws_info = match workspace_preparation.prepare(
                         vcs_engine,
                         cards_dir,
                         &running_path,
@@ -618,7 +695,7 @@ pub async fn run_dispatcher(
                         name, card_adapter, provider_name, adapter_source
                     );
 
-                    let (exit_code, mut meta) = run_card(
+                    let (exit_code, mut meta, run_card_error) = match run_card_with_meta_io(
                         cards_dir,
                         &running_path,
                         &card_adapter,
@@ -626,11 +703,21 @@ pub async fn run_dispatcher(
                         &provider_env,
                         provider_model.as_deref(),
                         rate_limit_exit,
+                        meta_io,
                     )
                     .await
-                    .unwrap_or((1, None));
+                    {
+                        Ok((exit_code, meta)) => (exit_code, meta, false),
+                        Err(err) => {
+                            eprintln!(
+                                "[dispatcher] card '{}' failed before completion: {err:#}",
+                                name
+                            );
+                            (1, None, true)
+                        }
+                    };
 
-                    let is_rate_limited = exit_code == rate_limit_exit;
+                    let is_rate_limited = !run_card_error && exit_code == rate_limit_exit;
 
                     // Run realtime validation on job output when the job succeeded.
                     let mut validation_triggered_fail = false;
@@ -717,7 +804,9 @@ pub async fn run_dispatcher(
                         "failed"
                     };
 
-                    let _ = fs::rename(&running_path, &target);
+                    fs::rename(&running_path, &target).with_context(|| {
+                        format!("failed to move card '{}' from running/ to {to_state}/", name)
+                    })?;
                     // Log stage transition event (best-effort)
                     let _ = append_event(
                         &target,
@@ -891,6 +980,31 @@ pub async fn run_card(
     provider_model: Option<&str>,
     rate_limit_exit: i32,
 ) -> anyhow::Result<(i32, Option<Meta>)> {
+    let meta_io = FilesystemRunMetadataIo;
+    run_card_with_meta_io(
+        cards_dir,
+        card_dir,
+        adapter,
+        provider_name,
+        provider_env,
+        provider_model,
+        rate_limit_exit,
+        &meta_io,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_card_with_meta_io<I: RunMetadataIo>(
+    cards_dir: &Path,
+    card_dir: &Path,
+    adapter: &str,
+    provider_name: &str,
+    provider_env: &std::collections::BTreeMap<String, String>,
+    provider_model: Option<&str>,
+    rate_limit_exit: i32,
+    meta_io: &I,
+) -> anyhow::Result<(i32, Option<Meta>)> {
     fs::create_dir_all(card_dir.join("logs"))?;
     fs::create_dir_all(card_dir.join("output"))?;
 
@@ -905,7 +1019,7 @@ pub async fn run_card(
     let _ = fs::remove_file(&memory_out_file);
 
     // Render prompt template with actual values
-    let mut meta = Some(bop_core::read_meta(card_dir).context("failed to read card metadata")?);
+    let mut meta = Some(meta_io.read(card_dir).context("failed to read card metadata")?);
     let memory_namespace = meta
         .as_ref()
         .map(memory::memory_namespace_from_meta)
@@ -1010,7 +1124,7 @@ pub async fn run_card(
             note: None,
         });
         run_idx = Some(m.runs.len().saturating_sub(1));
-        write_meta(card_dir, m).context("failed to write run record before adapter spawn")?;
+        meta_io.write(card_dir, m).context("failed to write run record before adapter spawn")?;
     }
 
     let mut cmd = if adapter.ends_with(".nu") {
@@ -1911,5 +2025,209 @@ mod tests {
         let elapsed = start.elapsed();
         // Should complete within 3 seconds (2s timeout + overhead)
         assert!(elapsed < Duration::from_secs(3));
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum PreSpawnFault {
+        Read,
+        Write,
+        Pass,
+    }
+
+    struct FaultRunMetadataIo {
+        fault: PreSpawnFault,
+        reads: std::sync::atomic::AtomicUsize,
+        writes: std::sync::atomic::AtomicUsize,
+    }
+
+    impl RunMetadataIo for FaultRunMetadataIo {
+        fn read(&self, card_dir: &Path) -> anyhow::Result<Meta> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            if matches!(self.fault, PreSpawnFault::Read) {
+                anyhow::bail!("injected second metadata read failure");
+            }
+            bop_core::read_meta(card_dir)
+        }
+
+        fn write(&self, card_dir: &Path, meta: &Meta) -> anyhow::Result<()> {
+            self.writes.fetch_add(1, Ordering::SeqCst);
+            if matches!(self.fault, PreSpawnFault::Write) {
+                anyhow::bail!("injected pre-spawn metadata write failure");
+            }
+            write_meta(card_dir, meta)
+        }
+    }
+
+    struct NoWorkspacePreparation;
+
+    impl WorkspacePreparation for NoWorkspacePreparation {
+        fn prepare(
+            &self,
+            _vcs_engine: VcsEngine,
+            _cards_dir: &Path,
+            _card_dir: &Path,
+            _card_id: &str,
+            _meta: &mut Option<Meta>,
+        ) -> anyhow::Result<Option<workspace::WorkspaceInfo>> {
+            Ok(None)
+        }
+    }
+
+    #[tokio::test]
+    async fn metadata_faults_fail_and_real_rate_limit_one_requeues() {
+        for (fault, rate_limit_exit) in [
+            (PreSpawnFault::Read, 1),
+            (PreSpawnFault::Read, 75),
+            (PreSpawnFault::Write, 1),
+            (PreSpawnFault::Write, 75),
+            (PreSpawnFault::Pass, 1),
+        ] {
+            let td = tempfile::tempdir().unwrap();
+            let cards = td.path().join(".cards");
+            paths::ensure_cards_layout(&cards).unwrap();
+            fs::create_dir_all(cards.join(".bop")).unwrap();
+            fs::write(
+                cards.join(".bop").join("config.json"),
+                r#"{"dispatch":{"auto_select_provider":false},"webhooks":[]}"#,
+            )
+            .unwrap();
+            assert!(crate::webhook::load_webhooks(&cards).unwrap().is_empty());
+
+            let marker = td.path().join("adapter-ran");
+            let adapter = td.path().join("marker.nu");
+            let mock_exit = if matches!(fault, PreSpawnFault::Pass) {
+                "1"
+            } else {
+                "0"
+            };
+            fs::write(
+                &adapter,
+                "def main [workdir: string, prompt_file: string, stdout_log: string, stderr_log: string, ...rest] {\n    'ran' | save --force $env.BOP_TEST_MARKER\n    exit (if \"BOP_TEST_EXIT\" in $env { $env.BOP_TEST_EXIT | into int } else { 0 })\n}\n",
+            )
+            .unwrap();
+            fs::write(
+                cards.join("providers.json"),
+                serde_json::json!({
+                    "providers": {
+                        "mock": {
+                            "command": adapter.to_str().unwrap(),
+                            "rate_limit_exit": rate_limit_exit,
+                            "env": {
+                                "BOP_TEST_MARKER": marker.to_str().unwrap(),
+                                "BOP_TEST_EXIT": mock_exit
+                            }
+                        }
+                    }
+                })
+                .to_string(),
+            )
+            .unwrap();
+
+            let pending = cards.join("pending").join("fault.bop");
+            fs::create_dir_all(pending.join("logs")).unwrap();
+            fs::write(
+                pending.join("meta.json"),
+                r#"{"id":"fault","created":"2026-03-01T00:00:00Z","stage":"implement","provider_chain":["mock"],"stages":{},"acceptance_criteria":[]}"#,
+            )
+            .unwrap();
+            fs::write(pending.join("spec.md"), "fault fixture").unwrap();
+            fs::write(pending.join("prompt.md"), "{{spec}}\n").unwrap();
+
+            let meta_io = FaultRunMetadataIo {
+                fault,
+                reads: std::sync::atomic::AtomicUsize::new(0),
+                writes: std::sync::atomic::AtomicUsize::new(0),
+            };
+            run_dispatcher_with_meta_io(
+                &cards,
+                VcsEngine::GitGt,
+                adapter.to_str().unwrap(),
+                1,
+                100,
+                0,
+                60_000,
+                true,
+                true,
+                0.1,
+                &meta_io,
+                &NoWorkspacePreparation,
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(meta_io.reads.load(Ordering::SeqCst), 1, "{fault:?}");
+            assert_eq!(
+                meta_io.writes.load(Ordering::SeqCst),
+                usize::from(!matches!(fault, PreSpawnFault::Read)),
+                "{fault:?}"
+            );
+            if matches!(fault, PreSpawnFault::Pass) {
+                assert!(marker.exists(), "real adapter rate-limit control did not launch");
+                let pending = cards.join("pending").join("fault.bop");
+                assert!(pending.is_dir(), "real adapter exit 1 must requeue");
+                for state in ["running", "done", "failed"] {
+                    assert!(!cards.join(state).join("fault.bop").exists());
+                }
+                let persisted = bop_core::read_meta(&pending).unwrap();
+                assert_eq!(persisted.runs.len(), 1);
+                assert_eq!(persisted.runs[0].outcome, "rate_limited");
+                let events = fs::read_to_string(pending.join("logs/events.jsonl")).unwrap();
+                let requeues = events
+                    .lines()
+                    .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+                    .filter(|event| {
+                        event["event"] == "stage_transition"
+                            && event["from"] == "running"
+                            && event["to"] == "pending"
+                    })
+                    .count();
+                assert_eq!(requeues, 1, "real adapter rate-limit transition changed");
+            } else {
+                assert!(!marker.exists(), "{fault:?} launched the adapter");
+                for state in ["pending", "running", "done"] {
+                    assert!(
+                        !cards.join(state).join("fault.bop").exists(),
+                        "{fault:?} left a card in {state}/"
+                    );
+                }
+                let failed = cards.join("failed").join("fault.bop");
+                assert!(failed.is_dir(), "{fault:?} did not leave a failed card");
+                let failed_count = fs::read_dir(cards.join("failed"))
+                    .unwrap()
+                    .flatten()
+                    .filter(|entry| {
+                        entry.path().extension().and_then(|s| s.to_str()) == Some("bop")
+                    })
+                    .count();
+                assert_eq!(failed_count, 1, "{fault:?} created multiple failed cards");
+
+                let events = fs::read_to_string(failed.join("logs/events.jsonl")).unwrap();
+                let failed_transitions = events
+                    .lines()
+                    .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+                    .filter(|event| {
+                        event["event"] == "stage_transition"
+                            && event["from"] == "running"
+                            && event["to"] == "failed"
+                    })
+                    .count();
+                assert_eq!(
+                    failed_transitions, 1,
+                    "{fault:?} emitted duplicate failed transitions"
+                );
+
+                // Positive control after no-spawn assertions: the marker script works.
+                let marker_status = TokioCommand::new("nu")
+                    .arg(&adapter)
+                    .args(["unused-workdir", "unused-prompt", "unused-stdout", "unused-stderr"])
+                    .env("BOP_TEST_MARKER", &marker)
+                    .env_remove("BOP_TEST_EXIT")
+                    .status()
+                    .await
+                    .unwrap();
+                assert!(marker_status.success(), "marker adapter control failed");
+                assert!(marker.exists(), "marker adapter control did not create the marker");
+            }
+        }
     }
 }
