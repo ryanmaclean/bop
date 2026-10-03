@@ -969,7 +969,7 @@ pub async fn run_card(
         .unwrap_or_else(|| "implement".to_string());
     let started_at = Utc::now();
     let started_at_iso = started_at.to_rfc3339();
-    let run_id = short_run_id();
+    let run_record_id = short_run_id();
     let mut run_idx: Option<usize> = None;
     if let Some(ref mut m) = meta {
         let rec = m
@@ -995,7 +995,7 @@ pub async fn run_card(
             .or_else(|| model_from_provider_env(provider_env))
             .unwrap_or_else(|| provider_name.to_string());
         m.runs.push(RunRecord {
-            run_id: run_id.clone(),
+            run_id: run_record_id.clone(),
             stage: stage.clone(),
             provider: provider_name.to_string(),
             model: initial_model,
@@ -1029,12 +1029,12 @@ pub async fn run_card(
     // Per-job target dir in /tmp — outside the workspace so it doesn't accumulate
     // inside worktrees. Deleted immediately after the adapter exits regardless of
     // outcome. /tmp is cleaned by the OS on reboot as a backstop.
-    let run_id = meta
+    let card_id = meta
         .as_ref()
         .map(|m| m.id.as_str())
         .or_else(|| card_dir.file_name().and_then(|n| n.to_str()))
         .unwrap_or("unknown");
-    let target_dir = std::env::temp_dir().join(format!("bop-target-{}", run_id));
+    let target_dir = std::env::temp_dir().join(format!("bop-target-{}", card_id));
 
     let mut child = cmd
         .arg(&workdir)
@@ -1046,6 +1046,7 @@ pub async fn run_card(
         .env("BOP_MEMORY_NAMESPACE", &memory_namespace)
         .env("CARGO_TARGET_DIR", &target_dir)
         .envs(provider_env)
+        .env("BOP_RUN_ID", &run_record_id)
         // Card identity — lets any agent orient itself
         .env(
             "BOP_CARD_ID",

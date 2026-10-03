@@ -133,6 +133,8 @@ fn dispatcher_moves_success_to_done() {
 
     let status = Command::new(bop_bin())
         .env("MOCK_EXIT", "0")
+        .env("BOP_RUN_ID", "spoofed-parent-id")
+        .env("MOCK_ECHO_BOP_RUN_ID", "1")
         .args([
             "--cards-dir",
             cards.to_str().unwrap(),
@@ -151,6 +153,18 @@ fn dispatcher_moves_success_to_done() {
     assert!(
         logs_webloc.contains("bop://card/job1/logs"),
         "done cards should link to static logs action"
+    );
+
+    let meta: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(card.join("meta.json")).unwrap()).unwrap();
+    let run_record_id = meta["runs"][0]["run_id"].as_str().unwrap();
+    assert!(!run_record_id.is_empty());
+    assert_ne!(run_record_id, "spoofed-parent-id");
+    let stdout = fs::read_to_string(card.join("logs/stdout.log")).unwrap();
+    let exported_line = format!("BOP_RUN_ID={run_record_id}");
+    assert!(
+        stdout.lines().any(|line| line == exported_line.as_str()),
+        "adapter did not receive persisted run identity: {stdout}"
     );
 }
 
