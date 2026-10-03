@@ -3,10 +3,10 @@ use bop_core::config::WebhookEvent;
 use bop_core::{append_event, write_meta, Event, Meta, RunRecord};
 use chrono::Utc;
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
+use rand::RngCore;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::process::Command as TokioCommand;
@@ -1083,7 +1083,7 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
         .unwrap_or_else(|| "implement".to_string());
     let started_at = Utc::now();
     let started_at_iso = started_at.to_rfc3339();
-    let run_record_id = short_run_id();
+    let run_record_id = short_run_id().context("failed to mint run-record ID")?;
     let mut run_idx: Option<usize> = None;
     if let Some(ref mut m) = meta {
         let rec = m
@@ -1312,14 +1312,20 @@ pub struct RunUsage {
     pub cost_usd: Option<f64>,
 }
 
-pub fn short_run_id() -> String {
-    let now = Utc::now()
-        .timestamp_nanos_opt()
-        .unwrap_or_else(|| Utc::now().timestamp_micros() * 1000) as u64;
-    let pid = std::process::id() as u64;
-    let seq = util::RUN_ID_SEQ.fetch_add(1, Ordering::Relaxed);
-    let mixed = now ^ (pid << 16) ^ seq;
-    format!("{:08x}", (mixed & 0xffff_ffff) as u32)
+fn run_id_with_entropy(
+    fill: impl FnOnce(&mut [u8; 16]) -> anyhow::Result<()>,
+) -> anyhow::Result<String> {
+    let mut bytes = [0u8; 16];
+    fill(&mut bytes).context("failed to obtain run ID entropy")?;
+    Ok(format!("{:032x}", u128::from_be_bytes(bytes)))
+}
+
+pub fn short_run_id() -> anyhow::Result<String> {
+    let mut rng = rand::rngs::OsRng;
+    run_id_with_entropy(|bytes| {
+        rng.try_fill_bytes(bytes)
+            .map_err(|err| anyhow::anyhow!("{err}"))
+    })
 }
 
 pub fn model_from_provider_env(env: &BTreeMap<String, String>) -> Option<String> {
@@ -1544,22 +1550,30 @@ pub fn load_feed_config(card_dir: &Path) -> bop_core::realtime::FeedConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::Ordering;
     use tempfile::tempdir;
 
     // ── short_run_id ──────────────────────────────────────────────────────────
 
     #[test]
-    fn short_run_id_returns_8_char_hex() {
-        let id = short_run_id();
-        assert_eq!(id.len(), 8);
-        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+    fn short_run_id_returns_32_char_hex() {
+        let id = short_run_id().unwrap();
+        assert_eq!(id.len(), 32);
+        assert!(id.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
     }
 
     #[test]
     fn short_run_id_returns_different_values() {
-        let a = short_run_id();
-        let b = short_run_id();
+        let a = short_run_id().unwrap();
+        let b = short_run_id().unwrap();
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn run_id_entropy_failure_is_an_error() {
+        let err = run_id_with_entropy(|_| anyhow::bail!("simulated entropy failure"))
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("simulated entropy failure"));
     }
 
     // ── resolve_adapter ───────────────────────────────────────────────────────
