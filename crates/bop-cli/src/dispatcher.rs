@@ -17,6 +17,34 @@ use crate::{
     cards, inspect, lock, memory, paths, power, providers, quicklook, reaper, util, workspace,
 };
 
+// The adapter is the leader of a process group created at spawn. Its Moth child
+// inherits the group unless it deliberately moves itself elsewhere.
+#[cfg(unix)]
+fn kill_owned_adapter_group(pid: i32) -> std::io::Result<()> {
+    if pid <= 1 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "adapter PID is not a safe process-group ID",
+        ));
+    }
+    // A positive, unreaped child PID prevents this group ID being recycled
+    // before the signal. Refuse to signal if the child left its own group.
+    let observed_group = unsafe { libc::getpgid(pid) };
+    if observed_group == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if observed_group != pid {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "adapter is no longer leader of its owned process group",
+        ));
+    }
+    if unsafe { libc::killpg(pid, libc::SIGKILL) } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 struct Dispatcher {
     webhook_client: crate::webhook::WebhookClient,
@@ -1145,6 +1173,9 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
         TokioCommand::new(adapter)
     };
 
+    #[cfg(unix)]
+    cmd.process_group(0);
+
     // Per-job target dir in /tmp — outside the workspace so it doesn't accumulate
     // inside worktrees. Deleted immediately after the adapter exits regardless of
     // outcome. /tmp is cleaned by the OS on reboot as a backstop.
@@ -1183,10 +1214,18 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
         .as_ref()
         .and_then(|m| m.timeout_seconds)
         .unwrap_or(3600);
-    let pid = child
+    let pid = match child
         .id()
-        .map(|v| v as i32)
-        .with_context(|| "spawned adapter without a child PID")?;
+        .and_then(|value| i32::try_from(value).ok())
+        .filter(|value| *value > 1)
+    {
+        Some(pid) => pid,
+        None => {
+            let _ = child.start_kill();
+            let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
+            anyhow::bail!("spawned adapter without a safe child PID");
+        }
+    };
     let pid_str = pid.to_string();
     let _ = fs::write(card_dir.join("logs").join("pid"), &pid_str);
     let _ = TokioCommand::new("xattr")
@@ -1213,7 +1252,34 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
         let now = tokio::time::Instant::now();
         if now >= deadline {
             timed_out = true;
-            let _ = child.kill().await;
+            #[cfg(unix)]
+            let signal_result = kill_owned_adapter_group(pid);
+            #[cfg(not(unix))]
+            let signal_result = child.start_kill();
+            if let Err(error) = signal_result {
+                let _ = util::append_log_line(
+                    &stderr_log,
+                    &format!("adapter process-group termination unconfirmed: {error}"),
+                );
+                // Preserve the direct-child fallback if the group check or
+                // signal fails; descendants may survive this error path.
+                let _ = child.start_kill();
+            }
+            match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => {
+                    let _ = util::append_log_line(
+                        &stderr_log,
+                        &format!("adapter child reap failed after timeout: {error}"),
+                    );
+                }
+                Err(_) => {
+                    let _ = util::append_log_line(
+                        &stderr_log,
+                        "adapter child reap exceeded 2 seconds after timeout",
+                    );
+                }
+            }
             break None;
         }
         let remaining = deadline.saturating_duration_since(now);
