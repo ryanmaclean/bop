@@ -769,6 +769,117 @@ fn done_stdout(cards: &Path, id: &str) -> String {
     fs::read_to_string(card.join("logs").join("stdout.log")).unwrap_or_default()
 }
 
+/// This must be run explicitly on a permitted native build host with an
+/// independently built Moth agent. It is source-only until that run succeeds.
+#[test]
+#[ignore = "requires a permitted native host and debug MOTH_AGENT_BIN"]
+fn dispatcher_moth_receipt_matches_full_rendered_prompt() {
+    let moth_bin = PathBuf::from(
+        std::env::var_os("MOTH_AGENT_BIN").expect("MOTH_AGENT_BIN is required for this test"),
+    );
+    assert!(moth_bin.is_absolute() && moth_bin.is_file());
+    let adapter = PathBuf::from(env!("CARGO_BIN_EXE_bop-moth-adapter"));
+    let td = tempfile::tempdir().unwrap();
+    let cards = td.path().join(".cards");
+    let providers = serde_json::json!({
+        "providers": {
+            "moth": {
+                "command": adapter.to_str().unwrap(),
+                "rate_limit_exit": 75
+            }
+        }
+    })
+    .to_string();
+    setup_routing_case(&cards, r#"["moth"]"#, &providers, "mothbridge");
+
+    // All echoed bytes are synthetic fixture data; no user prompt or secret
+    // enters the debug-only full-echo path or the test's failure messages.
+    fs::write(cards.join("system_context.md"), "Synthetic bridge fixture only.\n").unwrap();
+    let pending = find_card_in(&cards, "pending", "mothbridge");
+    let spec = format!("BOP-MOTH-BEGIN 雪🙂\n{}\nBOP-MOTH-END\n", "x".repeat(240));
+    fs::write(pending.join("spec.md"), &spec).unwrap();
+    // Limit this native fixture's dispatcher wait through BOP's checksummed
+    // metadata API. On timeout BOP kills only the adapter; Moth grandchild
+    // cleanup remains a separate gate.
+    let mut fixture_meta = bop_core::read_meta(&pending).unwrap();
+    fixture_meta.timeout_seconds = Some(30);
+    bop_core::write_meta(&pending, &fixture_meta).unwrap();
+    let template = fs::read_to_string(pending.join("prompt.md")).unwrap();
+    let pending_meta = bop_core::read_meta(&pending).unwrap();
+    let ctx = bop_core::PromptContext::from_files(&pending, &pending_meta).unwrap();
+    let expected = bop_core::render_prompt(&template, &ctx);
+    assert!(expected.contains(&spec));
+    assert!(expected.chars().count() > 80);
+
+    let output = Command::new(bop_bin())
+        .env("MOTH_AGENT_BIN", &moth_bin)
+        .env("BOP_MOTH_TEST_MOCK", "1")
+        .env("MOTH_TEST_ECHO_FULL_PROMPT", &expected)
+        .env("BOP_RUN_ID", "spoofed-parent-id")
+        .env("AGENT_RUN_ID", "inherited-agent-conflict")
+        .args([
+            "--cards-dir",
+            cards.to_str().unwrap(),
+            "dispatcher",
+            "--adapter",
+            adapter.to_str().unwrap(),
+            "--once",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "dispatcher failed without a native receipt");
+
+    let card = find_card_in(&cards, "done", "mothbridge");
+    assert!(card.exists(), "Moth card must finish in done/");
+    let rendered = fs::read(card.join("prompt.md")).unwrap();
+    assert!(rendered == expected.as_bytes(), "BOP rendered prompt differs from fixture");
+    let meta: serde_json::Value =
+        serde_json::from_slice(&fs::read(card.join("meta.json")).unwrap()).unwrap();
+    let runs = meta["runs"].as_array().unwrap();
+    assert_eq!(runs.len(), 1);
+    let run_id = runs[0]["run_id"].as_str().unwrap();
+    assert_eq!(run_id.len(), 32);
+    assert!(run_id.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+    assert!(run_id != "spoofed-parent-id", "BOP must override a spoofed parent ID");
+    assert!(run_id != "inherited-agent-conflict", "BOP must override AGENT_RUN_ID");
+    assert_eq!(runs[0]["outcome"].as_str(), Some("success"));
+
+    let runlog_dir = card.join("logs").join("moth");
+    let jsonl = fs::read(runlog_dir.join(format!("{run_id}.jsonl"))).unwrap();
+    assert_eq!(jsonl.last(), Some(&b'\n'), "runlog must end at a JSONL record boundary");
+    let events: Vec<serde_json::Value> = std::str::from_utf8(&jsonl)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(events.len() >= 3);
+    for (seq, event) in events.iter().enumerate() {
+        assert_eq!(event["seq"].as_u64(), Some(seq as u64));
+        assert!(event["run_id"].as_str() == Some(run_id), "JSONL record has a different run ID");
+    }
+    assert_eq!(events[0]["kind"].as_str(), Some("start"));
+    assert_eq!(events.last().unwrap()["kind"].as_str(), Some("done"));
+    assert_eq!(
+        events.iter().filter(|event| event["kind"].as_str() == Some("done")).count(),
+        1
+    );
+    assert!(!runlog_dir.join("inherited-agent-conflict.jsonl").exists());
+    assert!(!runlog_dir.join("spoofed-parent-id.jsonl").exists());
+
+    let echoed = format!("[mock] received: {expected}\n");
+    let deltas: Vec<_> = events
+        .iter()
+        .filter(|event| event["kind"].as_str() == Some("text_delta"))
+        .collect();
+    assert_eq!(deltas.len(), 1);
+    assert!(
+        deltas[0]["data"]["text"].as_str() == Some(echoed.as_str()),
+        "Moth text_delta did not contain the complete rendered prompt"
+    );
+    let stdout = fs::read_to_string(card.join("logs").join("stdout.log")).unwrap();
+    assert!(stdout == echoed, "Moth stdout did not contain the complete rendered prompt");
+}
+
 #[test]
 fn dispatcher_runs_adapter_of_selected_provider_not_chain_head() {
     build_jc();
