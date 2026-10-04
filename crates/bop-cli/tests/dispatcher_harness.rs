@@ -880,6 +880,116 @@ fn dispatcher_moth_receipt_matches_full_rendered_prompt() {
     assert!(stdout == echoed, "Moth stdout did not contain the complete rendered prompt");
 }
 
+/// Native-only process-tree regression. The fixture is an original Rust binary,
+/// built only with the explicit timeout-process-tree-fixture feature.
+#[cfg(all(unix, feature = "timeout-process-tree-fixture"))]
+#[test]
+#[ignore = "requires a permitted Linux/FreeBSD native host and selected tool-license closure"]
+fn dispatcher_timeout_reaps_adapter_and_stops_moth_grandchild() {
+    use std::process::{Child, Stdio};
+    use std::time::{Duration, Instant};
+
+    struct KillOnDrop(Child);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    let fixture = PathBuf::from(env!("CARGO_BIN_EXE_bop-timeout-process-tree-fixture"));
+    let adapter = PathBuf::from(env!("CARGO_BIN_EXE_bop-moth-adapter"));
+    let td = tempfile::tempdir().unwrap();
+    let cards = td.path().join(".cards");
+    let providers = serde_json::json!({
+        "providers": {"moth": {"command": adapter.to_str().unwrap(), "rate_limit_exit": 75}}
+    }).to_string();
+    setup_routing_case(&cards, r#"["moth"]"#, &providers, "timeout-tree");
+    let pending = find_card_in(&cards, "pending", "timeout-tree");
+    fs::write(pending.join("spec.md"), "Synthetic timeout tree prompt.\n").unwrap();
+    let mut meta = bop_core::read_meta(&pending).unwrap();
+    meta.timeout_seconds = Some(6);
+    bop_core::write_meta(&pending, &meta).unwrap();
+
+    let prompt_snapshot = td.path().join("received-prompt");
+    let grandchild_pid_file = td.path().join("grandchild-pid");
+    let grandchild_beat = td.path().join("grandchild-beat");
+    let sentinel_pid_file = td.path().join("sentinel-pid");
+    let sentinel_beat = td.path().join("sentinel-beat");
+    let mut sentinel = KillOnDrop(Command::new(&fixture)
+        .arg("grandchild")
+        .env("BOP_TIMEOUT_TREE_PID_FILE", &sentinel_pid_file)
+        .env("BOP_TIMEOUT_TREE_BEAT_FILE", &sentinel_beat)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn().unwrap());
+    let mut dispatcher = KillOnDrop(Command::new(bop_bin())
+        .env("MOTH_AGENT_BIN", &fixture)
+        .env("BOP_TIMEOUT_TREE_PROMPT_FILE", &prompt_snapshot)
+        .env("BOP_TIMEOUT_TREE_PID_FILE", &grandchild_pid_file)
+        .env("BOP_TIMEOUT_TREE_BEAT_FILE", &grandchild_beat)
+        .args([
+            "--cards-dir", cards.to_str().unwrap(),
+            "dispatcher", "--adapter", adapter.to_str().unwrap(), "--once",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn().unwrap());
+
+    let started_deadline = Instant::now() + Duration::from_secs(4);
+    let adapter_pid_file = loop {
+        // The card moves under its glyph-prefixed filename. Rediscover it
+        // after the dispatcher transition rather than freezing fallback path.
+        let running = find_card_in(&cards, "running", "timeout-tree");
+        let pid_file = running.join("logs").join("pid");
+        if grandchild_pid_file.exists() && pid_file.exists()
+            && grandchild_beat.exists() && sentinel_beat.exists()
+        {
+            break pid_file;
+        }
+        assert!(Instant::now() < started_deadline, "fixture did not start before timeout");
+        assert!(dispatcher.0.try_wait().unwrap().is_none(), "dispatcher exited before fixture started");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let adapter_pid: i32 = fs::read_to_string(&adapter_pid_file).unwrap().parse().unwrap();
+    let grandchild_pid: i32 = fs::read_to_string(&grandchild_pid_file).unwrap().parse().unwrap();
+    assert!(adapter_pid > 1 && grandchild_pid > 1);
+    assert_eq!(unsafe { libc::getpgid(grandchild_pid) }, adapter_pid,
+        "grandchild did not inherit the adapter-owned group");
+    assert_ne!(unsafe { libc::getpgid(sentinel.0.id() as i32) }, adapter_pid,
+        "unrelated sentinel joined adapter group");
+
+    let finish_deadline = Instant::now() + Duration::from_secs(12);
+    let status = loop {
+        if let Some(status) = dispatcher.0.try_wait().unwrap() {
+            break status;
+        }
+        assert!(Instant::now() < finish_deadline, "dispatcher exceeded test watchdog");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert!(status.success(), "dispatcher did not record timeout cleanly");
+    let failed = find_card_in(&cards, "failed", "timeout-tree");
+    assert!(failed.exists(), "timed-out card must be in failed/");
+    let meta = bop_core::read_meta(&failed).unwrap();
+    assert_eq!(meta.exit_code, Some(124));
+    assert_eq!(meta.runs.len(), 1);
+    assert_eq!(meta.runs[0].outcome, "timeout");
+    assert!(fs::read(&prompt_snapshot).unwrap() == fs::read(failed.join("prompt.md")).unwrap(),
+        "fake Moth did not receive the full rendered prompt");
+
+    let stopped_at = fs::metadata(&grandchild_beat).unwrap().len();
+    let sentinel_at = fs::metadata(&sentinel_beat).unwrap().len();
+    assert!(stopped_at > 0 && sentinel_at > 0);
+    std::thread::sleep(Duration::from_millis(750));
+    assert_eq!(fs::metadata(&grandchild_beat).unwrap().len(), stopped_at,
+        "grandchild kept running after dispatcher timeout");
+    assert!(fs::metadata(&sentinel_beat).unwrap().len() > sentinel_at,
+        "unrelated sentinel stopped after adapter group kill");
+    assert_eq!(unsafe { libc::kill(adapter_pid, 0) }, -1,
+        "direct adapter was not reaped");
+    assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH));
+}
+
 #[test]
 fn dispatcher_runs_adapter_of_selected_provider_not_chain_head() {
     build_jc();
