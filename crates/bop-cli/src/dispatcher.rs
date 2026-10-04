@@ -1186,6 +1186,14 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
         .unwrap_or("unknown");
     let target_dir = std::env::temp_dir().join(format!("bop-target-{}", card_id));
 
+    // Include synchronous spawn and PID bookkeeping in the card budget. Tokio
+    // cannot interrupt spawn or filesystem calls, but no child process is
+    // awaited before the first deadline check below.
+    let timeout_seconds = meta
+        .as_ref()
+        .and_then(|m| m.timeout_seconds)
+        .unwrap_or(3600);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_seconds);
     let mut child = cmd
         .arg(&workdir)
         .arg(&prompt_file)
@@ -1210,10 +1218,6 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
         .spawn()
         .with_context(|| format!("failed to spawn adapter: {}", adapter))?;
 
-    let timeout_seconds = meta
-        .as_ref()
-        .and_then(|m| m.timeout_seconds)
-        .unwrap_or(3600);
     let pid = match child
         .id()
         .and_then(|value| i32::try_from(value).ok())
@@ -1228,13 +1232,14 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
     };
     let pid_str = pid.to_string();
     let _ = fs::write(card_dir.join("logs").join("pid"), &pid_str);
-    let _ = TokioCommand::new("xattr")
-        .arg("-w")
-        .arg("sh.bop.agent-pid")
-        .arg(&pid_str)
-        .arg(card_dir)
-        .status()
-        .await;
+    // Refresh the legacy attribute to this run's PID without a subprocess.
+    // A failed refresh leaves any old value visible as conflict evidence.
+    if let Err(error) = reaper::refresh_legacy_xattr_pid(card_dir, pid) {
+        let _ = util::append_log_line(
+            &stderr_log,
+            &format!("legacy PID xattr refresh failed: {error}"),
+        );
+    }
 
     let mut lease = lock::RunLease {
         run_id: util::next_run_id(child.id()),
@@ -1246,7 +1251,6 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
     };
     let _ = lock::write_run_lease(card_dir, &lease);
 
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_seconds);
     let mut timed_out = false;
     let status = loop {
         let now = tokio::time::Instant::now();
