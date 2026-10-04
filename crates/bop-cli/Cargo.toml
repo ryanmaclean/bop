@@ -4,6 +4,14 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 
+[features]
+timeout-process-tree-fixture = []
+
+[[bin]]
+name = "bop-timeout-process-tree-fixture"
+path = "tests/support/timeout_process_tree.rs"
+required-features = ["timeout-process-tree-fixture"]
+
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
@@ -14,6 +22,7 @@ walkdir.workspace = true
 url.workspace = true
 bop-core = { path = "../bop-core" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "signal", "net"] }
+libc = "=0.2.182"
 axum = "0.7"
 serde.workspace = true
 notify = "6"

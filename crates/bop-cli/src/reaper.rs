@@ -2,7 +2,10 @@ use chrono::Duration as ChronoDuration;
 use std::fs;
 use std::path::Path;
 use std::time::Duration;
-use tokio::process::Command as TokioCommand;
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "freebsd"))]
+use std::ffi::CString;
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "freebsd"))]
+use std::os::unix::ffi::OsStrExt;
 
 use bop_core::{write_meta, StageStatus};
 
@@ -35,7 +38,13 @@ pub async fn reap_orphans(
             continue;
         }
 
-        let pid = read_pid(&card_dir).await?;
+        let pid = match read_pid(&card_dir).await {
+            Ok(pid) => pid,
+            Err(error) => {
+                eprintln!("skipping card {} with conflicting PID evidence: {error}", card_dir.display());
+                continue;
+            }
+        };
         let pid_dead = match pid {
             Some(pid) => !is_alive(pid).await?,
             None => false,
@@ -45,6 +54,11 @@ pub async fn reap_orphans(
             .as_ref()
             .map(|l| lock::lease_is_stale(l, stale_after_chrono))
             .unwrap_or(false);
+        // A stale heartbeat cannot prove that a live process has exited.
+        // Moving this card would allow a second adapter to start alongside it.
+        if pid.is_some() && !pid_dead {
+            continue;
+        }
         if !pid_dead && !lease_stale {
             continue;
         }
@@ -101,43 +115,205 @@ pub async fn reap_orphans(
 }
 
 pub async fn read_pid(card_dir: &Path) -> anyhow::Result<Option<i32>> {
-    let out = TokioCommand::new("xattr")
-        .arg("-p")
-        .arg("sh.bop.agent-pid")
-        .arg(card_dir)
-        .output()
-        .await;
-    if let Ok(out) = out {
-        if out.status.success() {
-            if let Ok(s) = String::from_utf8(out.stdout) {
-                if let Ok(pid) = s.trim().parse::<i32>() {
-                    return Ok(Some(pid));
+    let pid_path = card_dir.join("logs").join("pid");
+    let file_pid = fs::read_to_string(pid_path)
+        .ok()
+        .and_then(|text| parse_safe_pid(&text));
+    let lease_pid = lock::read_run_lease(card_dir)
+        .and_then(|lease| (lease.pid > 1).then_some(lease.pid));
+
+    // The old dispatcher could update only some of these best-effort stores.
+    // Every valid source is evidence; disagreement must not pick a PID to
+    // signal or use for orphan recovery.
+    let xattr_pid = read_legacy_xattr_pid(card_dir)?;
+    resolve_pid_sources(file_pid, lease_pid, xattr_pid)
+}
+
+fn resolve_pid_sources(
+    file_pid: Option<i32>,
+    lease_pid: Option<i32>,
+    xattr_pid: Option<i32>,
+) -> anyhow::Result<Option<i32>> {
+    let mut chosen: Option<(&str, i32)> = None;
+    for (source, pid) in [
+        ("PID file", file_pid),
+        ("lease", lease_pid),
+        ("legacy xattr", xattr_pid),
+    ] {
+        if let Some(pid) = pid {
+            if let Some((old_source, old_pid)) = chosen {
+                if old_pid != pid {
+                    anyhow::bail!(
+                        "conflicting card PIDs: {old_source} ({old_pid}) and {source} ({pid})"
+                    );
                 }
+            } else {
+                chosen = Some((source, pid));
             }
         }
     }
+    Ok(chosen.map(|(_, pid)| pid))
+}
 
-    let pid_path = card_dir.join("logs").join("pid");
-    if let Ok(s) = fs::read_to_string(pid_path) {
-        if let Ok(pid) = s.trim().parse::<i32>() {
-            return Ok(Some(pid));
+fn parse_safe_pid(text: &str) -> Option<i32> {
+    text.trim().parse::<i32>().ok().filter(|pid| *pid > 1)
+}
+
+fn parse_legacy_xattr_bytes(value: &[u8]) -> Option<i32> {
+    if value.len() > 32 {
+        return None;
+    }
+    std::str::from_utf8(value).ok().and_then(parse_safe_pid)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "freebsd"))]
+fn read_legacy_xattr_pid(card_dir: &Path) -> anyhow::Result<Option<i32>> {
+    let path = CString::new(card_dir.as_os_str().as_bytes())
+        .map_err(|_| anyhow::anyhow!("card path contains NUL"))?;
+    let mut value = [0_u8; 32];
+    #[cfg(target_os = "linux")]
+    let name: &[u8] = b"user.sh.bop.agent-pid\0";
+    #[cfg(any(target_os = "macos", target_os = "freebsd"))]
+    let name: &[u8] = b"sh.bop.agent-pid\0";
+
+    // The target-specific libc ABI is different on each platform. The
+    // attribute contains a decimal PID, so an oversized value is invalid.
+    #[cfg(target_os = "linux")]
+    let len = unsafe {
+        libc::getxattr(
+            path.as_ptr(),
+            name.as_ptr().cast(),
+            value.as_mut_ptr().cast(),
+            value.len(),
+        )
+    };
+    #[cfg(target_os = "macos")]
+    let len = unsafe {
+        libc::getxattr(
+            path.as_ptr(),
+            name.as_ptr().cast(),
+            value.as_mut_ptr().cast(),
+            value.len(),
+            0,
+            0,
+        )
+    };
+    #[cfg(target_os = "freebsd")]
+    let len = unsafe {
+        libc::extattr_get_file(
+            path.as_ptr(),
+            libc::EXTATTR_NAMESPACE_USER,
+            name.as_ptr().cast(),
+            value.as_mut_ptr().cast(),
+            value.len(),
+        )
+    };
+    if len < 0 {
+        let error = std::io::Error::last_os_error();
+        #[cfg(target_os = "linux")]
+        let missing = libc::ENODATA;
+        #[cfg(any(target_os = "macos", target_os = "freebsd"))]
+        let missing = libc::ENOATTR;
+        // ERANGE means the attribute exceeds our 32-byte decimal PID schema.
+        if matches!(error.raw_os_error(), Some(code) if code == missing || code == libc::ERANGE || code == libc::ENOTSUP) {
+            return Ok(None);
         }
+        return Err(error.into());
     }
+    let len = usize::try_from(len)?;
+    let bytes = value
+        .get(..len)
+        .ok_or_else(|| anyhow::anyhow!("legacy PID xattr length exceeds buffer"))?;
+    Ok(parse_legacy_xattr_bytes(bytes))
+}
 
-    if let Some(lease) = lock::read_run_lease(card_dir) {
-        return Ok(Some(lease.pid));
-    }
-
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "freebsd")))]
+fn read_legacy_xattr_pid(_card_dir: &Path) -> anyhow::Result<Option<i32>> {
     Ok(None)
 }
 
+pub fn refresh_legacy_xattr_pid(card_dir: &Path, pid: i32) -> anyhow::Result<()> {
+    if pid <= 1 {
+        anyhow::bail!("unsafe PID for legacy xattr refresh: {pid}");
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "freebsd"))]
+    {
+        let path = CString::new(card_dir.as_os_str().as_bytes())
+            .map_err(|_| anyhow::anyhow!("card path contains NUL"))?;
+        let value = pid.to_string();
+        #[cfg(target_os = "linux")]
+        let name: &[u8] = b"user.sh.bop.agent-pid\0";
+        #[cfg(any(target_os = "macos", target_os = "freebsd"))]
+        let name: &[u8] = b"sh.bop.agent-pid\0";
+
+        #[cfg(target_os = "linux")]
+        let written = unsafe {
+            libc::setxattr(
+                path.as_ptr(),
+                name.as_ptr().cast(),
+                value.as_ptr().cast(),
+                value.len(),
+                0,
+            )
+        };
+        #[cfg(target_os = "macos")]
+        let written = unsafe {
+            libc::setxattr(
+                path.as_ptr(),
+                name.as_ptr().cast(),
+                value.as_ptr().cast(),
+                value.len(),
+                0,
+                0,
+            )
+        };
+        #[cfg(target_os = "freebsd")]
+        let written = unsafe {
+            libc::extattr_set_file(
+                path.as_ptr(),
+                libc::EXTATTR_NAMESPACE_USER,
+                name.as_ptr().cast(),
+                value.as_ptr().cast(),
+                value.len(),
+            )
+        };
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        if written != 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        #[cfg(target_os = "freebsd")]
+        if written != value.len() as isize {
+            if written < 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+            anyhow::bail!("legacy PID xattr short write: {written} of {} bytes", value.len());
+        }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "freebsd")))]
+    {
+        let _ = card_dir;
+    }
+    Ok(())
+}
+
 pub async fn is_alive(pid: i32) -> anyhow::Result<bool> {
-    let status = TokioCommand::new("kill")
-        .arg("-0")
-        .arg(pid.to_string())
-        .status()
-        .await?;
-    Ok(status.success())
+    if pid <= 1 {
+        anyhow::bail!("unsafe PID for liveness check: {}", pid);
+    }
+    #[cfg(unix)]
+    {
+        if unsafe { libc::kill(pid, 0) } == 0 {
+            return Ok(true);
+        }
+        let error = std::io::Error::last_os_error();
+        return match error.raw_os_error() {
+            Some(libc::EPERM) => Ok(true),
+            Some(libc::ESRCH) => Ok(false),
+            _ => Err(error.into()),
+        };
+    }
+    #[cfg(not(unix))]
+    anyhow::bail!("native PID liveness is unsupported on this platform")
 }
 
 pub async fn recover_orphans(
@@ -163,7 +339,13 @@ pub async fn recover_orphans(
             continue;
         }
 
-        let pid = read_pid(&card_dir).await?;
+        let pid = match read_pid(&card_dir).await {
+            Ok(pid) => pid,
+            Err(error) => {
+                eprintln!("skipping card {} with conflicting PID evidence: {error}", card_dir.display());
+                continue;
+            }
+        };
         let pid_dead = match pid {
             Some(pid) => !is_alive(pid).await?,
             None => true, // No PID means orphaned
@@ -254,6 +436,111 @@ mod tests {
         assert_eq!(pid, None);
     }
 
+    #[tokio::test]
+    async fn read_pid_accepts_matching_pid_file_and_lease() {
+        let td = tempdir().unwrap();
+        let card_dir = td.path().join("test.bop");
+        fs::create_dir_all(card_dir.join("logs")).unwrap();
+        fs::write(card_dir.join("logs").join("pid"), "12345").unwrap();
+        let lease = lock::RunLease {
+            run_id: "older-run".to_string(),
+            pid: 12345,
+            pid_start_time: chrono::Utc::now(),
+            started_at: chrono::Utc::now(),
+            heartbeat_at: chrono::Utc::now(),
+            host: "test-host".to_string(),
+        };
+        lock::write_run_lease(&card_dir, &lease).unwrap();
+        assert_eq!(read_pid(&card_dir).await.unwrap(), Some(12345));
+    }
+
+    #[tokio::test]
+    async fn read_pid_rejects_conflicting_pid_file_and_lease() {
+        let td = tempdir().unwrap();
+        let card_dir = td.path().join("test.bop");
+        fs::create_dir_all(card_dir.join("logs")).unwrap();
+        fs::write(card_dir.join("logs").join("pid"), "12345").unwrap();
+        let lease = lock::RunLease {
+            run_id: "other-run".to_string(),
+            pid: 54321,
+            pid_start_time: chrono::Utc::now(),
+            started_at: chrono::Utc::now(),
+            heartbeat_at: chrono::Utc::now(),
+            host: "test-host".to_string(),
+        };
+        lock::write_run_lease(&card_dir, &lease).unwrap();
+        assert!(read_pid(&card_dir).await.is_err());
+    }
+
+    #[test]
+    fn pid_sources_quarantine_legacy_xattr_disagreement() {
+        // A pre-upgrade run can update xattr while file or lease writes fail.
+        assert!(resolve_pid_sources(Some(1111), None, Some(2222)).is_err());
+        assert!(resolve_pid_sources(None, Some(1111), Some(2222)).is_err());
+        // A stale xattr from an earlier run must not override two current files.
+        assert!(resolve_pid_sources(Some(2222), Some(2222), Some(1111)).is_err());
+    }
+
+    #[test]
+    fn pid_sources_accept_matching_or_single_evidence() {
+        assert_eq!(
+            resolve_pid_sources(Some(2222), Some(2222), Some(2222)).unwrap(),
+            Some(2222)
+        );
+        assert_eq!(resolve_pid_sources(None, None, Some(2222)).unwrap(), Some(2222));
+        assert_eq!(resolve_pid_sources(None, None, None).unwrap(), None);
+    }
+
+    #[test]
+    fn malformed_or_oversize_xattr_is_not_a_valid_pid() {
+        assert_eq!(parse_legacy_xattr_bytes(b"not-a-pid"), None);
+        assert_eq!(parse_legacy_xattr_bytes(b"123\0"), None);
+        assert_eq!(
+            parse_legacy_xattr_bytes(b"000000000000000000000000000000012"),
+            None
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "freebsd"))]
+    #[tokio::test]
+    #[ignore = "run on an approved off-i9 native xattr-capable filesystem"]
+    async fn native_xattr_conflict_and_refresh_coexistence() {
+        let td = tempdir().unwrap();
+        let card_dir = td.path().join("test.bop");
+        fs::create_dir_all(card_dir.join("logs")).unwrap();
+        fs::write(card_dir.join("logs").join("pid"), "2222").unwrap();
+        refresh_legacy_xattr_pid(&card_dir, 1111).unwrap();
+        assert!(read_pid(&card_dir).await.is_err());
+
+        // Force a refresh error while retaining the old xattr. A later
+        // reader must keep quarantining the conflicting PID evidence.
+        let moved = td.path().join("moved.bop");
+        fs::rename(&card_dir, &moved).unwrap();
+        assert!(refresh_legacy_xattr_pid(&card_dir, 2222).is_err());
+        fs::rename(&moved, &card_dir).unwrap();
+        assert!(read_pid(&card_dir).await.is_err());
+
+        refresh_legacy_xattr_pid(&card_dir, 2222).unwrap();
+        assert_eq!(read_pid(&card_dir).await.unwrap(), Some(2222));
+    }
+
+    #[tokio::test]
+    async fn read_pid_rejects_group_and_init_pids() {
+        let td = tempdir().unwrap();
+        let card_dir = td.path().join("test.bop");
+        fs::create_dir_all(card_dir.join("logs")).unwrap();
+        for bad in ["0", "-2", "1"] {
+            fs::write(card_dir.join("logs").join("pid"), bad).unwrap();
+            assert_eq!(read_pid(&card_dir).await.unwrap(), None);
+        }
+    }
+
+    #[tokio::test]
+    async fn is_alive_rejects_group_pid() {
+        assert!(is_alive(0).await.is_err());
+        assert!(is_alive(-2).await.is_err());
+    }
+
     // ── is_alive ──────────────────────────────────────────────────────────────
 
     #[tokio::test]
@@ -293,6 +580,61 @@ mod tests {
         fs::create_dir_all(card_dir.join("logs")).unwrap();
         fs::write(card_dir.join("logs").join("pid"), pid.to_string()).unwrap();
         write_meta(&card_dir, meta).unwrap();
+    }
+
+    #[tokio::test]
+    async fn reap_orphans_keeps_live_pid_even_with_stale_lease() {
+        let td = tempdir().unwrap();
+        let (running, pending, failed) = setup_card_dirs(td.path());
+        let meta = test_meta("live-stale", Some(0));
+        let pid = std::process::id() as i32;
+        create_running_card(&running, "live-stale", pid, &meta);
+        let card_dir = running.join("live-stale.bop");
+        let old = chrono::Utc::now() - chrono::Duration::minutes(5);
+        let lease = lock::RunLease {
+            run_id: "live-run".to_string(),
+            pid,
+            pid_start_time: old,
+            started_at: old,
+            heartbeat_at: old,
+            host: "test-host".to_string(),
+        };
+        lock::write_run_lease(&card_dir, &lease).unwrap();
+
+        reap_orphans(&running, &pending, &failed, 3, Duration::from_secs(30))
+            .await
+            .unwrap();
+
+        assert!(card_dir.exists());
+        assert!(!pending.join("live-stale.bop").exists());
+    }
+
+    #[tokio::test]
+    async fn reap_orphans_skips_conflict_and_recovers_other_card() {
+        let td = tempdir().unwrap();
+        let (running, pending, failed) = setup_card_dirs(td.path());
+        let meta = test_meta("conflict", Some(0));
+        create_running_card(&running, "conflict", 12345, &meta);
+        let conflict = running.join("conflict.bop");
+        let now = chrono::Utc::now();
+        let lease = lock::RunLease {
+            run_id: "other-run".to_string(),
+            pid: 54321,
+            pid_start_time: now,
+            started_at: now,
+            heartbeat_at: now,
+            host: "test-host".to_string(),
+        };
+        lock::write_run_lease(&conflict, &lease).unwrap();
+        create_running_card(&running, "dead", 999999, &test_meta("dead", Some(0)));
+
+        reap_orphans(&running, &pending, &failed, 3, Duration::from_secs(30))
+            .await
+            .unwrap();
+
+        assert!(conflict.exists());
+        assert!(!pending.join("conflict.bop").exists());
+        assert!(pending.join("dead.bop").exists());
     }
 
     #[tokio::test]
