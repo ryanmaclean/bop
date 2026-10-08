@@ -1,44 +1,19 @@
 # cargo-deny configuration
 # Everything not in the allow list is denied by default (cargo-deny >= 0.14).
-# GPL/LGPL/AGPL/MPL/CDDL/BSD-4-Clause are blocked by omission from the
-# allow list and are never added there, even via exception, per fleet
-# licensing policy (see ~/.claude/CLAUDE.md "Licensing").
+# The current repository instruction permits only MIT, BSD-2/3-Clause,
+# and Apache-2.0. Historical fleet exceptions do not override that rule.
 
 [licenses]
-# Policy set only: MIT, BSD-2/3, Apache-2.0 (+ LLVM exception variant),
-# plus the transitive set the fleet policy documents as pre-approved:
-# ISC, Zlib, Unicode-3.0.
+# This gate intentionally rejects the current unresolved dependency closure.
+# Do not broaden it to make CI green; repair the dependency path first.
 allow = [
   "MIT",
   "Apache-2.0",
-  "Apache-2.0 WITH LLVM-exception",
   "BSD-2-Clause",
   "BSD-3-Clause",
-  "ISC", # ISC approved 2026-09-23
-  "Zlib",
-  "Unicode-3.0",
 ]
 
-# Every license outside the policy set above gets a narrowly-scoped,
-# dated exception here instead of a blanket allow-list entry. Each
-# exception names the exact dependency path it covers and a review date
-# for re-evaluating whether the dependency (and its license) is still
-# needed.
-[[licenses.exceptions]]
-# CDLA-Permissive-2.0: permissive data license, not on the banned
-# copyleft list. Pulled in by the TLS root store used for HTTPS clients.
-# Path: bop -> reqwest -> hyper-rustls -> webpki-roots.
-# Review by: 2026-12-31
-allow = ["CDLA-Permissive-2.0"]
-name = "webpki-roots"
-
-[[licenses.exceptions]]
-# CC0-1.0: public-domain-equivalent dedication, not copyleft. Used by the
-# file-watcher crate.
-# Path: bop -> notify.
-# Review by: 2026-12-31
-allow = ["CC0-1.0"]
-name = "notify"
+# No per-package license exceptions.
 
 [bans]
 # No explicit bans needed — license check handles this.
