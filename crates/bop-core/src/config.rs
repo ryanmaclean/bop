@@ -110,7 +110,7 @@ pub fn parse_config(json: &str) -> anyhow::Result<Config> {
 
 /// Return the global config path: ~/.bop/config.json
 pub fn global_config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".bop").join("config.json"))
+    crate::home_dir().map(|h| h.join(".bop").join("config.json"))
 }
 
 /// Return the project config path: <cwd>/.bop/config.json
