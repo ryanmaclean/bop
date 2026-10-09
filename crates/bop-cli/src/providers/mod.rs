@@ -628,6 +628,9 @@ pub trait Provider: Send + Sync {
 
     /// Fetch current quota/usage from the provider. On transient failures,
     /// return a snapshot with `error` set rather than propagating the error.
+    // async-trait 0.1.89 adds a bare `#[must_use]` to this boxed-Future method.
+    // Clippy 1.99 considers it redundant because Future is already must-use.
+    #[allow(clippy::double_must_use)]
     async fn fetch(&self) -> anyhow::Result<ProviderSnapshot>;
 }
 
