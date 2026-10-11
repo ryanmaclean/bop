@@ -66,6 +66,8 @@ fn pane_reports_initial_verification_failure_over_launch_socket() {
             Err(err) => panic!("launch socket accept failed: {err}"),
         }
     };
+    // The EOF assertion below needs a blocking stream even if accept inherited the listener mode.
+    stream.set_nonblocking(false).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
