@@ -1,11 +1,11 @@
 use chrono::Duration as ChronoDuration;
-use std::fs;
-use std::path::Path;
-use std::time::Duration;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "freebsd"))]
 use std::ffi::CString;
+use std::fs;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "freebsd"))]
 use std::os::unix::ffi::OsStrExt;
+use std::path::Path;
+use std::time::Duration;
 
 use bop_core::{write_meta, StageStatus};
 
@@ -41,7 +41,10 @@ pub async fn reap_orphans(
         let pid = match read_pid(&card_dir).await {
             Ok(pid) => pid,
             Err(error) => {
-                eprintln!("skipping card {} with conflicting PID evidence: {error}", card_dir.display());
+                eprintln!(
+                    "skipping card {} with conflicting PID evidence: {error}",
+                    card_dir.display()
+                );
                 continue;
             }
         };
@@ -119,8 +122,8 @@ pub async fn read_pid(card_dir: &Path) -> anyhow::Result<Option<i32>> {
     let file_pid = fs::read_to_string(pid_path)
         .ok()
         .and_then(|text| parse_safe_pid(&text));
-    let lease_pid = lock::read_run_lease(card_dir)
-        .and_then(|lease| (lease.pid > 1).then_some(lease.pid));
+    let lease_pid =
+        lock::read_run_lease(card_dir).and_then(|lease| (lease.pid > 1).then_some(lease.pid));
 
     // The old dispatcher could update only some of these best-effort stores.
     // Every valid source is evidence; disagreement must not pick a PID to
@@ -215,7 +218,8 @@ fn read_legacy_xattr_pid(card_dir: &Path) -> anyhow::Result<Option<i32>> {
         #[cfg(any(target_os = "macos", target_os = "freebsd"))]
         let missing = libc::ENOATTR;
         // ERANGE means the attribute exceeds our 32-byte decimal PID schema.
-        if matches!(error.raw_os_error(), Some(code) if code == missing || code == libc::ERANGE || code == libc::ENOTSUP) {
+        if matches!(error.raw_os_error(), Some(code) if code == missing || code == libc::ERANGE || code == libc::ENOTSUP)
+        {
             return Ok(None);
         }
         return Err(error.into());
@@ -286,7 +290,10 @@ pub fn refresh_legacy_xattr_pid(card_dir: &Path, pid: i32) -> anyhow::Result<()>
             if written < 0 {
                 return Err(std::io::Error::last_os_error().into());
             }
-            anyhow::bail!("legacy PID xattr short write: {written} of {} bytes", value.len());
+            anyhow::bail!(
+                "legacy PID xattr short write: {written} of {} bytes",
+                value.len()
+            );
         }
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "freebsd")))]
@@ -306,11 +313,11 @@ pub async fn is_alive(pid: i32) -> anyhow::Result<bool> {
             return Ok(true);
         }
         let error = std::io::Error::last_os_error();
-        return match error.raw_os_error() {
+        match error.raw_os_error() {
             Some(libc::EPERM) => Ok(true),
             Some(libc::ESRCH) => Ok(false),
             _ => Err(error.into()),
-        };
+        }
     }
     #[cfg(not(unix))]
     anyhow::bail!("native PID liveness is unsupported on this platform")
@@ -342,7 +349,10 @@ pub async fn recover_orphans(
         let pid = match read_pid(&card_dir).await {
             Ok(pid) => pid,
             Err(error) => {
-                eprintln!("skipping card {} with conflicting PID evidence: {error}", card_dir.display());
+                eprintln!(
+                    "skipping card {} with conflicting PID evidence: {error}",
+                    card_dir.display()
+                );
                 continue;
             }
         };
@@ -487,7 +497,10 @@ mod tests {
             resolve_pid_sources(Some(2222), Some(2222), Some(2222)).unwrap(),
             Some(2222)
         );
-        assert_eq!(resolve_pid_sources(None, None, Some(2222)).unwrap(), Some(2222));
+        assert_eq!(
+            resolve_pid_sources(None, None, Some(2222)).unwrap(),
+            Some(2222)
+        );
         assert_eq!(resolve_pid_sources(None, None, None).unwrap(), None);
     }
 

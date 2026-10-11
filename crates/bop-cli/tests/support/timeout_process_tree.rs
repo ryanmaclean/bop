@@ -35,7 +35,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             fs::write(pid_file, std::process::id().to_string())?;
             // Finite lifetime bounds any orphan if the regression reappears.
             for _ in 0..150 {
-                OpenOptions::new().create(true).append(true).open(&beat_file)?
+                OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&beat_file)?
                     .write_all(b"x")?;
                 thread::sleep(Duration::from_millis(100));
             }

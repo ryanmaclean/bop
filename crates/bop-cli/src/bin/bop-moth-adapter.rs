@@ -86,8 +86,8 @@ fn run_validated(
 ) -> Result<ExitCode, String> {
     check_log_path(stdout_log, logs_dir, "stdout.log")?;
     check_memory_path(memory_out, card_dir)?;
-    let prompt_metadata = fs::symlink_metadata(prompt_arg)
-        .map_err(|error| format!("prompt_file: {error}"))?;
+    let prompt_metadata =
+        fs::symlink_metadata(prompt_arg).map_err(|error| format!("prompt_file: {error}"))?;
     if prompt_metadata.file_type().is_symlink() || !prompt_metadata.is_file() {
         return Err("prompt_file must be a regular non-symlink file".into());
     }
@@ -170,7 +170,9 @@ fn run_validated(
     drop(child_stdin);
     if let Err(error) = write_result {
         terminate_and_reap(&mut child);
-        return Err(format!("could not deliver complete prompt to Moth stdin: {error}"));
+        return Err(format!(
+            "could not deliver complete prompt to Moth stdin: {error}"
+        ));
     }
     // ChildStdin is closed here, so Moth sees EOF before model
     // or runlog work under the paired --prompt-stdin contract.
@@ -271,13 +273,19 @@ fn require_prompt_stdin_capability(agent_bin: &Path) -> Result<(), String> {
             }
             match rx.recv_timeout(remaining.min(Duration::from_millis(25))) {
                 Ok(ProbeEvent::Bytes(is_stdout, chunk)) => {
-                    let new_len = total_bytes.checked_add(chunk.len())
+                    let new_len = total_bytes
+                        .checked_add(chunk.len())
                         .ok_or("Moth help output length overflow")?;
                     if new_len > HELP_MAX_BYTES {
                         return Err("Moth help capability probe exceeded output limit".into());
                     }
-                    let stream = if is_stdout { &mut stdout_bytes } else { &mut stderr_bytes };
-                    stream.try_reserve(chunk.len())
+                    let stream = if is_stdout {
+                        &mut stdout_bytes
+                    } else {
+                        &mut stderr_bytes
+                    };
+                    stream
+                        .try_reserve(chunk.len())
                         .map_err(|error| format!("Moth help output allocation: {error}"))?;
                     stream.extend_from_slice(&chunk);
                     total_bytes = new_len;
@@ -293,10 +301,13 @@ fn require_prompt_stdin_capability(agent_bin: &Path) -> Result<(), String> {
             }
         }
         let marker = b"--prompt-stdin";
-        let advertised = stdout_bytes.windows(marker.len()).any(|window| window == marker)
-            || stderr_bytes.windows(marker.len()).any(|window| window == marker);
-        if !status.expect("status checked above").success() || !advertised
-        {
+        let advertised = stdout_bytes
+            .windows(marker.len())
+            .any(|window| window == marker)
+            || stderr_bytes
+                .windows(marker.len())
+                .any(|window| window == marker);
+        if !status.expect("status checked above").success() || !advertised {
             return Err("MOTH_AGENT_BIN lacks required agent run --prompt-stdin support".into());
         }
         Ok(())
@@ -308,14 +319,20 @@ fn require_prompt_stdin_capability(agent_bin: &Path) -> Result<(), String> {
         // readers on this failure path; the adapter exits immediately.
         return result;
     }
-    out_thread.join().map_err(|_| "Moth help stdout reader panicked")?;
-    err_thread.join().map_err(|_| "Moth help stderr reader panicked")?;
+    out_thread
+        .join()
+        .map_err(|_| "Moth help stdout reader panicked")?;
+    err_thread
+        .join()
+        .map_err(|_| "Moth help stderr reader panicked")?;
     result
 }
 
 fn read_prompt_snapshot(prompt_file: &Path) -> Result<Vec<u8>, String> {
     let mut file = File::open(prompt_file).map_err(|error| format!("open prompt_file: {error}"))?;
-    let opened = file.metadata().map_err(|error| format!("prompt_file metadata: {error}"))?;
+    let opened = file
+        .metadata()
+        .map_err(|error| format!("prompt_file metadata: {error}"))?;
     if !opened.is_file() {
         return Err("opened prompt_file is not a regular file".into());
     }
@@ -325,26 +342,34 @@ fn read_prompt_snapshot(prompt_file: &Path) -> Result<Vec<u8>, String> {
     while remaining > 0 {
         let limit = usize::try_from(remaining.min(chunk.len() as u64))
             .map_err(|_| "prompt_file length is not addressable")?;
-        let n = file.read(&mut chunk[..limit])
+        let n = file
+            .read(&mut chunk[..limit])
             .map_err(|error| format!("read prompt_file: {error}"))?;
         if n == 0 {
             return Err("prompt_file ended before its opened length".into());
         }
-        snapshot.try_reserve(n)
+        snapshot
+            .try_reserve(n)
             .map_err(|error| format!("prompt snapshot allocation: {error}"))?;
         snapshot.extend_from_slice(&chunk[..n]);
         remaining -= n as u64;
     }
     let mut excess = [0u8; 1];
-    if file.read(&mut excess).map_err(|error| format!("read prompt_file EOF: {error}"))? != 0 {
+    if file
+        .read(&mut excess)
+        .map_err(|error| format!("read prompt_file EOF: {error}"))?
+        != 0
+    {
         return Err("prompt_file grew while creating snapshot".into());
     }
     if snapshot.is_empty() {
         return Err("prompt_file is empty".into());
     }
     std::str::from_utf8(&snapshot).map_err(|error| format!("prompt_file UTF-8: {error}"))?;
-    let final_len = file.metadata()
-        .map_err(|error| format!("prompt_file final metadata: {error}"))?.len();
+    let final_len = file
+        .metadata()
+        .map_err(|error| format!("prompt_file final metadata: {error}"))?
+        .len();
     if opened.len() != final_len || final_len != snapshot.len() as u64 {
         return Err("prompt_file changed length while creating snapshot".into());
     }
@@ -362,12 +387,19 @@ struct ReceiptLine<'a> {
 fn next_jsonl_line(reader: &mut impl BufRead, line: &mut Vec<u8>) -> Result<bool, String> {
     line.clear();
     loop {
-        let available = reader.fill_buf().map_err(|error| format!("read Moth runlog: {error}"))?;
+        let available = reader
+            .fill_buf()
+            .map_err(|error| format!("read Moth runlog: {error}"))?;
         if available.is_empty() {
-            return if line.is_empty() { Ok(false) }
-                else { Err("Moth runlog ends in an unterminated record".into()) };
+            return if line.is_empty() {
+                Ok(false)
+            } else {
+                Err("Moth runlog ends in an unterminated record".into())
+            };
         }
-        let len = available.iter().position(|byte| *byte == b'\n')
+        let len = available
+            .iter()
+            .position(|byte| *byte == b'\n')
             .map_or(available.len(), |index| index + 1);
         line.try_reserve(len)
             .map_err(|error| format!("Moth runlog line allocation: {error}"))?;
@@ -386,7 +418,11 @@ fn validate_success_receipt(receipt: &Path, run_id: &str) -> Result<(), String> 
         return Err("Moth runlog must be a regular non-symlink file".into());
     }
     let file = File::open(receipt).map_err(|error| format!("open Moth runlog: {error}"))?;
-    if !file.metadata().map_err(|error| format!("Moth runlog metadata: {error}"))?.is_file() {
+    if !file
+        .metadata()
+        .map_err(|error| format!("Moth runlog metadata: {error}"))?
+        .is_file()
+    {
         return Err("opened Moth runlog is not a regular file".into());
     }
     let mut reader = BufReader::new(file);
@@ -401,7 +437,10 @@ fn validate_success_receipt(receipt: &Path, run_id: &str) -> Result<(), String> 
             .map_err(|error| format!("Moth runlog malformed JSON: {error}"))?;
         let _ = &record.data;
         if record.seq != next_seq {
-            return Err(format!("Moth runlog sequence gap: expected {next_seq}, got {}", record.seq));
+            return Err(format!(
+                "Moth runlog sequence gap: expected {next_seq}, got {}",
+                record.seq
+            ));
         }
         if record.run_id != run_id {
             return Err("Moth runlog record has a different run_id".into());
@@ -416,7 +455,9 @@ fn validate_success_receipt(receipt: &Path, run_id: &str) -> Result<(), String> 
             }
             _ => {}
         }
-        next_seq = next_seq.checked_add(1).ok_or("Moth runlog sequence overflow")?;
+        next_seq = next_seq
+            .checked_add(1)
+            .ok_or("Moth runlog sequence overflow")?;
     }
     if !saw_done || next_seq < 2 {
         return Err("Moth returned success without a terminal done record".into());
@@ -440,7 +481,11 @@ fn absolute(base: &Path, raw: &OsString, name: &str) -> Result<PathBuf, String> 
 }
 
 fn absolute_path(base: &Path, path: PathBuf) -> PathBuf {
-    if path.is_absolute() { path } else { base.join(path) }
+    if path.is_absolute() {
+        path
+    } else {
+        base.join(path)
+    }
 }
 
 fn existing_dir(path: &Path, name: &str) -> Result<PathBuf, String> {
@@ -463,14 +508,16 @@ fn check_log_path(path: &Path, logs_dir: &Path, expected_name: &str) -> Result<(
     if path.file_name() != Some(OsStr::new(expected_name)) {
         return Err(format!("{expected_name}: unexpected log filename"));
     }
-    let parent = path.parent().ok_or_else(|| format!("{expected_name}: missing parent"))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("{expected_name}: missing parent"))?;
     if existing_dir(parent, expected_name)? != logs_dir {
         return Err(format!("{expected_name}: path escapes BOP_CARD_DIR/logs"));
     }
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
-            Err(format!("{expected_name}: existing path must be a regular non-symlink file"))
-        }
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => Err(format!(
+            "{expected_name}: existing path must be a regular non-symlink file"
+        )),
         Ok(_) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(format!("{expected_name}: {error}")),
@@ -487,7 +534,9 @@ fn check_memory_path(path: &Path, card_dir: &Path) -> Result<(), String> {
     }
     match fs::symlink_metadata(path) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Ok(_) => return Err("memory_out must be absent because this adapter does not write it".into()),
+        Ok(_) => {
+            return Err("memory_out must be absent because this adapter does not write it".into())
+        }
         Err(error) => return Err(format!("memory_out: {error}")),
     }
     // Moth currently has no BOP memory-output protocol. The adapter must not
@@ -517,7 +566,6 @@ fn prepare_runlog_dir(logs_dir: &Path) -> Result<PathBuf, String> {
 fn open_log(path: &Path, name: &str) -> Result<File, String> {
     OpenOptions::new()
         .create(true)
-        .write(true)
         .append(true)
         .open(path)
         .map_err(|error| format!("{name}: {error}"))
@@ -578,7 +626,11 @@ mod tests {
         fs::write(&receipt, format!("{start}{done}")).unwrap();
         validate_success_receipt(&receipt, id).unwrap();
         assert!(validate_success_receipt(&receipt, "ffffffffffffffffffffffffffffffff").is_err());
-        fs::write(&receipt, format!("{start}{{\"seq\":2,\"run_id\":\"{id}\",\"kind\":\"done\",\"data\":{{}}}}\n")).unwrap();
+        fs::write(
+            &receipt,
+            format!("{start}{{\"seq\":2,\"run_id\":\"{id}\",\"kind\":\"done\",\"data\":{{}}}}\n"),
+        )
+        .unwrap();
         assert!(validate_success_receipt(&receipt, id).is_err());
         fs::write(&receipt, format!("{start}{done}{{\"seq\":2,\"run_id\":\"{id}\",\"kind\":\"text_delta\",\"data\":{{}}}}\n")).unwrap();
         assert!(validate_success_receipt(&receipt, id).is_err());

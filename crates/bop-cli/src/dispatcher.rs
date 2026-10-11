@@ -836,7 +836,10 @@ async fn run_dispatcher_with_meta_io<I: RunMetadataIo, W: WorkspacePreparation>(
                     };
 
                     fs::rename(&running_path, &target).with_context(|| {
-                        format!("failed to move card '{}' from running/ to {to_state}/", name)
+                        format!(
+                            "failed to move card '{}' from running/ to {to_state}/",
+                            name
+                        )
                     })?;
                     // Log stage transition event (best-effort)
                     let _ = append_event(
@@ -1052,7 +1055,11 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
     let _ = fs::remove_file(&memory_out_file);
 
     // Render prompt template with actual values
-    let mut meta = Some(meta_io.read(card_dir).context("failed to read card metadata")?);
+    let mut meta = Some(
+        meta_io
+            .read(card_dir)
+            .context("failed to read card metadata")?,
+    );
     let memory_namespace = meta
         .as_ref()
         .map(memory::memory_namespace_from_meta)
@@ -1157,7 +1164,9 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
             note: None,
         });
         run_idx = Some(m.runs.len().saturating_sub(1));
-        meta_io.write(card_dir, m).context("failed to write run record before adapter spawn")?;
+        meta_io
+            .write(card_dir, m)
+            .context("failed to write run record before adapter spawn")?;
     }
 
     let mut cmd = if adapter.ends_with(".nu") {
@@ -1634,7 +1643,9 @@ mod tests {
     fn short_run_id_returns_32_char_hex() {
         let id = short_run_id().unwrap();
         assert_eq!(id.len(), 32);
-        assert!(id.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
+        assert!(id
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
     }
 
     #[test]
@@ -1646,8 +1657,7 @@ mod tests {
 
     #[test]
     fn run_id_entropy_failure_is_an_error() {
-        let err = run_id_with_entropy(|_| anyhow::bail!("simulated entropy failure"))
-            .unwrap_err();
+        let err = run_id_with_entropy(|_| anyhow::bail!("simulated entropy failure")).unwrap_err();
         assert!(format!("{err:#}").contains("simulated entropy failure"));
     }
 
@@ -2259,7 +2269,10 @@ mod tests {
             assert_eq!(meta_io.reads.load(Ordering::SeqCst), 1, "{fault:?}");
             assert_eq!(
                 meta_io.writes.load(Ordering::SeqCst),
-                usize::from(!matches!(fault, PreSpawnFault::Read | PreSpawnFault::Entropy)),
+                usize::from(!matches!(
+                    fault,
+                    PreSpawnFault::Read | PreSpawnFault::Entropy
+                )),
                 "{fault:?}"
             );
             assert_eq!(
@@ -2268,7 +2281,10 @@ mod tests {
                 "{fault:?} minted the wrong number of IDs"
             );
             if matches!(fault, PreSpawnFault::Pass) {
-                assert!(marker.exists(), "real adapter rate-limit control did not launch");
+                assert!(
+                    marker.exists(),
+                    "real adapter rate-limit control did not launch"
+                );
                 let pending = cards.join("pending").join("fault.bop");
                 assert!(pending.is_dir(), "real adapter exit 1 must requeue");
                 for state in ["running", "done", "failed"] {
@@ -2329,14 +2345,22 @@ mod tests {
                 // Positive control after no-spawn assertions: the marker script works.
                 let marker_status = TokioCommand::new("nu")
                     .arg(&adapter)
-                    .args(["unused-workdir", "unused-prompt", "unused-stdout", "unused-stderr"])
+                    .args([
+                        "unused-workdir",
+                        "unused-prompt",
+                        "unused-stdout",
+                        "unused-stderr",
+                    ])
                     .env("BOP_TEST_MARKER", &marker)
                     .env_remove("BOP_TEST_EXIT")
                     .status()
                     .await
                     .unwrap();
                 assert!(marker_status.success(), "marker adapter control failed");
-                assert!(marker.exists(), "marker adapter control did not create the marker");
+                assert!(
+                    marker.exists(),
+                    "marker adapter control did not create the marker"
+                );
             }
         }
     }

@@ -41,7 +41,10 @@ pub fn cmd_events(
             } else {
                 &ev.job.name
             };
-            println!("{:<20} {:<10} {:<30} {:<32}", time, event_type, card, ev.run.run_id);
+            println!(
+                "{:<20} {:<10} {:<30} {:<32}",
+                time, event_type, card, ev.run.run_id
+            );
         }
         println!("\n{} event(s) total", events.len());
     }

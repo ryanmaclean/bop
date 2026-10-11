@@ -491,7 +491,10 @@ fn dispatcher_quarantines_invalid_pending_meta_to_failed() {
         rejected_log.contains("invalid_meta"),
         "rejected marker should include invalid_meta reason"
     );
-    assert!(!marker.exists(), "invalid metadata must not launch the adapter");
+    assert!(
+        !marker.exists(),
+        "invalid metadata must not launch the adapter"
+    );
     for state in ["pending", "running", "done"] {
         assert!(
             !find_card_in(&cards, state, "bad-meta").exists(),
@@ -794,7 +797,11 @@ fn dispatcher_moth_receipt_matches_full_rendered_prompt() {
 
     // All echoed bytes are synthetic fixture data; no user prompt or secret
     // enters the debug-only full-echo path or the test's failure messages.
-    fs::write(cards.join("system_context.md"), "Synthetic bridge fixture only.\n").unwrap();
+    fs::write(
+        cards.join("system_context.md"),
+        "Synthetic bridge fixture only.\n",
+    )
+    .unwrap();
     let pending = find_card_in(&cards, "pending", "mothbridge");
     let spec = format!("BOP-MOTH-BEGIN 雪🙂\n{}\nBOP-MOTH-END\n", "x".repeat(240));
     fs::write(pending.join("spec.md"), &spec).unwrap();
@@ -827,26 +834,44 @@ fn dispatcher_moth_receipt_matches_full_rendered_prompt() {
         ])
         .output()
         .unwrap();
-    assert!(output.status.success(), "dispatcher failed without a native receipt");
+    assert!(
+        output.status.success(),
+        "dispatcher failed without a native receipt"
+    );
 
     let card = find_card_in(&cards, "done", "mothbridge");
     assert!(card.exists(), "Moth card must finish in done/");
     let rendered = fs::read(card.join("prompt.md")).unwrap();
-    assert!(rendered == expected.as_bytes(), "BOP rendered prompt differs from fixture");
+    assert!(
+        rendered == expected.as_bytes(),
+        "BOP rendered prompt differs from fixture"
+    );
     let meta: serde_json::Value =
         serde_json::from_slice(&fs::read(card.join("meta.json")).unwrap()).unwrap();
     let runs = meta["runs"].as_array().unwrap();
     assert_eq!(runs.len(), 1);
     let run_id = runs[0]["run_id"].as_str().unwrap();
     assert_eq!(run_id.len(), 32);
-    assert!(run_id.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
-    assert!(run_id != "spoofed-parent-id", "BOP must override a spoofed parent ID");
-    assert!(run_id != "inherited-agent-conflict", "BOP must override AGENT_RUN_ID");
+    assert!(run_id
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+    assert!(
+        run_id != "spoofed-parent-id",
+        "BOP must override a spoofed parent ID"
+    );
+    assert!(
+        run_id != "inherited-agent-conflict",
+        "BOP must override AGENT_RUN_ID"
+    );
     assert_eq!(runs[0]["outcome"].as_str(), Some("success"));
 
     let runlog_dir = card.join("logs").join("moth");
     let jsonl = fs::read(runlog_dir.join(format!("{run_id}.jsonl"))).unwrap();
-    assert_eq!(jsonl.last(), Some(&b'\n'), "runlog must end at a JSONL record boundary");
+    assert_eq!(
+        jsonl.last(),
+        Some(&b'\n'),
+        "runlog must end at a JSONL record boundary"
+    );
     let events: Vec<serde_json::Value> = std::str::from_utf8(&jsonl)
         .unwrap()
         .lines()
@@ -855,12 +880,18 @@ fn dispatcher_moth_receipt_matches_full_rendered_prompt() {
     assert!(events.len() >= 3);
     for (seq, event) in events.iter().enumerate() {
         assert_eq!(event["seq"].as_u64(), Some(seq as u64));
-        assert!(event["run_id"].as_str() == Some(run_id), "JSONL record has a different run ID");
+        assert!(
+            event["run_id"].as_str() == Some(run_id),
+            "JSONL record has a different run ID"
+        );
     }
     assert_eq!(events[0]["kind"].as_str(), Some("start"));
     assert_eq!(events.last().unwrap()["kind"].as_str(), Some("done"));
     assert_eq!(
-        events.iter().filter(|event| event["kind"].as_str() == Some("done")).count(),
+        events
+            .iter()
+            .filter(|event| event["kind"].as_str() == Some("done"))
+            .count(),
         1
     );
     assert!(!runlog_dir.join("inherited-agent-conflict.jsonl").exists());
@@ -877,7 +908,10 @@ fn dispatcher_moth_receipt_matches_full_rendered_prompt() {
         "Moth text_delta did not contain the complete rendered prompt"
     );
     let stdout = fs::read_to_string(card.join("logs").join("stdout.log")).unwrap();
-    assert!(stdout == echoed, "Moth stdout did not contain the complete rendered prompt");
+    assert!(
+        stdout == echoed,
+        "Moth stdout did not contain the complete rendered prompt"
+    );
 }
 
 /// Native-only process-tree regression. The fixture is an original Rust binary,
@@ -903,7 +937,8 @@ fn dispatcher_timeout_reaps_adapter_and_stops_moth_grandchild() {
     let cards = td.path().join(".cards");
     let providers = serde_json::json!({
         "providers": {"moth": {"command": adapter.to_str().unwrap(), "rate_limit_exit": 75}}
-    }).to_string();
+    })
+    .to_string();
     setup_routing_case(&cards, r#"["moth"]"#, &providers, "timeout-tree");
     let pending = find_card_in(&cards, "pending", "timeout-tree");
     fs::write(pending.join("spec.md"), "Synthetic timeout tree prompt.\n").unwrap();
@@ -916,25 +951,35 @@ fn dispatcher_timeout_reaps_adapter_and_stops_moth_grandchild() {
     let grandchild_beat = td.path().join("grandchild-beat");
     let sentinel_pid_file = td.path().join("sentinel-pid");
     let sentinel_beat = td.path().join("sentinel-beat");
-    let mut sentinel = KillOnDrop(Command::new(&fixture)
-        .arg("grandchild")
-        .env("BOP_TIMEOUT_TREE_PID_FILE", &sentinel_pid_file)
-        .env("BOP_TIMEOUT_TREE_BEAT_FILE", &sentinel_beat)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn().unwrap());
-    let mut dispatcher = KillOnDrop(Command::new(bop_bin())
-        .env("MOTH_AGENT_BIN", &fixture)
-        .env("BOP_TIMEOUT_TREE_PROMPT_FILE", &prompt_snapshot)
-        .env("BOP_TIMEOUT_TREE_PID_FILE", &grandchild_pid_file)
-        .env("BOP_TIMEOUT_TREE_BEAT_FILE", &grandchild_beat)
-        .args([
-            "--cards-dir", cards.to_str().unwrap(),
-            "dispatcher", "--adapter", adapter.to_str().unwrap(), "--once",
-        ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn().unwrap());
+    let mut sentinel = KillOnDrop(
+        Command::new(&fixture)
+            .arg("grandchild")
+            .env("BOP_TIMEOUT_TREE_PID_FILE", &sentinel_pid_file)
+            .env("BOP_TIMEOUT_TREE_BEAT_FILE", &sentinel_beat)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let mut dispatcher = KillOnDrop(
+        Command::new(bop_bin())
+            .env("MOTH_AGENT_BIN", &fixture)
+            .env("BOP_TIMEOUT_TREE_PROMPT_FILE", &prompt_snapshot)
+            .env("BOP_TIMEOUT_TREE_PID_FILE", &grandchild_pid_file)
+            .env("BOP_TIMEOUT_TREE_BEAT_FILE", &grandchild_beat)
+            .args([
+                "--cards-dir",
+                cards.to_str().unwrap(),
+                "dispatcher",
+                "--adapter",
+                adapter.to_str().unwrap(),
+                "--once",
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
 
     let started_deadline = Instant::now() + Duration::from_secs(4);
     let adapter_pid_file = loop {
@@ -942,52 +987,91 @@ fn dispatcher_timeout_reaps_adapter_and_stops_moth_grandchild() {
         // after the dispatcher transition rather than freezing fallback path.
         let running = find_card_in(&cards, "running", "timeout-tree");
         let pid_file = running.join("logs").join("pid");
-        if grandchild_pid_file.exists() && pid_file.exists()
-            && grandchild_beat.exists() && sentinel_beat.exists()
+        if grandchild_pid_file.exists()
+            && pid_file.exists()
+            && grandchild_beat.exists()
+            && sentinel_beat.exists()
         {
             break pid_file;
         }
-        assert!(Instant::now() < started_deadline, "fixture did not start before timeout");
-        assert!(dispatcher.0.try_wait().unwrap().is_none(), "dispatcher exited before fixture started");
+        assert!(
+            Instant::now() < started_deadline,
+            "fixture did not start before timeout"
+        );
+        assert!(
+            dispatcher.0.try_wait().unwrap().is_none(),
+            "dispatcher exited before fixture started"
+        );
         std::thread::sleep(Duration::from_millis(20));
     };
-    let adapter_pid: i32 = fs::read_to_string(&adapter_pid_file).unwrap().parse().unwrap();
-    let grandchild_pid: i32 = fs::read_to_string(&grandchild_pid_file).unwrap().parse().unwrap();
+    let adapter_pid: i32 = fs::read_to_string(&adapter_pid_file)
+        .unwrap()
+        .parse()
+        .unwrap();
+    let grandchild_pid: i32 = fs::read_to_string(&grandchild_pid_file)
+        .unwrap()
+        .parse()
+        .unwrap();
     assert!(adapter_pid > 1 && grandchild_pid > 1);
-    assert_eq!(unsafe { libc::getpgid(grandchild_pid) }, adapter_pid,
-        "grandchild did not inherit the adapter-owned group");
-    assert_ne!(unsafe { libc::getpgid(sentinel.0.id() as i32) }, adapter_pid,
-        "unrelated sentinel joined adapter group");
+    assert_eq!(
+        unsafe { libc::getpgid(grandchild_pid) },
+        adapter_pid,
+        "grandchild did not inherit the adapter-owned group"
+    );
+    assert_ne!(
+        unsafe { libc::getpgid(sentinel.0.id() as i32) },
+        adapter_pid,
+        "unrelated sentinel joined adapter group"
+    );
 
     let finish_deadline = Instant::now() + Duration::from_secs(12);
     let status = loop {
         if let Some(status) = dispatcher.0.try_wait().unwrap() {
             break status;
         }
-        assert!(Instant::now() < finish_deadline, "dispatcher exceeded test watchdog");
+        assert!(
+            Instant::now() < finish_deadline,
+            "dispatcher exceeded test watchdog"
+        );
         std::thread::sleep(Duration::from_millis(20));
     };
-    assert!(status.success(), "dispatcher did not record timeout cleanly");
+    assert!(
+        status.success(),
+        "dispatcher did not record timeout cleanly"
+    );
     let failed = find_card_in(&cards, "failed", "timeout-tree");
     assert!(failed.exists(), "timed-out card must be in failed/");
     let meta = bop_core::read_meta(&failed).unwrap();
     assert_eq!(meta.exit_code, Some(124));
     assert_eq!(meta.runs.len(), 1);
     assert_eq!(meta.runs[0].outcome, "timeout");
-    assert!(fs::read(&prompt_snapshot).unwrap() == fs::read(failed.join("prompt.md")).unwrap(),
-        "fake Moth did not receive the full rendered prompt");
+    assert!(
+        fs::read(&prompt_snapshot).unwrap() == fs::read(failed.join("prompt.md")).unwrap(),
+        "fake Moth did not receive the full rendered prompt"
+    );
 
     let stopped_at = fs::metadata(&grandchild_beat).unwrap().len();
     let sentinel_at = fs::metadata(&sentinel_beat).unwrap().len();
     assert!(stopped_at > 0 && sentinel_at > 0);
     std::thread::sleep(Duration::from_millis(750));
-    assert_eq!(fs::metadata(&grandchild_beat).unwrap().len(), stopped_at,
-        "grandchild kept running after dispatcher timeout");
-    assert!(fs::metadata(&sentinel_beat).unwrap().len() > sentinel_at,
-        "unrelated sentinel stopped after adapter group kill");
-    assert_eq!(unsafe { libc::kill(adapter_pid, 0) }, -1,
-        "direct adapter was not reaped");
-    assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH));
+    assert_eq!(
+        fs::metadata(&grandchild_beat).unwrap().len(),
+        stopped_at,
+        "grandchild kept running after dispatcher timeout"
+    );
+    assert!(
+        fs::metadata(&sentinel_beat).unwrap().len() > sentinel_at,
+        "unrelated sentinel stopped after adapter group kill"
+    );
+    assert_eq!(
+        unsafe { libc::kill(adapter_pid, 0) },
+        -1,
+        "direct adapter was not reaped"
+    );
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::ESRCH)
+    );
 }
 
 #[test]
