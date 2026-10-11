@@ -397,7 +397,7 @@ fn dispatcher_qa_prefers_different_provider_than_implement() {
 }
 
 #[test]
-fn dispatcher_reaps_stale_lease_without_dead_pid() {
+fn dispatcher_keeps_stale_lease_with_live_pid() {
     build_jc();
 
     let td = tempfile::tempdir().unwrap();
@@ -426,16 +426,17 @@ fn dispatcher_reaps_stale_lease_without_dead_pid() {
         .unwrap();
     assert!(status.success());
 
-    let card = cards.join("pending").join("lease-stale.bop");
+    let card = cards.join("running").join("lease-stale.bop");
     assert!(
         card.exists(),
-        "stale lease card should be moved back to pending"
+        "a stale heartbeat must not release a card owned by a live PID"
     );
+    assert!(!cards.join("pending").join("lease-stale.bop").exists());
     let meta = fs::read_to_string(card.join("meta.json")).unwrap();
-    assert!(meta.contains("\"retry_count\": 1") || meta.contains("\"retry_count\":1"));
+    assert!(meta.contains("\"retry_count\": 0") || meta.contains("\"retry_count\":0"));
     assert!(
-        meta.contains("\"status\": \"pending\"") || meta.contains("\"status\":\"pending\""),
-        "running stage should normalize to pending after reaping"
+        meta.contains("\"status\": \"running\"") || meta.contains("\"status\":\"running\""),
+        "the live owner's running stage must remain unchanged"
     );
 }
 
