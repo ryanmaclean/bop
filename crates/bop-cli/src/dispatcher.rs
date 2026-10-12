@@ -744,7 +744,13 @@ async fn run_dispatcher_with_meta_io<I: RunMetadataIo, W: WorkspacePreparation>(
                                 "[dispatcher] card '{}' failed before completion: {err:#}",
                                 name
                             );
-                            (1, None, true)
+                            match meta_io.read(&running_path) {
+                                Ok(m) if !reaper::has_unretired_moth_owner(&m) => (1,Some(m),true),
+                                _ => {
+                                    eprintln!("[dispatcher] retaining {}: ownership metadata unresolved",name);
+                                    continue;
+                                }
+                            }
                         }
                     };
 
@@ -1041,6 +1047,10 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
     meta_io: &I,
     mint_run_id: &dyn Fn() -> anyhow::Result<String>,
 ) -> anyhow::Result<(i32, Option<Meta>)> {
+    let strict_moth = provider_name == "moth" || Path::new(adapter).file_stem().and_then(|s| s.to_str()) == Some("bop-moth-adapter");
+    if strict_moth && !cfg!(target_os = "freebsd") { anyhow::bail!("strict Moth ownership requires FreeBSD; no fallback"); }
+    let existing = meta_io.read(card_dir).context("read ownership before run admission")?;
+    if reaper::has_unretired_moth_owner(&existing) { anyhow::bail!("previous Moth owner remains unretired"); }
     fs::create_dir_all(card_dir.join("logs"))?;
     fs::create_dir_all(card_dir.join("output"))?;
 
@@ -1055,11 +1065,7 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
     let _ = fs::remove_file(&memory_out_file);
 
     // Render prompt template with actual values
-    let mut meta = Some(
-        meta_io
-            .read(card_dir)
-            .context("failed to read card metadata")?,
-    );
+    let mut meta = Some(existing);
     let memory_namespace = meta
         .as_ref()
         .map(memory::memory_namespace_from_meta)
@@ -1117,6 +1123,30 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
         }
     };
 
+    let timeout_seconds = meta.as_ref().and_then(|m| m.timeout_seconds).unwrap_or(3600);
+    let mut cmd = if strict_moth {
+        let agent = provider_env.get("MOTH_AGENT_BIN").map(std::ffi::OsString::from)
+            .or_else(|| std::env::var_os("MOTH_AGENT_BIN")).context("MOTH_AGENT_BIN is required for owned Moth route")?;
+        if !Path::new(&agent).is_absolute() { anyhow::bail!("MOTH_AGENT_BIN must be absolute"); }
+        let deadline_ms = timeout_seconds.checked_mul(1000).filter(|v| *v>0 && *v<=86400000).context("Moth owner deadline outside supported range")?;
+        let mut c = TokioCommand::new(agent);
+        c.arg("__moth_owner_v1").arg("--deadline-ms").arg(deadline_ms.to_string())
+            .arg("--capture-bytes").arg("67108864").arg("--input-bytes").arg("0").arg("--").arg(adapter);
+        c
+    } else if adapter.ends_with(".nu") {
+        let mut c = TokioCommand::new("nu");
+        let adapter_path = if std::path::Path::new(adapter).is_absolute() {
+            adapter.to_string()
+        } else {
+            format!("{}/{}", std::env::current_dir()?.display(), adapter)
+        };
+        c.arg(adapter_path);
+        c
+    } else {
+        TokioCommand::new(adapter)
+    };
+
+
     let stage = meta
         .as_ref()
         .map(|m| m.stage.clone())
@@ -1161,7 +1191,7 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
             completion_tokens: None,
             cost_usd: None,
             duration_s: None,
-            note: None,
+            note: strict_moth.then(|| reaper::MOTH_OWNER_UNRETIRED.to_string()),
         });
         run_idx = Some(m.runs.len().saturating_sub(1));
         meta_io
@@ -1169,21 +1199,8 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
             .context("failed to write run record before adapter spawn")?;
     }
 
-    let mut cmd = if adapter.ends_with(".nu") {
-        let mut c = TokioCommand::new("nu");
-        let adapter_path = if std::path::Path::new(adapter).is_absolute() {
-            adapter.to_string()
-        } else {
-            format!("{}/{}", std::env::current_dir()?.display(), adapter)
-        };
-        c.arg(adapter_path);
-        c
-    } else {
-        TokioCommand::new(adapter)
-    };
-
     #[cfg(unix)]
-    cmd.process_group(0);
+    if !strict_moth { cmd.process_group(0); }
 
     // Per-job target dir in /tmp — outside the workspace so it doesn't accumulate
     // inside worktrees. Deleted immediately after the adapter exits regardless of
@@ -1203,7 +1220,7 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
         .and_then(|m| m.timeout_seconds)
         .unwrap_or(3600);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_seconds);
-    let mut child = cmd
+    cmd
         .arg(&workdir)
         .arg(&prompt_file)
         .arg(&stdout_log)
@@ -1223,8 +1240,44 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
         .env("BOP_CARDS_DIR", cards_dir)
         .env("BOP_STAGE", &stage)
         .env("BOP_PROVIDER", provider_name)
-        .env("BOP_TARGET_DIR", &target_dir)
-        .spawn()
+        .env("BOP_TARGET_DIR", &target_dir);
+
+    let (exit_code, timed_out) = if strict_moth {
+        let owner = match crate::owner_client::start(run_record_id.clone(), cmd, Vec::new(), 67108864) {
+            Ok(owner)=>owner,
+            Err(crate::owner_client::StartError::NotSpawned(error))=>{
+                // This typed path proves Command::spawn never returned a child.
+                // Post-acquisition failure must never enter this branch.
+                if let Some(ref mut m)=meta {
+                    if let Some(index)=run_idx { if let Some(run)=m.runs.get_mut(index) {
+                        run.note=None;run.outcome="failed".into();run.ended_at=Some(Utc::now().to_rfc3339());
+                    } }
+                    if let Some(record)=m.stages.get_mut(&stage) { record.status=bop_core::StageStatus::Failed; }
+                    meta_io.write(card_dir,m).context("persist definitive owner spawn failure")?;
+                }
+                anyhow::bail!("owner not spawned: {error}");
+            }
+            Err(crate::owner_client::StartError::Retained(error))=>anyhow::bail!("owner acquisition retained: {error}"),
+        };
+        let pid = i32::try_from(owner.pid()).context("owner PID outside supported range")?;
+        fs::write(card_dir.join("logs/pid"), pid.to_string())?;
+        if let Err(e) = reaper::refresh_legacy_xattr_pid(card_dir,pid) { let _=util::append_log_line(&stderr_log,&format!("owner xattr: {e}")); }
+        let mut lease=lock::RunLease { run_id:run_record_id.clone(),pid,pid_start_time:started_at,started_at,heartbeat_at:started_at,host:util::host_name() };
+        let mut cancelled=false;
+        let completion=loop {
+            tokio::select! {
+                result=owner.wait()=>break result.map_err(anyhow::Error::msg)?,
+                signal=tokio::signal::ctrl_c(), if !cancelled => { let _=signal;cancelled=true;owner.cancel(); }
+                _=tokio::time::sleep(lock::LEASE_HEARTBEAT_INTERVAL)=>{ lease.heartbeat_at=Utc::now();let _=lock::write_run_lease(card_dir,&lease); }
+            }
+        };
+        owner.release().await.map_err(anyhow::Error::msg)?;
+        // These are adapter diagnostics; payload logs retain their existing paths.
+        if !completion.stdout.is_empty() { let _=util::append_log_line(&stderr_log,&String::from_utf8_lossy(&completion.stdout)); }
+        if !completion.stderr.is_empty() { let _=util::append_log_line(&stderr_log,&String::from_utf8_lossy(&completion.stderr)); }
+        (completion.exit_code(),completion.reason==2)
+    } else {
+    let mut child = cmd.spawn()
         .with_context(|| format!("failed to spawn adapter: {}", adapter))?;
 
     let pid = match child
@@ -1311,6 +1364,10 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
         status.and_then(|s| s.code()).unwrap_or(1)
     };
 
+    (exit_code, timed_out)
+    };
+
+    // For Moth, complete domain retirement and controller join were confirmed.
     // Adapter has exited — delete the ephemeral target dir immediately.
     // Nothing else needs it: build artifacts are only useful during the run.
     let _ = fs::remove_dir_all(&target_dir);
@@ -1354,6 +1411,7 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
 
         if let Some(idx) = run_idx {
             if let Some(run) = m.runs.get_mut(idx) {
+                if strict_moth { run.note = None; }
                 run.ended_at = Some(finished_at.to_rfc3339());
                 run.duration_s = duration_s;
                 run.outcome = if timed_out {
@@ -1385,6 +1443,7 @@ async fn run_card_with_meta_io<I: RunMetadataIo>(
         }
     }
 
+    if strict_moth { if let Some(ref m)=meta { meta_io.write(card_dir,m).context("persist confirmed owner retirement")?; } }
     Ok((exit_code, meta))
 }
 
@@ -2364,4 +2423,22 @@ mod tests {
             }
         }
     }
+    #[cfg(target_os="freebsd")]
+    #[tokio::test]
+    #[ignore="requires admitted native FreeBSD process-spawn path; authored, unrun"]
+    async fn definitive_owner_spawn_failure_clears_only_its_unretired_marker() {
+        let td=tempdir().unwrap();let cards=td.path().join("cards");let card=cards.join("running/no-owner.bop");
+        fs::create_dir_all(&card).unwrap();
+        let meta=Meta {id:"no-owner".into(),stage:"implement".into(),timeout_seconds:Some(1),..Default::default()};
+        write_meta(&card,&meta).unwrap();
+        let mut env=BTreeMap::new();
+        env.insert("MOTH_AGENT_BIN".into(),td.path().join("definitely-absent-agent").to_string_lossy().into_owned());
+        let result=run_card(&cards,&card,"bop-moth-adapter","moth",&env,None,75).await;
+        assert!(format!("{:#}",result.unwrap_err()).contains("owner not spawned"));
+        let meta=bop_core::read_meta(&card).unwrap();assert_eq!(meta.runs.len(),1);
+        assert!(!reaper::has_unretired_moth_owner(&meta));
+        assert_eq!(meta.runs[0].outcome,"failed");assert!(meta.runs[0].ended_at.is_some());
+        assert_eq!(meta.stages["implement"].status,bop_core::StageStatus::Failed);
+    }
+
 }

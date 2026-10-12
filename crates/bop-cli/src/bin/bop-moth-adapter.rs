@@ -10,18 +10,22 @@ use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitCode, Stdio};
-use std::sync::mpsc::{self, Receiver, SyncSender};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::ExitCode;
+use tokio::process::Command;
+#[path = "../owner_client.rs"]
+mod owner_client;
+
 
 use serde::Deserialize;
 
-const HELP_TIMEOUT: Duration = Duration::from_secs(3);
+const HELP_TIMEOUT_MS: u64 = 3000;
 const HELP_MAX_BYTES: usize = 128 * 1024;
 
-fn main() -> ExitCode {
-    match run() {
+#[tokio::main]
+async fn main() -> ExitCode {
+    let result = run().await;
+    owner_client::retirement_barrier().await;
+    match result {
         Ok(code) => code,
         Err(error) => {
             eprintln!("bop-moth-adapter: {error}");
@@ -30,7 +34,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<ExitCode, String> {
+async fn run() -> Result<ExitCode, String> {
     let args: Vec<OsString> = env::args_os().skip(1).collect();
     if args.len() != 5 {
         return Err(format!(
@@ -68,14 +72,14 @@ fn run() -> Result<ExitCode, String> {
         &card_dir,
         &logs_dir,
         &mut stderr_file,
-    );
+    ).await;
     if let Err(error) = &outcome {
         let _ = writeln!(stderr_file, "bop-moth-adapter: {error}");
     }
     outcome
 }
 
-fn run_validated(
+async fn run_validated(
     workdir: &Path,
     prompt_arg: &Path,
     stdout_log: &Path,
@@ -122,9 +126,10 @@ fn run_validated(
             return Err("MOTH_AGENT_BIN is not executable".into());
         }
     }
-    require_prompt_stdin_capability(&agent_bin)?;
+    require_prompt_stdin_capability(&agent_bin).await?;
 
     let mock = test_mock_mode(env::var_os("BOP_MOTH_TEST_MOCK"), cfg!(debug_assertions))?;
+    let mock_script = test_mock_script(env::var_os("BOP_MOTH_TEST_MOCK_SCRIPT"), mock, cfg!(debug_assertions))?;
     let runlog_dir = prepare_runlog_dir(logs_dir)?;
     let receipt = runlog_dir.join(format!("{run_id}.jsonl"));
     match fs::symlink_metadata(&receipt) {
@@ -135,197 +140,36 @@ fn run_validated(
     // Freeze the bytes before spawning Moth. This is a snapshot of the opened
     // file, not proof against a writer racing BOP's render/open boundary.
     let prompt = read_prompt_snapshot(&prompt_file)?;
-    let stdout_file = open_log(stdout_log, "stdout_log")?;
-    let child_stderr = stderr_file
-        .try_clone()
-        .map_err(|error| format!("stderr_log clone: {error}"))?;
-
-    let mut child = Command::new(&agent_bin);
-    child
-        .arg("run")
-        .arg("--runlog")
-        .arg(&runlog_dir)
-        .arg("--prompt-stdin")
-        .current_dir(workdir)
-        .env("BOP_RUN_ID", &run_id)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::from(stdout_file))
-        .stderr(Stdio::from(child_stderr));
-    if mock {
-        child.arg("--mock");
-    }
-
-    let mut child = match child.spawn() {
-        Ok(child) => child,
-        Err(error) => return Err(format!("failed to launch MOTH_AGENT_BIN: {error}")),
-    };
-    let mut child_stdin = match child.stdin.take() {
-        Some(stdin) => stdin,
-        None => {
-            terminate_and_reap(&mut child);
-            return Err("Moth child has no stdin pipe".into());
-        }
-    };
-    let write_result = child_stdin.write_all(&prompt);
-    drop(child_stdin);
-    if let Err(error) = write_result {
-        terminate_and_reap(&mut child);
-        return Err(format!(
-            "could not deliver complete prompt to Moth stdin: {error}"
-        ));
-    }
-    // ChildStdin is closed here, so Moth sees EOF before model
-    // or runlog work under the paired --prompt-stdin contract.
-    let status = match child.wait() {
-        Ok(status) => status,
-        Err(error) => {
-            terminate_and_reap(&mut child);
-            return Err(format!("wait for Moth: {error}"));
-        }
-    };
-    let code = match status.code() {
-        Some(code) => u8::try_from(code)
-            .map_err(|_| format!("Moth returned an unsupported exit code: {code}"))?,
-        None => return Err("Moth terminated without an exit code".into()),
-    };
-    if code == 0 {
-        validate_success_receipt(&receipt, &run_id)?;
-    }
+    let mut stdout_file = open_log(stdout_log, "stdout_log")?;
+    let mut command = owned_command(&agent_bin, 86400000, 67108864, prompt.len() as u64);
+    command.arg(&agent_bin).arg("run").arg("--runlog").arg(&runlog_dir).arg("--prompt-stdin")
+        .current_dir(workdir).env("BOP_RUN_ID", &run_id);
+    if let Some(path) = mock_script { command.arg("--mock-script").arg(path); }
+    else if mock { command.arg("--mock"); }
+    let owner = owner_client::start(format!("moth-run:{run_id}"), command, prompt, 67108864)?;
+    let completion = owner.release().await?;
+    stdout_file.write_all(&completion.stdout).map_err(|e| format!("stdout_log: {e}"))?;
+    stderr_file.write_all(&completion.stderr).map_err(|e| format!("stderr_log: {e}"))?;
+    let code = u8::try_from(completion.exit_code()).map_err(|_| "unsupported Moth exit code")?;
+    if code == 0 { validate_success_receipt(&receipt, &run_id)?; }
     Ok(ExitCode::from(code))
 }
 
-enum ProbeEvent {
-    Bytes(bool, Vec<u8>),
-    Eof(bool),
-    ReadError(String),
+fn owned_command(agent: &Path, deadline: u64, cap: usize, input: u64) -> Command {
+    let mut command=Command::new(agent);
+    command.arg("__moth_owner_v1").arg("--deadline-ms").arg(deadline.to_string())
+        .arg("--capture-bytes").arg(cap.to_string()).arg("--input-bytes").arg(input.to_string()).arg("--");
+    command
 }
-
-fn pump_probe(mut reader: impl Read + Send + 'static, is_stdout: bool, tx: SyncSender<ProbeEvent>) {
-    let mut chunk = [0u8; 4096];
-    loop {
-        let event = match reader.read(&mut chunk) {
-            Ok(0) => ProbeEvent::Eof(is_stdout),
-            Ok(n) => ProbeEvent::Bytes(is_stdout, chunk[..n].to_vec()),
-            Err(error) => ProbeEvent::ReadError(error.to_string()),
-        };
-        let terminal = !matches!(event, ProbeEvent::Bytes(_, _));
-        if tx.send(event).is_err() || terminal {
-            return;
-        }
-    }
-}
-
-fn terminate_and_reap(child: &mut Child) {
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
-fn require_prompt_stdin_capability(agent_bin: &Path) -> Result<(), String> {
-    // A legacy CLI can interpret an unknown option as literal prompt text.
-    // Help is a bounded capability hint, not executable attestation.
-    let mut child = Command::new(agent_bin)
-        .arg("run")
-        .arg("--help")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("MOTH_AGENT_BIN capability probe: {error}"))?;
-    let stdout = match child.stdout.take() {
-        Some(stdout) => stdout,
-        None => {
-            terminate_and_reap(&mut child);
-            return Err("help probe stdout pipe missing".into());
-        }
-    };
-    let stderr = match child.stderr.take() {
-        Some(stderr) => stderr,
-        None => {
-            terminate_and_reap(&mut child);
-            return Err("help probe stderr pipe missing".into());
-        }
-    };
-    let (tx, rx): (SyncSender<ProbeEvent>, Receiver<ProbeEvent>) = mpsc::sync_channel(8);
-    let out_thread = {
-        let tx = tx.clone();
-        thread::spawn(move || pump_probe(stdout, true, tx))
-    };
-    let err_thread = thread::spawn(move || pump_probe(stderr, false, tx));
-    let started = Instant::now();
-    let mut stdout_bytes = Vec::new();
-    let mut stderr_bytes = Vec::new();
-    let mut total_bytes = 0usize;
-    let mut eof_count = 0;
-    let mut status = None;
-    let result = (|| -> Result<(), String> {
-        loop {
-            if status.is_none() {
-                status = child
-                    .try_wait()
-                    .map_err(|error| format!("help probe wait: {error}"))?;
-            }
-            if status.is_some() && eof_count == 2 {
-                break;
-            }
-            let remaining = HELP_TIMEOUT.saturating_sub(started.elapsed());
-            if remaining.is_zero() {
-                return Err("Moth help capability probe timed out".into());
-            }
-            match rx.recv_timeout(remaining.min(Duration::from_millis(25))) {
-                Ok(ProbeEvent::Bytes(is_stdout, chunk)) => {
-                    let new_len = total_bytes
-                        .checked_add(chunk.len())
-                        .ok_or("Moth help output length overflow")?;
-                    if new_len > HELP_MAX_BYTES {
-                        return Err("Moth help capability probe exceeded output limit".into());
-                    }
-                    let stream = if is_stdout {
-                        &mut stdout_bytes
-                    } else {
-                        &mut stderr_bytes
-                    };
-                    stream
-                        .try_reserve(chunk.len())
-                        .map_err(|error| format!("Moth help output allocation: {error}"))?;
-                    stream.extend_from_slice(&chunk);
-                    total_bytes = new_len;
-                }
-                Ok(ProbeEvent::Eof(_is_stdout)) => eof_count += 1,
-                Ok(ProbeEvent::ReadError(error)) => {
-                    return Err(format!("Moth help output read: {error}"));
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err("Moth help output readers stopped without EOF".into());
-                }
-            }
-        }
-        let marker = b"--prompt-stdin";
-        let advertised = stdout_bytes
-            .windows(marker.len())
-            .any(|window| window == marker)
-            || stderr_bytes
-                .windows(marker.len())
-                .any(|window| window == marker);
-        if !status.expect("status checked above").success() || !advertised {
-            return Err("MOTH_AGENT_BIN lacks required agent run --prompt-stdin support".into());
-        }
-        Ok(())
-    })();
-    if result.is_err() {
-        drop(rx); // Release bounded-channel senders before leaving.
-        terminate_and_reap(&mut child);
-        // A hostile grandchild may keep a pipe open. Do not join blocked
-        // readers on this failure path; the adapter exits immediately.
-        return result;
-    }
-    out_thread
-        .join()
-        .map_err(|_| "Moth help stdout reader panicked")?;
-    err_thread
-        .join()
-        .map_err(|_| "Moth help stderr reader panicked")?;
-    result
+async fn require_prompt_stdin_capability(agent_bin: &Path) -> Result<(), String> {
+    let mut command=owned_command(agent_bin, HELP_TIMEOUT_MS, HELP_MAX_BYTES, 0);
+    command.arg(agent_bin).arg("run").arg("--help");
+    let completion=owner_client::start("moth-capability".into(),command,Vec::new(),HELP_MAX_BYTES)?.release().await?;
+    let marker=b"--prompt-stdin";
+    let advertised=completion.stdout.windows(marker.len()).any(|w| w==marker)
+        || completion.stderr.windows(marker.len()).any(|w| w==marker);
+    if completion.exit_code()!=0 || !advertised { return Err("MOTH_AGENT_BIN lacks required agent run --prompt-stdin support".into()); }
+    Ok(())
 }
 
 fn read_prompt_snapshot(prompt_file: &Path) -> Result<Vec<u8>, String> {
@@ -578,6 +422,16 @@ fn valid_bop_run_id(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+fn test_mock_script(value:Option<OsString>, mock:bool, debug:bool)->Result<Option<PathBuf>,String> {
+    let Some(raw)=value else { return Ok(None); };
+    if !debug || !mock { return Err("BOP_MOTH_TEST_MOCK_SCRIPT requires explicit debug-only mock mode".into()); }
+    let path=PathBuf::from(raw);
+    if !path.is_absolute() { return Err("BOP_MOTH_TEST_MOCK_SCRIPT must be absolute".into()); }
+    let meta=fs::symlink_metadata(&path).map_err(|e|format!("mock script metadata: {e}"))?;
+    if meta.file_type().is_symlink() || !meta.is_file() { return Err("mock script must be a regular non-symlink file".into()); }
+    Ok(Some(path))
+}
+
 fn test_mock_mode(value: Option<OsString>, debug_assertions: bool) -> Result<bool, String> {
     match value.as_deref().and_then(OsStr::to_str) {
         None if value.is_none() => Ok(false),
@@ -590,7 +444,7 @@ fn test_mock_mode(value: Option<OsString>, debug_assertions: bool) -> Result<boo
 
 #[cfg(test)]
 mod tests {
-    use super::{test_mock_mode, valid_bop_run_id, validate_success_receipt};
+    use super::{test_mock_script, test_mock_mode, valid_bop_run_id, validate_success_receipt};
     use std::ffi::OsString;
     use std::fs;
 
@@ -604,6 +458,10 @@ mod tests {
 
     #[test]
     fn mock_mode_requires_explicit_debug_only_switch() {
+        assert!(test_mock_script(None, false, false).unwrap().is_none());
+        assert!(test_mock_script(Some(OsString::from("/script.json")), true, false).is_err());
+        assert!(test_mock_script(Some(OsString::from("/script.json")), false, true).is_err());
+        assert!(test_mock_script(Some(OsString::from("relative.json")), true, true).is_err());
         assert!(!test_mock_mode(None, true).unwrap());
         assert!(!test_mock_mode(Some(OsString::from("0")), true).unwrap());
         assert!(test_mock_mode(Some(OsString::from("1")), true).unwrap());

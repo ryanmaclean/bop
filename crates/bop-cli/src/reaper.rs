@@ -11,6 +11,32 @@ use bop_core::{write_meta, StageStatus};
 
 use crate::{decision::DecisionPlaneConfig, lock, quicklook};
 
+/// Reserved prefix in the existing canonical run note. A parent PID is not
+/// retirement evidence: a crashed native owner can leave adopted descendants.
+/// Keep this marker until the live owner confirms complete retirement and is reaped.
+pub const MOTH_OWNER_UNRETIRED: &str = "moth-owner-v1:unretired";
+
+pub fn has_unretired_moth_owner(meta: &bop_core::Meta) -> bool {
+    meta.runs.iter().any(|run| {
+        run.note.as_deref().is_some_and(|note| note.starts_with(MOTH_OWNER_UNRETIRED))
+    })
+}
+
+fn recovery_metadata(card_dir: &Path) -> Option<bop_core::Meta> {
+    match bop_core::read_meta(card_dir) {
+        Ok(meta) if !has_unretired_moth_owner(&meta) => Some(meta),
+        Ok(_) => {
+            eprintln!("retaining card {}: Moth owner retirement is unconfirmed", card_dir.display());
+            None
+        }
+        Err(error) => {
+            // Reconstructing minimal metadata would erase unknown ownership.
+            eprintln!("retaining card {}: unreadable ownership metadata: {error}", card_dir.display());
+            None
+        }
+    }
+}
+
 pub async fn reap_orphans(
     running_dir: &Path,
     pending_dir: &Path,
@@ -37,6 +63,10 @@ pub async fn reap_orphans(
         if card_dir.extension().and_then(|s| s.to_str()).unwrap_or("") != "bop" {
             continue;
         }
+
+        let Some(observed_meta) = recovery_metadata(&card_dir) else {
+            continue;
+        };
 
         let pid = match read_pid(&card_dir).await {
             Ok(pid) => pid,
@@ -66,7 +96,7 @@ pub async fn reap_orphans(
             continue;
         }
 
-        let mut meta = bop_core::read_meta(&card_dir).ok();
+        let mut meta = Some(observed_meta);
         let retry_count = meta.as_ref().and_then(|m| m.retry_count).unwrap_or(0);
         let next_retry = retry_count.saturating_add(1);
         let move_to_failed = next_retry > max_retries;
@@ -346,6 +376,10 @@ pub async fn recover_orphans(
             continue;
         }
 
+        let Some(observed_meta) = recovery_metadata(&card_dir) else {
+            continue;
+        };
+
         let pid = match read_pid(&card_dir).await {
             Ok(pid) => pid,
             Err(error) => {
@@ -365,26 +399,7 @@ pub async fn recover_orphans(
             continue;
         }
 
-        // Try to read meta.json, create minimal one if corrupt/missing
-        let meta = match bop_core::read_meta(&card_dir) {
-            Ok(m) => m,
-            Err(_) => {
-                // Corrupt or missing meta.json - create minimal recovery meta
-                let id = card_dir
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-                let minimal_meta = bop_core::Meta {
-                    id: id.clone(),
-                    stage: "pending".to_string(),
-                    ..Default::default()
-                };
-                let _ = bop_core::write_meta(&card_dir, &minimal_meta);
-                minimal_meta
-            }
-        };
-        let mut meta = meta;
+        let mut meta = observed_meta;
         crate::decision::record_orphan_recovery(&mut meta, &decision_cfg, pid_dead, false, false);
         let _ = bop_core::write_meta(&card_dir, &meta);
 
@@ -793,14 +808,10 @@ mod tests {
 
         let recovered = recover_orphans(&running, &pending).await.unwrap();
 
-        assert_eq!(recovered.len(), 1);
-        assert_eq!(recovered[0], "corrupt-card");
-        assert!(pending.join("corrupt-card.bop").exists());
-
-        // Verify minimal meta was created
-        let recovered_meta = bop_core::read_meta(&pending.join("corrupt-card.bop")).unwrap();
-        assert_eq!(recovered_meta.id, "corrupt-card");
-        assert_eq!(recovered_meta.stage, "pending");
+        assert!(recovered.is_empty());
+        assert!(card_dir.exists());
+        assert!(!pending.join("corrupt-card.bop").exists());
+        assert_eq!(fs::read_to_string(card_dir.join("meta.json")).unwrap(), "{ invalid json }");
     }
 
     #[tokio::test]
@@ -815,14 +826,10 @@ mod tests {
 
         let recovered = recover_orphans(&running, &pending).await.unwrap();
 
-        assert_eq!(recovered.len(), 1);
-        assert_eq!(recovered[0], "missing-meta");
-        assert!(pending.join("missing-meta.bop").exists());
-
-        // Verify minimal meta was created
-        let recovered_meta = bop_core::read_meta(&pending.join("missing-meta.bop")).unwrap();
-        assert_eq!(recovered_meta.id, "missing-meta");
-        assert_eq!(recovered_meta.stage, "pending");
+        assert!(recovered.is_empty());
+        assert!(card_dir.exists());
+        assert!(!pending.join("missing-meta.bop").exists());
+        assert!(!card_dir.join("meta.json").exists());
     }
 
     #[tokio::test]
@@ -868,5 +875,32 @@ mod tests {
         assert_eq!(recovered.len(), 1);
         assert_eq!(recovered[0], "no-pid");
         assert!(pending.join("no-pid.bop").exists());
+    }
+
+    #[tokio::test]
+    async fn both_recovery_paths_preserve_unretired_owner_then_accept_confirmed_retirement() {
+        let td=tempdir().unwrap();
+        let (running,pending,failed)=setup_card_dirs(td.path());
+        let mut meta=test_meta("owned",Some(0));
+        meta.runs.push(serde_json::from_value(serde_json::json!({
+            "run_id":"0123456789abcdef0123456789abcdef", "stage":"implement",
+            "provider":"moth", "model":"test", "adapter":"bop-moth-adapter",
+            "started_at":"2026-10-11T00:00:00Z", "outcome":"running",
+            "note":MOTH_OWNER_UNRETIRED
+        })).unwrap());
+        create_running_card(&running,"owned",999999,&meta);
+        let card=running.join("owned.bop");
+        let before=fs::read(card.join("meta.json")).unwrap();
+        reap_orphans(&running,&pending,&failed,3,Duration::from_secs(1)).await.unwrap();
+        assert!(recover_orphans(&running,&pending).await.unwrap().is_empty());
+        assert_eq!(fs::read(card.join("meta.json")).unwrap(),before);
+        assert!(!pending.join("owned.bop").exists());
+        // Simulate the production transition only after a live owner retirement
+        // barrier. This metadata unit case does not prove native retirement.
+        meta.runs[0].note=None;
+        meta.runs[0].ended_at=Some("2026-10-11T00:00:01Z".into());
+        meta.runs[0].outcome="failed".into();
+        write_meta(&card,&meta).unwrap();
+        assert_eq!(recover_orphans(&running,&pending).await.unwrap(),vec!["owned"]);
     }
 }

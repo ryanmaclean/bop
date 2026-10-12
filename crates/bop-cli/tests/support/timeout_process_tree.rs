@@ -21,7 +21,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut prompt = Vec::new();
             std::io::stdin().read_to_end(&mut prompt)?;
             fs::write(prompt_path, &prompt)?;
-            let mut grandchild = Command::new(env::current_exe()?)
+            if let Some(path)=env::var_os("BOP_TIMEOUT_TREE_TARGET_DIR") {
+                fs::create_dir_all(&path)?;
+                fs::write(std::path::Path::new(&path).join("owned-fixture"),b"native work began")?;
+            }
+            let mut command = Command::new(env::current_exe()?);
+            #[cfg(unix)]
+            if env::var_os("BOP_TIMEOUT_TREE_SEPARATE_SESSION").is_some() {
+                use std::os::unix::process::CommandExt;
+                // Only the async-signal-safe native setsid call runs after fork.
+                unsafe { command.pre_exec(|| { if libc::setsid()==-1 { Err(std::io::Error::last_os_error()) } else { Ok(()) } }); }
+            }
+            let mut grandchild = command
                 .arg("grandchild")
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
@@ -29,12 +40,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .spawn()?;
             let _ = grandchild.wait()?;
         }
-        Some("grandchild") => {
+        Some("grandchild" | "sentinel") => {
             let pid_file = required_path("BOP_TIMEOUT_TREE_PID_FILE")?;
             let beat_file = required_path("BOP_TIMEOUT_TREE_BEAT_FILE")?;
             fs::write(pid_file, std::process::id().to_string())?;
             // Finite lifetime bounds any orphan if the regression reappears.
-            for _ in 0..150 {
+            let ticks=if args.first().map(String::as_str)==Some("sentinel") { 1200 } else { 150 };
+            for _ in 0..ticks {
                 OpenOptions::new()
                     .create(true)
                     .append(true)
