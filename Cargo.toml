@@ -23,8 +23,6 @@ thiserror = "2"
 walkdir = "2"
 url = "2"
 
-dirs = "5.0"
-
 [profile.release]
 opt-level = 3
 lto = "thin"

@@ -5,7 +5,8 @@
 /// `Meta` + optional AC plan data; renderers never read files.
 use std::collections::HashMap;
 
-use bop_core::Meta;
+use bop_core::{Meta, StageStatus};
+use chrono::{DateTime, Utc};
 
 use crate::termcaps::{TermCaps, TermLevel};
 
@@ -42,7 +43,7 @@ pub struct CardView {
     pub progress: u8,
     /// Provider from the most recent run (e.g. "claude", "codex").
     pub provider: Option<String>,
-    /// Wall-clock seconds from the most recent run.
+    /// Live seconds for a running stage, or duration of the most recent run.
     pub elapsed_s: Option<u64>,
     /// AC plan phase name (from `implementation_plan.json`).
     pub phase_name: Option<String>,
@@ -106,7 +107,41 @@ pub trait CardRenderer {
 /// Fields not available from `Meta` (e.g. `phase_name`, `phase_frac`) are set
 /// to defaults — the caller may enrich them from AC plan data afterward.
 pub fn from_meta(meta: &Meta, state: &str) -> CardView {
+    from_meta_at(meta, state, Utc::now())
+}
+
+fn from_meta_at(meta: &Meta, state: &str, now: DateTime<Utc>) -> CardView {
     let last_run = meta.runs.last();
+    let running_started = (state == "running")
+        .then(|| {
+            meta.stages
+                .get(&meta.stage)
+                .filter(|record| record.status == StageStatus::Running)
+                .and_then(|record| record.started.as_ref().cloned())
+                .or_else(|| {
+                    last_run
+                        .filter(|run| run.outcome == "running" && run.ended_at.is_none())
+                        .and_then(|run| DateTime::parse_from_rfc3339(&run.started_at).ok())
+                        .map(|started| started.with_timezone(&Utc))
+                })
+        })
+        .flatten();
+    let elapsed_s = running_started
+        .map(|started| now.signed_duration_since(started).num_seconds().max(0) as u64)
+        .or_else(|| last_run.and_then(|run| run.duration_s));
+    let progress = meta.progress.unwrap_or_else(|| {
+        if state != "running" {
+            return 0;
+        }
+        let Some(elapsed) = elapsed_s else {
+            return 0;
+        };
+        let timeout = meta.timeout_seconds.unwrap_or(3600);
+        if timeout == 0 {
+            return 100;
+        }
+        ((u128::from(elapsed) * 100 / u128::from(timeout)).min(100)) as u8
+    });
 
     CardView {
         id: meta.id.clone(),
@@ -116,11 +151,11 @@ pub fn from_meta(meta: &Meta, state: &str) -> CardView {
         title: meta.title.clone().unwrap_or_else(|| meta.id.clone()),
         stage: meta.stage.clone(),
         priority: meta.priority,
-        progress: meta.progress.unwrap_or(0),
+        progress,
         provider: last_run
             .map(|r| r.provider.clone())
             .filter(|s| !s.is_empty()),
-        elapsed_s: last_run.and_then(|r| r.duration_s),
+        elapsed_s,
         phase_name: None,
         phase_frac: 0.0,
         failure_reason: meta.failure_reason.clone(),
@@ -189,7 +224,8 @@ fn select_renderer(caps: &TermCaps) -> Box<dyn CardRenderer> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bop_core::{Meta, RunRecord};
+    use bop_core::{Meta, RunRecord, StageRecord};
+    use chrono::{Duration as ChronoDuration, TimeZone};
 
     #[test]
     fn from_meta_basic_fields() {
@@ -213,6 +249,73 @@ mod tests {
         assert_eq!(view.priority, Some(2));
         assert!(view.provider.is_none());
         assert!(view.elapsed_s.is_none());
+    }
+
+    #[test]
+    fn running_card_uses_stage_start_and_timeout_when_progress_is_absent() {
+        let now = Utc
+            .with_ymd_and_hms(2026, 10, 11, 12, 0, 0)
+            .single()
+            .unwrap();
+        let started = now - ChronoDuration::minutes(15);
+        let mut meta = Meta {
+            id: "live-card".into(),
+            stage: "implement".into(),
+            timeout_seconds: Some(1800),
+            runs: vec![RunRecord {
+                outcome: "running".into(),
+                started_at: started.to_rfc3339(),
+                duration_s: None,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        meta.stages.insert(
+            "implement".into(),
+            StageRecord {
+                status: StageStatus::Running,
+                agent: None,
+                provider: None,
+                duration_s: None,
+                started: Some(started),
+                blocked_by: None,
+            },
+        );
+
+        let view = from_meta_at(&meta, "running", now);
+        assert_eq!(view.elapsed_s, Some(900));
+        assert_eq!(view.progress, 50);
+
+        meta.progress = Some(0);
+        assert_eq!(from_meta_at(&meta, "running", now).progress, 0);
+        meta.progress = None;
+        assert_eq!(
+            from_meta_at(&meta, "running", now + ChronoDuration::hours(1)).progress,
+            100
+        );
+    }
+
+    #[test]
+    fn running_card_falls_back_to_run_start_when_stage_record_is_missing() {
+        let now = Utc
+            .with_ymd_and_hms(2026, 10, 11, 12, 0, 0)
+            .single()
+            .unwrap();
+        let meta = Meta {
+            id: "run-only-card".into(),
+            stage: "implement".into(),
+            runs: vec![RunRecord {
+                outcome: "running".into(),
+                started_at: (now - ChronoDuration::minutes(15)).to_rfc3339(),
+                duration_s: None,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let view = from_meta_at(&meta, "running", now);
+        assert_eq!(view.elapsed_s, Some(900));
+        assert_eq!(view.progress, 25); // Dispatcher defaults to a 3600-second timeout.
     }
 
     #[test]

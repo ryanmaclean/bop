@@ -63,6 +63,11 @@ def main [
         $"($env.MOCK_STDOUT_TEXT)\n" | save --append $stdout_abs
     }
 
+    if "MOCK_ECHO_BOP_RUN_ID" in $env {
+        let run_id = if "BOP_RUN_ID" in $env { $env.BOP_RUN_ID } else { "<missing>" }
+        $"\nBOP_RUN_ID=($run_id)\n" | save --append $stdout_abs
+    }
+
     exit (if "MOCK_EXIT" in $env { $env.MOCK_EXIT | into int } else { 0 })
 }
 

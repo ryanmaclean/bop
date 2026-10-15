@@ -15,7 +15,11 @@ def main [
     exit 1
   }
 
-  ^cargo deny check licenses
+  # Keep Cargo subcommand dispatch and default policy/config selection unchanged.
+  let result = (do { ^cargo deny check licenses } | complete)
+  print --no-newline $result.stdout
+  print --stderr --no-newline $result.stderr
+  if $result.exit_code != 0 { exit $result.exit_code }
   print "License audit passed."
 }
 
