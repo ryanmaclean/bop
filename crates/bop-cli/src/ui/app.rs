@@ -53,7 +53,9 @@ pub enum AppEvent {
 pub enum Mode {
     /// Default: column/card navigation, action keys active.
     Normal,
-    /// `/` filter active — keystrokes go to nucleo query input.
+    /// `/` global search overlay active — keystrokes go to search input.
+    Search,
+    /// Legacy inline filter mode — keystrokes go to nucleo query input.
     Filter,
     /// Enter key opened the action popup overlay.
     ActionPopup,
@@ -88,6 +90,39 @@ pub enum AppTab {
     Detail(String),
     /// Integrated log pane for a card (`logs/stdout.log`).
     Log(String),
+}
+
+/// One search result row in the global search overlay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchResult {
+    /// Card ID for selection and jump.
+    pub id: String,
+    /// Card state badge shown in the result row.
+    pub state: String,
+}
+
+/// Mutable state for the global search overlay.
+#[derive(Debug, Clone)]
+pub struct SearchState {
+    /// Current query text typed by the user.
+    pub query: String,
+    /// Flat list of matches across all state columns.
+    pub results: Vec<SearchResult>,
+    /// Selected row in `results`.
+    pub selected: usize,
+    /// Card selected before search opened (for Esc restore).
+    pub previous_card_id: Option<String>,
+}
+
+impl SearchState {
+    fn new(previous_card_id: Option<String>) -> Self {
+        Self {
+            query: String::new(),
+            results: Vec::new(),
+            selected: 0,
+            previous_card_id,
+        }
+    }
 }
 
 // ── KanbanColumn ────────────────────────────────────────────────────────────
@@ -167,6 +202,8 @@ pub struct App {
     /// Nucleo filter state — holds the matcher and query for fuzzy filtering.
     /// Present when filter mode is active or a confirmed filter is applied.
     pub filter_state: Option<FilterState>,
+    /// Global search overlay state (`/` in kanban mode).
+    pub search_state: Option<SearchState>,
     /// Current interaction mode.
     pub mode: Mode,
     /// Active body tab (`Kanban`, `Factory`, `Detail(card_id)`, or `Log(card_id)`).
@@ -271,6 +308,7 @@ impl App {
             col_focus,
             filter: None,
             filter_state: None,
+            search_state: None,
             mode: Mode::Normal,
             tab: AppTab::Kanban,
             factory_tab: FactoryTabState::new(),
@@ -441,6 +479,124 @@ impl App {
         }
         self.filter_state = Some(state);
         self.mode = Mode::Filter;
+    }
+
+    /// Enter global search mode and seed results from all cards.
+    pub fn enter_search_mode(&mut self) {
+        let previous_card_id = self.selected_card().map(|card| card.id.clone());
+        self.search_state = Some(SearchState::new(previous_card_id));
+        self.refresh_search_results();
+        self.mode = Mode::Search;
+    }
+
+    /// Append one character to the search query and refresh results.
+    pub fn search_push_char(&mut self, c: char) {
+        if let Some(search) = self.search_state.as_mut() {
+            search.query.push(c);
+        }
+        self.refresh_search_results();
+    }
+
+    /// Remove one character from the search query and refresh results.
+    pub fn search_backspace(&mut self) {
+        if let Some(search) = self.search_state.as_mut() {
+            search.query.pop();
+        }
+        self.refresh_search_results();
+    }
+
+    /// Move global-search selection down with wrap-around.
+    pub fn search_select_next(&mut self) {
+        let Some(search) = self.search_state.as_mut() else {
+            return;
+        };
+        if search.results.is_empty() {
+            return;
+        }
+        search.selected = (search.selected + 1) % search.results.len();
+    }
+
+    /// Move global-search selection up with wrap-around.
+    pub fn search_select_prev(&mut self) {
+        let Some(search) = self.search_state.as_mut() else {
+            return;
+        };
+        if search.results.is_empty() {
+            return;
+        }
+        search.selected = if search.selected == 0 {
+            search.results.len() - 1
+        } else {
+            search.selected - 1
+        };
+    }
+
+    /// Confirm search selection and jump focus to the selected card.
+    pub fn confirm_search(&mut self) {
+        let selected_id = self
+            .search_state
+            .as_ref()
+            .and_then(|search| search.results.get(search.selected))
+            .map(|result| result.id.clone());
+
+        self.search_state = None;
+        self.mode = Mode::Normal;
+
+        if let Some(card_id) = selected_id {
+            let _ = self.select_card_by_id(&card_id);
+        }
+    }
+
+    /// Cancel search and restore the pre-search card focus.
+    pub fn cancel_search(&mut self) {
+        let previous_id = self
+            .search_state
+            .as_ref()
+            .and_then(|search| search.previous_card_id.clone());
+
+        self.search_state = None;
+        self.mode = Mode::Normal;
+
+        if let Some(card_id) = previous_id {
+            let _ = self.select_card_by_id(&card_id);
+        }
+    }
+
+    /// Recompute global search results from the current query.
+    pub fn refresh_search_results(&mut self) {
+        let Some(query) = self
+            .search_state
+            .as_ref()
+            .map(|search| search.query.clone())
+        else {
+            return;
+        };
+        let results = self.search_results_for_query(&query);
+        if let Some(search) = self.search_state.as_mut() {
+            search.results = results;
+            if search.results.is_empty() {
+                search.selected = 0;
+            } else if search.selected >= search.results.len() {
+                search.selected = search.results.len() - 1;
+            }
+        }
+    }
+
+    /// Flat search over all cards by case-insensitive ID substring.
+    fn search_results_for_query(&self, query: &str) -> Vec<SearchResult> {
+        let needle = query.to_ascii_lowercase();
+        let mut results = Vec::new();
+        for column in &self.columns {
+            for card in &column.cards {
+                if needle.is_empty() || card.id.to_ascii_lowercase().contains(&needle) {
+                    results.push(SearchResult {
+                        id: card.id.clone(),
+                        state: column.state.clone(),
+                    });
+                }
+            }
+        }
+        results
     }
 
     /// Confirm the current filter and return to Normal mode.
@@ -877,6 +1033,10 @@ impl App {
         // Keep selection anchored to the detail card while panel is open.
         if let Some(card_id) = self.detail_card_id().map(str::to_owned) {
             let _ = self.select_card_by_id(&card_id);
+        }
+
+        if self.mode == Mode::Search {
+            self.refresh_search_results();
         }
 
         // Detect new completions for the event ticker.
@@ -1403,10 +1563,71 @@ mod tests {
     }
 
     #[test]
+    fn search_matches_across_all_states() {
+        let td = tempdir().unwrap();
+        setup_card_in_state(td.path(), "pending", "alpha-task");
+        setup_card_in_state(td.path(), "running", "beta-task");
+        setup_card_in_state(td.path(), "done", "alpha-done");
+
+        let mut app = App::new(td.path()).unwrap();
+        app.enter_search_mode();
+        app.search_push_char('a');
+        app.search_push_char('l');
+        app.search_push_char('p');
+
+        let state = app.search_state.as_ref().unwrap();
+        let ids: Vec<&str> = state.results.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, vec!["alpha-task", "alpha-done"]);
+    }
+
+    #[test]
+    fn confirm_search_jumps_focus_to_selected_card() {
+        let td = tempdir().unwrap();
+        setup_card_in_state(td.path(), "pending", "api-alpha");
+        setup_card_in_state(td.path(), "running", "api-bravo");
+
+        let mut app = App::new(td.path()).unwrap();
+        app.enter_search_mode();
+        if let Some(search) = app.search_state.as_mut() {
+            search.query = "bravo".into();
+        }
+        app.refresh_search_results();
+
+        app.confirm_search();
+
+        assert_eq!(app.mode, Mode::Normal);
+        let selected = app.selected_card().unwrap();
+        assert_eq!(selected.id, "api-bravo");
+        let focused = app.focused_column().unwrap();
+        assert_eq!(focused.state, "running");
+    }
+
+    #[test]
+    fn cancel_search_restores_previous_selection() {
+        let td = tempdir().unwrap();
+        setup_card_in_state(td.path(), "pending", "alpha");
+        setup_card_in_state(td.path(), "running", "beta");
+
+        let mut app = App::new(td.path()).unwrap();
+        let _ = app.select_card_by_id("beta");
+
+        app.enter_search_mode();
+        app.search_push_char('a');
+        app.cancel_search();
+
+        assert_eq!(app.mode, Mode::Normal);
+        let selected = app.selected_card().unwrap();
+        assert_eq!(selected.id, "beta");
+        let focused = app.focused_column().unwrap();
+        assert_eq!(focused.state, "running");
+    }
+
+    #[test]
     fn mode_enum_variants() {
         // Verify all modes are distinct.
         let modes = [
             Mode::Normal,
+            Mode::Search,
             Mode::Filter,
             Mode::ActionPopup,
             Mode::Detail,

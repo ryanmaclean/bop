@@ -47,6 +47,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
 
     match app.mode {
         Mode::Normal => handle_normal(app, key),
+        Mode::Search => handle_search(app, key),
         Mode::Filter => handle_filter(app, key),
         Mode::ActionPopup => handle_action_popup(app, key),
         Mode::Detail => handle_detail(app, key),
@@ -90,6 +91,10 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
             app.open_detail_for_selected();
         }
         KeyCode::Char('/') => {
+            app.enter_search_mode();
+        }
+        KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            // Legacy inline filter is still available on Ctrl+F.
             app.enter_filter_mode();
         }
         KeyCode::Enter => {
@@ -222,6 +227,28 @@ fn handle_log_tab(app: &mut App, key: KeyEvent) {
         KeyCode::Char('L') | KeyCode::Esc => {
             app.close_log_pane();
         }
+        _ => {}
+    }
+}
+
+// ── Filter mode ─────────────────────────────────────────────────────────────
+
+/// Handle key events in global Search mode.
+///
+/// Keystrokes update the search query. Special keys:
+/// - `Esc` — cancel search and restore previous selection
+/// - `Enter` — jump to selected result and return to kanban
+/// - `Backspace` — delete last character from query
+/// - `↑` / `↓` — move selected search result
+/// - Any printable `Char` — append to query
+fn handle_search(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => app.cancel_search(),
+        KeyCode::Enter => app.confirm_search(),
+        KeyCode::Backspace => app.search_backspace(),
+        KeyCode::Up => app.search_select_prev(),
+        KeyCode::Down => app.search_select_next(),
+        KeyCode::Char(c) => app.search_push_char(c),
         _ => {}
     }
 }
@@ -803,6 +830,7 @@ mod tests {
             col_focus,
             filter: None,
             filter_state: None,
+            search_state: None,
             mode: Mode::Normal,
             tab: AppTab::Kanban,
             factory_tab: FactoryTabState::new(),
@@ -1061,6 +1089,58 @@ mod tests {
         handle_key(&mut app, key(KeyCode::Char('l')));
         // Should not have moved focus
         assert_eq!(app.col_focus, 0);
+    }
+
+    #[test]
+    fn slash_enters_search_mode() {
+        let columns = vec![KanbanColumn::new(
+            "pending",
+            vec![test_card("alpha", "pending"), test_card("bravo", "pending")],
+            None,
+        )];
+        let mut app = test_app(columns);
+
+        handle_key(&mut app, key(KeyCode::Char('/')));
+        assert_eq!(app.mode, Mode::Search);
+        let search = app.search_state.as_ref().unwrap();
+        assert_eq!(search.results.len(), 2);
+    }
+
+    #[test]
+    fn search_enter_jumps_to_result_and_returns_to_normal() {
+        let columns = vec![
+            KanbanColumn::new("pending", vec![test_card("alpha-task", "pending")], None),
+            KanbanColumn::new("running", vec![test_card("build-ui", "running")], None),
+        ];
+        let mut app = test_app(columns);
+
+        handle_key(&mut app, key(KeyCode::Char('/')));
+        handle_key(&mut app, key(KeyCode::Char('b')));
+        handle_key(&mut app, key(KeyCode::Char('u')));
+        handle_key(&mut app, key(KeyCode::Enter));
+
+        assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.selected_card().unwrap().id, "build-ui");
+        assert_eq!(app.focused_column().unwrap().state, "running");
+    }
+
+    #[test]
+    fn search_esc_restores_previous_selection() {
+        let columns = vec![
+            KanbanColumn::new("pending", vec![test_card("alpha-task", "pending")], None),
+            KanbanColumn::new("running", vec![test_card("build-ui", "running")], None),
+        ];
+        let mut app = test_app(columns);
+        app.col_focus = 1;
+        app.columns[1].list_state.select(Some(0));
+
+        handle_key(&mut app, key(KeyCode::Char('/')));
+        handle_key(&mut app, key(KeyCode::Char('a')));
+        handle_key(&mut app, key(KeyCode::Esc));
+
+        assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.selected_card().unwrap().id, "build-ui");
+        assert_eq!(app.focused_column().unwrap().state, "running");
     }
 
     // ── Detail mode tests ───────────────────────────────────────────────

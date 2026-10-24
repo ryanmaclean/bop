@@ -5,7 +5,8 @@
 /// on a second line (mc-style function key legend).
 ///
 /// Mode-specific legends:
-/// - **Normal**: `[h/l]col [j/k]card [↵]detail [a]actions [H/>]move [L]logs [/]filter [Ctrl+O]shell [n]new [q]quit`
+/// - **Normal**: `[h/l]col [j/k]card [↵]detail [a]actions [H/>]move [L]logs [/]search [Ctrl+O]shell [n]new [q]quit`
+/// - **Search**: `Search: {query}█ (N) [↑↓]select [↵]jump [Esc]cancel`
 /// - **Log tab**: `[j/k]scroll [f]follow [Tab]next [L/Esc]close`
 /// - **Detail**: `[M/D/R/O/L]tabs [j/k]scroll [G]end [f]follow [Esc/↵]close`
 /// - **LogTail**: `[↑↓]scroll [f]follow [c]clear [Esc]close`
@@ -47,7 +48,7 @@ fn normal_legend() -> Vec<Span<'static>> {
         Span::styled("[L]", Style::default().fg(Color::Cyan)),
         Span::styled("logs ", Style::default().fg(Color::DarkGray)),
         Span::styled("[/]", Style::default().fg(Color::Cyan)),
-        Span::styled("filter ", Style::default().fg(Color::DarkGray)),
+        Span::styled("search ", Style::default().fg(Color::DarkGray)),
         Span::styled("[Ctrl+O]", Style::default().fg(Color::Cyan)),
         Span::styled("shell ", Style::default().fg(Color::DarkGray)),
         Span::styled("[n]", Style::default().fg(Color::Cyan)),
@@ -138,6 +139,29 @@ fn filter_legend(query: &str) -> Vec<Span<'static>> {
         Span::styled("clear ", Style::default().fg(Color::DarkGray)),
         Span::styled("[↵]", Style::default().fg(Color::Cyan)),
         Span::styled("confirm", Style::default().fg(Color::DarkGray)),
+    ]
+}
+
+/// Build keybinding hint spans for Search mode with query and result count.
+fn search_legend(query: &str, result_count: usize) -> Vec<Span<'static>> {
+    vec![
+        Span::styled("Search: ", Style::default().fg(Color::Yellow)),
+        Span::styled(
+            format!("{}{}", query, BLOCK_CURSOR),
+            Style::default().fg(Color::White),
+        ),
+        Span::styled(" ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!("({})", result_count),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled("  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("[↑↓]", Style::default().fg(Color::Cyan)),
+        Span::styled("select ", Style::default().fg(Color::DarkGray)),
+        Span::styled("[↵]", Style::default().fg(Color::Cyan)),
+        Span::styled("jump ", Style::default().fg(Color::DarkGray)),
+        Span::styled("[Esc]", Style::default().fg(Color::Cyan)),
+        Span::styled("cancel", Style::default().fg(Color::DarkGray)),
     ]
 }
 
@@ -257,6 +281,15 @@ pub fn render_footer(frame: &mut Frame, area: Rect, app: &App, terminal_height: 
             }
             Mode::Detail => detail_legend(app.detail_tab, app.detail_log_follow),
             Mode::LogTail => logtail_legend(),
+            Mode::Search => {
+                let query = app
+                    .search_state
+                    .as_ref()
+                    .map(|s| s.query.as_str())
+                    .unwrap_or("");
+                let count = app.search_state.as_ref().map_or(0, |s| s.results.len());
+                search_legend(query, count)
+            }
             Mode::Filter => {
                 let query = app
                     .filter_state

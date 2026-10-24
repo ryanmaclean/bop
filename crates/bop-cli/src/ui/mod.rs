@@ -28,7 +28,7 @@ use detail_panel::render_detail_panel;
 use event::{EventLoop, TerminalGuard};
 use factory_tab::FactoryTabWidget;
 use log_pane::render_log_pane;
-use widgets::{render_footer, render_header, render_kanban, render_logtail};
+use widgets::{render_footer, render_header, render_kanban, render_logtail, render_search_overlay};
 
 /// Launch the interactive TUI kanban board.
 ///
@@ -190,6 +190,13 @@ fn draw(
                         );
                     }
                 }
+
+                // ── Global Search overlay (centered popup) ─────────────
+                if app.mode == Mode::Search {
+                    if let Some(search) = app.search_state.as_ref() {
+                        render_search_overlay(frame, zones[1], search);
+                    }
+                }
             }
         }
 
@@ -248,6 +255,7 @@ fn render_minimal_status(frame: &mut ratatui::Frame, area: ratatui::layout::Rect
         AppTab::Log(_) => "log",
         AppTab::Kanban => match app.mode {
             Mode::Normal => "normal",
+            Mode::Search => "search",
             Mode::Filter => "filter",
             Mode::ActionPopup => "action",
             Mode::Detail => "detail",
@@ -352,6 +360,7 @@ mod snapshot_tests {
             col_focus,
             filter: None,
             filter_state: None,
+            search_state: None,
             mode: Mode::Normal,
             tab: AppTab::Kanban,
             factory_tab: FactoryTabState::new(),

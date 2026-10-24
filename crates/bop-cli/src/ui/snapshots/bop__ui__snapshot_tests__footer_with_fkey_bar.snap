@@ -1,7 +1,7 @@
 ---
 source: crates/bop-cli/src/ui/mod.rs
-assertion_line: 679
+assertion_line: 688
 expression: content
 ---
-[h/l]col [j/k]card [↵]detail [a]actions [H/>]move [L]logs [/]filter [Ctrl+O]shel
+[h/l]col [j/k]card [↵]detail [a]actions [H/>]move [L]logs [/]search [Ctrl+O]shel
 F3=logs  F4=detail  F5=pause  F8=kill  F10=quit
