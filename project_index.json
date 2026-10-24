@@ -1,0 +1,44 @@
+{
+  "project_type": "monorepo",
+  "services": {
+    "bop-core": {
+      "path": "crates/bop-core",
+      "tech_stack": ["rust"],
+      "description": "Shared library: Meta, PromptContext, render_prompt, realtime module",
+      "test_command": "cargo test -p bop-core"
+    },
+    "bop-cli": {
+      "path": "crates/bop-cli",
+      "tech_stack": ["rust", "tokio", "clap", "axum", "ratatui"],
+      "description": "CLI binary (bop command): dispatcher, merge-gate, bridge, providers, UI",
+      "test_command": "cargo test -p bop",
+      "dev_command": "cargo run -p bop"
+    },
+    "vibekanban": {
+      "path": "vibekanban",
+      "tech_stack": ["nushell", "python"],
+      "description": "Nushell scripts and provider implementations for AI CLI integrations"
+    }
+  },
+  "infrastructure": {
+    "docker": false,
+    "database": "none (filesystem as state machine + JSONL append-only log)",
+    "ci": "github-actions"
+  },
+  "conventions": {
+    "linter": "clippy (warnings as errors)",
+    "formatter": "rustfmt",
+    "testing": "cargo test (unit + integration harness tests)",
+    "check_all": "make check (test + lint + check-fmt)",
+    "storage_rule": "NO databases — filesystem + JSONL only",
+    "vcs": "git (with optional jj for multi-agent)"
+  },
+  "key_paths": {
+    "card_storage": ".cards/{state}/{id}.card/",
+    "templates": ".cards/templates/",
+    "providers_config": ".cards/providers.json",
+    "system_context": ".cards/system_context.md",
+    "bridge_socket": "~/.bop/bridge.sock",
+    "bridge_events": "~/.bop/bridge-events.jsonl"
+  }
+}

@@ -205,8 +205,8 @@
             "expected": "Build succeeds, 14 bridge tests pass, clippy clean, fmt clean"
           },
           "status": "completed",
-          "notes": "Full integration verification passed. (1) cargo build -p bop: SUCCESS. (2) cargo test -p bop bridge: 14/14 tests pass (bridge::tests 5, bridge::cmd::tests 2, bridge::hook_installer::tests 4, bridge::opencode::tests 3). (3) cargo clippy -p bop -- -D warnings: CLEAN. (4) cargo fmt --check: CLEAN. (5) bridge emit with no socket: exits 0 (fire-and-forget noop). (6) bridge listen creates socket, cleans up on interrupt. No regressions: 1024 bop unit tests pass, bop-core tests pass, workspace-wide clippy clean.",
-          "updated_at": "2026-03-25T19:05:00.000000+00:00"
+          "notes": "Full integration verification passed. (1) cargo build -p bop: SUCCESS. (2) cargo test -p bop bridge: 14/14 tests pass (bridge::tests 5, bridge::cmd::tests 2, bridge::hook_installer::tests 4, bridge::opencode::tests 3). (3) cargo clippy -p bop -- -D warnings: CLEAN. (4) cargo fmt --check: CLEAN. (5) bridge emit with no socket: exits 0 (fire-and-forget noop). (6) bridge listen creates socket, cleans up on interrupt. No regressions: 1024 bop unit tests pass, bop-core tests pass, workspace-wide clippy clean. All 7/7 subtasks across 6 phases completed.",
+          "updated_at": "2026-03-25T19:03:21.262349+00:00"
         }
       ]
     }
@@ -316,12 +316,57 @@
       "checks": []
     }
   },
-  "qa_signoff": null,
+  "qa_signoff": {
+    "status": "approved",
+    "qa_session": 2,
+    "issues_found": [
+      {
+        "description": "None"
+      }
+    ],
+    "tests_passed": {},
+    "timestamp": "2026-03-25T20:18:53.402019+00:00",
+    "ready_for_qa_revalidation": false
+  },
   "status": "human_review",
   "planStatus": "review",
   "xstateState": "human_review",
   "executionPhase": "complete",
-  "updated_at": "2026-03-25T19:02:21.639Z",
-  "last_updated": "2026-03-25T18:49:33.378006+00:00",
-  "reviewReason": "completed"
+  "updated_at": "2026-03-25T20:19:10.940Z",
+  "last_updated": "2026-03-25T20:18:53.402025+00:00",
+  "reviewReason": "completed",
+  "lastEvent": {
+    "eventId": "c8ab84fb-2152-43d3-a1ca-02333d337e5e",
+    "sequence": 1,
+    "type": "QA_PASSED",
+    "timestamp": "2026-03-25T20:19:10.832814+00:00"
+  },
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "error",
+      "timestamp": "2026-03-25T19:47:36.468028+00:00",
+      "issues": [
+        {
+          "title": "QA error",
+          "description": "QA agent did not update implementation_plan.json"
+        }
+      ]
+    },
+    {
+      "iteration": 2,
+      "status": "approved",
+      "timestamp": "2026-03-25T20:19:10.831951+00:00",
+      "issues": [],
+      "duration_seconds": 1894.36
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 2,
+    "last_iteration": 2,
+    "last_status": "approved",
+    "issues_by_type": {
+      "unknown": 1
+    }
+  }
 }
