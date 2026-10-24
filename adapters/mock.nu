@@ -84,7 +84,10 @@ def run_tests []: nothing -> nothing {
     let stdout_log = [$tmpdir "stdout.log"] | path join
     let stderr_log = [$tmpdir "stderr.log"] | path join
 
-    "test prompt content" | save $prompt_file
+    "test prompt content
+## Previous run attestation
+- Exit code: 1 (failed)
+" | save $prompt_file
     "" | save $stdout_log
     "" | save $stderr_log
 
@@ -105,6 +108,7 @@ def run_tests []: nothing -> nothing {
     assert ($stdout_content | str contains "mock adapter") "stdout should contain 'mock adapter'"
     assert ($stderr_content | str contains "mock stderr") "stderr should contain 'mock stderr'"
     assert ($stdout_content | str contains "test prompt content") "stdout should contain the prompt text"
+    assert ($stdout_content | str contains "Previous run attestation") "stdout should keep attestation context"
 
     # Cleanup
     ^rm -rf $tmpdir

@@ -1,3 +1,4 @@
+pub mod attestation;
 pub mod cardchars;
 pub mod config;
 pub mod lineage;
@@ -855,6 +856,8 @@ pub struct PromptContext {
     pub provider: String,
     pub agent: String,
     pub memory: String,
+    /// Formatted summary of logs/attestation.json from the prior run, if present.
+    pub previous_attestation: Option<String>,
     /// Prepended verbatim before the template. Load from `.cards/system_context.md`.
     pub system_context: String,
     pub worktree_branch: String,
@@ -886,6 +889,14 @@ impl PromptContext {
         } else {
             meta.acceptance_criteria.join("\n")
         };
+        let previous_attestation =
+            fs::read_to_string(card_dir.join("logs").join("attestation.json"))
+                .ok()
+                .and_then(|raw| serde_json::from_str::<attestation::Attestation>(&raw).ok())
+                .map(|attestation| {
+                    let verified = attestation.verify();
+                    attestation.summary_for_prompt(verified)
+                });
 
         // Walk up from card_dir to find .cards/system_context.md, .cards/CODEBASE.md, and .cards/stages/
         let mut system_context = String::new();
@@ -982,6 +993,7 @@ impl PromptContext {
             provider: String::new(),
             agent: meta.agent_type.clone().unwrap_or_default(),
             memory: String::new(),
+            previous_attestation,
             system_context,
             worktree_branch: meta.worktree_branch.clone().unwrap_or_default(),
             stage_instructions,
@@ -997,7 +1009,8 @@ impl PromptContext {
 }
 
 /// Template renderer supporting {{spec}}, {{plan}}, {{stage}},
-/// {{acceptance_criteria}}, {{provider}}, {{agent}}, {{memory}}.
+/// {{acceptance_criteria}}, {{provider}}, {{agent}}, {{memory}}, and
+/// {{previous_attestation}}.
 ///
 /// If `ctx.system_context` is non-empty it is prepended before the template.
 /// If the template has no {{...}} markers, it is returned unchanged.
@@ -1010,6 +1023,10 @@ pub fn render_prompt(template: &str, ctx: &PromptContext) -> String {
     out = out.replace("{{provider}}", &ctx.provider);
     out = out.replace("{{agent}}", &ctx.agent);
     out = out.replace("{{memory}}", &ctx.memory);
+    out = out.replace(
+        "{{previous_attestation}}",
+        ctx.previous_attestation.as_deref().unwrap_or(""),
+    );
     out = out.replace("{{worktree_branch}}", &ctx.worktree_branch);
     out = out.replace("{{stage_instructions}}", &ctx.stage_instructions);
     out = out.replace("{{stage_index}}", &ctx.stage_index);
@@ -1069,6 +1086,7 @@ mod tests {
             provider: "mock".to_string(),
             agent: "agent".to_string(),
             memory: "k: v".to_string(),
+            previous_attestation: None,
             system_context: String::new(),
             worktree_branch: String::new(),
             stage_instructions: String::new(),
@@ -1095,6 +1113,7 @@ mod tests {
             provider: "claude".to_string(),
             agent: String::new(),
             memory: String::new(),
+            previous_attestation: None,
             system_context: String::new(),
             worktree_branch: "job/feat-auth".to_string(),
             stage_instructions: "You are reviewing code.".to_string(),
@@ -1113,6 +1132,67 @@ mod tests {
         assert!(rendered.contains("(2 of 2)"));
         assert!(rendered.contains("build auth"));
         assert!(rendered.contains("Implemented auth module."));
+    }
+
+    #[test]
+    fn prompt_context_from_files_loads_previous_attestation_summary() {
+        let dir = tempfile::tempdir().unwrap();
+        let card_dir = dir.path().join("job-attest.bop");
+        fs::create_dir_all(card_dir.join("logs")).unwrap();
+        fs::write(card_dir.join("spec.md"), "# spec").unwrap();
+
+        let mut attestation = attestation::Attestation {
+            run_id: "abc123".to_string(),
+            exit_code: 1,
+            tool_calls: 23,
+            model: "o3-2025-04-16".to_string(),
+            modified_files: vec!["src/lib.rs".to_string(), "src/main.rs".to_string()],
+            input_commit: "8a3f9cd".to_string(),
+            output_commit: "8a3f9cd".to_string(),
+            record_hash: String::new(),
+        };
+        attestation.record_hash = attestation.compute_record_hash().unwrap();
+        fs::write(
+            card_dir.join("logs").join("attestation.json"),
+            serde_json::to_string_pretty(&attestation).unwrap(),
+        )
+        .unwrap();
+
+        let meta = Meta {
+            id: "job-attest".to_string(),
+            created: chrono::Utc::now(),
+            stage: "implement".to_string(),
+            ..Default::default()
+        };
+
+        let ctx = PromptContext::from_files(&card_dir, &meta).unwrap();
+        let summary = ctx
+            .previous_attestation
+            .as_deref()
+            .expect("attestation summary should be present");
+        assert!(summary.contains("- Exit code: 1 (failed)"));
+        assert!(summary.contains("- Tool calls: 23"));
+    }
+
+    #[test]
+    fn prompt_context_from_files_without_attestation_sets_none_and_renders_empty_placeholder() {
+        let dir = tempfile::tempdir().unwrap();
+        let card_dir = dir.path().join("job-no-attest.bop");
+        fs::create_dir_all(&card_dir).unwrap();
+        fs::write(card_dir.join("spec.md"), "# spec").unwrap();
+
+        let meta = Meta {
+            id: "job-no-attest".to_string(),
+            created: chrono::Utc::now(),
+            stage: "implement".to_string(),
+            ..Default::default()
+        };
+
+        let ctx = PromptContext::from_files(&card_dir, &meta).unwrap();
+        assert!(ctx.previous_attestation.is_none());
+
+        let rendered = render_prompt("A{{previous_attestation}}B", &ctx);
+        assert_eq!(rendered, "AB");
     }
 
     #[test]

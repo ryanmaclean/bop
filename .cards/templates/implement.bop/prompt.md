@@ -1,5 +1,7 @@
 {{system_context}}
 
+{{previous_attestation}}
+
 ---
 
 {{stage_instructions}}
