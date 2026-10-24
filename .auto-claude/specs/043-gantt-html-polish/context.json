@@ -1,0 +1,30 @@
+{
+  "files_to_modify": {
+    "bop-cli": ["crates/bop-cli/src/gantt.rs"]
+  },
+  "files_to_reference": [
+    "crates/bop-cli/src/colors.rs",
+    "crates/bop-cli/src/gantt.rs"
+  ],
+  "patterns": {
+    "html_generation": "HTML is generated as a String using format! macros and inline CSS",
+    "color_scheme": "State colors defined in colors.rs using hex values for HTML and ANSI for terminal",
+    "testing": "Unit tests at bottom of modules using #[cfg(test)] and #[test] attributes",
+    "data_structures": "Bar struct contains id, glyph, state, stage, provider, timestamps, tokens, cost"
+  },
+  "existing_implementations": {
+    "description": "The gantt.rs file already implements HTML generation with tooltips, heatmap coloring, and summary statistics. Current implementation uses HTML title attribute for tooltips, percentile-based duration colors (green/amber/red), and a summary table with 6 metrics.",
+    "relevant_files": [
+      "crates/bop-cli/src/gantt.rs",
+      "crates/bop-cli/src/colors.rs"
+    ],
+    "features_already_present": [
+      "HTML tooltip via title attribute (lines 521-529)",
+      "Duration heatmap with percentile colors (lines 505-536)",
+      "Summary statistics table (lines 570-587)",
+      "Responsive CSS layout (lines 409-427)",
+      "Peak parallelism calculation (lines 189-206)",
+      "Existing unit tests (lines 621-685)"
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "project_type": "single",
+  "services": {
+    "bop-cli": {
+      "path": "./crates/bop-cli",
+      "tech_stack": ["rust", "cargo"],
+      "port": null,
+      "dev_command": "cargo build",
+      "test_command": "cargo test"
+    }
+  },
+  "infrastructure": {
+    "docker": false,
+    "database": null
+  },
+  "conventions": {
+    "linter": "clippy",
+    "formatter": "rustfmt",
+    "testing": "cargo test",
+    "make_check": "make check"
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "subtasks": {
+    "subtask-1-1": {
+      "attempts": [
+        {
+          "session": 2,
+          "timestamp": "2026-03-22T03:05:19.053324+00:00",
+          "approach": "Implemented: Verify HTML tooltip implementation and ensure all card details are included",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-2": {
+      "attempts": [
+        {
+          "session": 3,
+          "timestamp": "2026-03-22T03:09:13.238250+00:00",
+          "approach": "Implemented: Verify duration heatmap colors are correctly applied based on percentiles",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-3": {
+      "attempts": [
+        {
+          "session": 4,
+          "timestamp": "2026-03-22T03:14:07.433474+00:00",
+          "approach": "Implemented: Verify summary statistics table renders correctly with all 6 metrics",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-4": {
+      "attempts": [
+        {
+          "session": 5,
+          "timestamp": "2026-03-22T03:18:08.881405+00:00",
+          "approach": "Implemented: Verify responsive layout works at 1280px width without horizontal scroll",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-5": {
+      "attempts": [
+        {
+          "session": 6,
+          "timestamp": "2026-03-22T03:22:07.541125+00:00",
+          "approach": "Implemented: Add or update unit tests for HTML generation features",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-6": {
+      "attempts": [
+        {
+          "session": 7,
+          "timestamp": "2026-03-22T03:26:54.190408+00:00",
+          "approach": "Implemented: Run cargo clippy and fix any warnings",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    },
+    "subtask-1-7": {
+      "attempts": [
+        {
+          "session": 8,
+          "timestamp": "2026-03-22T03:31:57.007216+00:00",
+          "approach": "Implemented: Verify no JavaScript errors when opening HTML in browser",
+          "success": true,
+          "error": null
+        }
+      ],
+      "status": "completed"
+    }
+  },
+  "stuck_subtasks": [],
+  "metadata": {
+    "created_at": "2026-03-22T02:55:30.485525+00:00",
+    "last_updated": "2026-03-22T03:31:57.007226+00:00"
+  }
+}
