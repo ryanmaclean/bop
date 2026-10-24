@@ -44,6 +44,10 @@ def main [
 
     let prompt_text = if ($prompt_abs | path exists) { open --raw $prompt_abs } else { "" }
 
+    if ($prompt_text | str contains "{{previous_attestation}}") {
+        "warning: unresolved {{previous_attestation}} placeholder\n" | save --append $stderr_abs
+    }
+
     [
         "mock adapter"
         $"workdir=($workdir)"
