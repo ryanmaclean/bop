@@ -180,6 +180,17 @@ pub fn seed_providers(cards_dir: &Path) -> anyhow::Result<()> {
             probe: true,
         },
     );
+    pf.providers.insert(
+        "gemini-flash".to_string(),
+        AdapterConfig {
+            command: "adapters/gemini.nu".to_string(),
+            rate_limit_exit: 75,
+            cooldown_until_epoch_s: None,
+            model: Some("gemini-2.5-flash-preview".to_string()),
+            env: Default::default(),
+            probe: true,
+        },
+    );
     write_providers(cards_dir, &pf)?;
     Ok(())
 }

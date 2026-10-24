@@ -104,6 +104,7 @@ async fn provider_reachable(provider: &str) -> bool {
     let endpoint = match provider {
         "claude" => "api.anthropic.com:443",
         "codex" | "opencode" => "api.openai.com:443",
+        "gemini" | "gemini-flash" => "generativelanguage.googleapis.com:443",
         _ => {
             // Unknown provider - assume reachable to avoid blocking
             return true;
@@ -126,7 +127,7 @@ fn resolve_adapter(meta: &Meta, fallback: &str) -> String {
     match provider {
         "claude" => "adapters/claude.nu".to_string(),
         "codex" => "adapters/codex.nu".to_string(),
-        "gemini" => "adapters/gemini.nu".to_string(),
+        "gemini" | "gemini-flash" => "adapters/gemini.nu".to_string(),
         "ollama" => "adapters/ollama-local.nu".to_string(),
         "ollama-local" => "adapters/ollama-local.nu".to_string(),
         "mock" => "adapters/mock.nu".to_string(),
@@ -1501,6 +1502,7 @@ mod tests {
             ("claude", "adapters/claude.nu"),
             ("codex", "adapters/codex.nu"),
             ("gemini", "adapters/gemini.nu"),
+            ("gemini-flash", "adapters/gemini.nu"),
             ("ollama", "adapters/ollama-local.nu"),
             ("ollama-local", "adapters/ollama-local.nu"),
             ("mock", "adapters/mock.nu"),
