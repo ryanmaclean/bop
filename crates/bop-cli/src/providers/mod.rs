@@ -618,6 +618,7 @@ pub struct ProviderSnapshot {
 ///
 /// `detect()` is synchronous — it only checks for local credentials or
 /// configuration files. `fetch()` is async and may make network calls.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait Provider: Send + Sync {
     /// Short identifier matching `ProviderSnapshot::provider`.
