@@ -169,7 +169,13 @@ fn draw(
                     .cloned();
                 if let Some(card) = card {
                     let card_dir = paths::find_card(&app.cards_root, &card.id);
-                    render_detail(frame, zones[1], &card, app.detail_scroll, card_dir.as_deref());
+                    render_detail(
+                        frame,
+                        zones[1],
+                        &card,
+                        app.detail_scroll,
+                        card_dir.as_deref(),
+                    );
                 }
             }
             AppTab::Kanban => {

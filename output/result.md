@@ -1,3 +1,35 @@
+# QA Success Message — Implementation Results
+
+## What was built
+
+Added a pipeline success message to `maybe_advance_stage` in `dispatcher.rs`.
+
+Previously, when the final stage in a `stage_chain` completed successfully,
+the function silently returned. Now it:
+
+1. Emits `[stage-advance] <id> — pipeline complete (<impl> → <qa>) ✓` to stderr
+2. Writes `output/pipeline_success.md` into the card directory so tests and
+   Quick Look can surface it
+
+## Changes: `crates/bop-cli/src/dispatcher.rs`
+
+- `maybe_advance_stage`: replaced silent `return` for the final-stage case
+  with an eprintln + `fs::write` of `output/pipeline_success.md`
+- 4 new unit tests in `#[cfg(test)]`:
+  - `maybe_advance_stage_noop_for_empty_chain`
+  - `maybe_advance_stage_creates_next_stage_card` — implement → qa advance
+  - `maybe_advance_stage_writes_pipeline_success_for_final_stage`
+  - `maybe_advance_stage_skips_existing_next_card`
+
+## Verification
+
+```
+cargo test:   1022 passed, 0 failed
+cargo clippy: 0 warnings
+```
+
+---
+
 # AC Implementation Plan Progress in Quick Look + CLI — Results
 
 ## Summary

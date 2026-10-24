@@ -375,10 +375,7 @@ pub async fn run_merge_gate(
                         "qa passed: all {} criterion/criteria ok\n",
                         meta.acceptance_criteria.len()
                     );
-                    let _ = fs::write(
-                        card_dir.join("output").join("qa_report.md"),
-                        success_report,
-                    );
+                    let _ = fs::write(card_dir.join("output").join("qa_report.md"), success_report);
 
                     // Best-effort: capture file-change manifest for Quick Look
                     let branch = meta.change_ref.clone().unwrap_or_else(|| meta.id.clone());

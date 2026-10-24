@@ -719,7 +719,11 @@ pub fn maybe_advance_stage(cards_dir: &Path, done_card_dir: &Path) {
         let success_path = done_card_dir.join("output").join("pipeline_success.md");
         let _ = fs::write(
             &success_path,
-            format!("# Pipeline Complete\n\n{}\n\nAll {} stage(s) passed.\n", msg, meta.stage_chain.len()),
+            format!(
+                "# Pipeline Complete\n\n{}\n\nAll {} stage(s) passed.\n",
+                msg,
+                meta.stage_chain.len()
+            ),
         );
         return;
     }
@@ -761,7 +765,10 @@ pub fn maybe_advance_stage(cards_dir: &Path, done_card_dir: &Path) {
         created: Utc::now(),
         stage: next_stage.clone(),
         workflow_mode: meta.workflow_mode.clone(),
-        step_index: meta.workflow_mode.as_ref().map(|_| (current_idx + 2) as u32),
+        step_index: meta
+            .workflow_mode
+            .as_ref()
+            .map(|_| (current_idx + 2) as u32),
         glyph: meta.glyph.clone(),
         token: meta.token.clone(),
         title: meta.title.clone(),
@@ -1379,7 +1386,10 @@ mod tests {
         maybe_advance_stage(cards, &card_dir);
 
         // No pending card created
-        assert!(!cards.join("pending").exists() || fs::read_dir(cards.join("pending")).unwrap().count() == 0);
+        assert!(
+            !cards.join("pending").exists()
+                || fs::read_dir(cards.join("pending")).unwrap().count() == 0
+        );
         // No success file for empty chain
         assert!(!card_dir.join("output").join("pipeline_success.md").exists());
     }
@@ -1400,7 +1410,10 @@ mod tests {
 
         // meta.json should have stage = "qa"
         let meta_raw = fs::read_to_string(next.join("meta.json")).unwrap();
-        assert!(meta_raw.contains("\"qa\""), "next card should be in qa stage");
+        assert!(
+            meta_raw.contains("\"qa\""),
+            "next card should be in qa stage"
+        );
 
         // No pipeline_success.md yet (implement is not the final stage)
         assert!(!card_dir.join("output").join("pipeline_success.md").exists());
@@ -1419,15 +1432,28 @@ mod tests {
         // No further card created (qa is the final stage)
         let further = cards.join("pending");
         if further.exists() {
-            assert_eq!(fs::read_dir(&further).unwrap().count(), 0, "no further card should be created after final stage");
+            assert_eq!(
+                fs::read_dir(&further).unwrap().count(),
+                0,
+                "no further card should be created after final stage"
+            );
         }
 
         // pipeline_success.md must exist in output/
         let success = card_dir.join("output").join("pipeline_success.md");
-        assert!(success.exists(), "expected output/pipeline_success.md after final stage");
+        assert!(
+            success.exists(),
+            "expected output/pipeline_success.md after final stage"
+        );
         let content = fs::read_to_string(&success).unwrap();
-        assert!(content.contains("Pipeline Complete"), "success file should mention Pipeline Complete");
-        assert!(content.contains("implement → qa"), "success file should list the full pipeline");
+        assert!(
+            content.contains("Pipeline Complete"),
+            "success file should mention Pipeline Complete"
+        );
+        assert!(
+            content.contains("implement → qa"),
+            "success file should list the full pipeline"
+        );
     }
 
     #[test]
@@ -1448,7 +1474,10 @@ mod tests {
 
         // The pre-existing card should be untouched
         let raw = fs::read_to_string(next.join("meta.json")).unwrap();
-        assert!(raw.contains("sentinel"), "existing next card should not be overwritten");
+        assert!(
+            raw.contains("sentinel"),
+            "existing next card should not be overwritten"
+        );
     }
 
     // ── short_run_id ──────────────────────────────────────────────────────────
