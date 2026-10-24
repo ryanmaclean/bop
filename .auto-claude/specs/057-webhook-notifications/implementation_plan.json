@@ -112,7 +112,9 @@
             "command": "cargo clippy -p bop -- -D warnings && cargo fmt --check",
             "expected": "No clippy warnings, code is formatted"
           },
-          "status": "pending"
+          "status": "completed",
+          "notes": "Verified code quality. Clippy passed with no warnings for bop-core and bop-cli. Code formatting was applied to fix one formatting issue in merge_gate.rs (line 185 - chain formatting). All checks now pass. Committed formatting changes.",
+          "updated_at": "2026-03-09T20:40:19.421413+00:00"
         },
         {
           "id": "subtask-1-7",
@@ -126,8 +128,9 @@
             "command": "cargo test",
             "expected": "All tests pass across the workspace"
           },
-          "status": "pending",
-          "notes": "This is the final comprehensive test to ensure webhook feature doesn't break existing functionality"
+          "status": "completed",
+          "notes": "Verified all tests pass successfully. bop-cli: 1025 tests passed, bop-core: 110 tests passed, doc-tests: 1 test passed. Total: 1136 tests passed, 0 failed. Full test suite confirms webhook feature doesn't break existing functionality.",
+          "updated_at": "2026-03-09T20:42:00.000000+00:00"
         }
       ]
     }
@@ -230,11 +233,44 @@
       ]
     }
   },
-  "qa_signoff": null,
-  "status": "in_progress",
-  "planStatus": "in_progress",
-  "xstateState": "planning",
-  "executionPhase": "coding",
-  "updated_at": "2026-03-09T20:39:16.486Z",
-  "last_updated": "2026-03-09T20:38:21.030443+00:00"
+  "qa_signoff": {
+    "status": "approved",
+    "qa_session": 1,
+    "issues_found": [
+      {
+        "description": "None - All acceptance criteria met. Security review passed. Third-party API validation passed (reqwest usage correct). No regressions found."
+      }
+    ],
+    "tests_passed": {},
+    "timestamp": "2026-03-09T20:50:18.143321+00:00",
+    "ready_for_qa_revalidation": false
+  },
+  "status": "done",
+  "planStatus": "completed",
+  "xstateState": "human_review",
+  "executionPhase": "complete",
+  "updated_at": "2026-03-22T03:35:28.952Z",
+  "last_updated": "2026-03-09T20:50:18.143330+00:00",
+  "lastEvent": {
+    "eventId": "8cb358af-9256-4639-ac20-35c9ef6f283f",
+    "sequence": 1,
+    "type": "QA_PASSED",
+    "timestamp": "2026-03-09T20:50:42.473752+00:00"
+  },
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2026-03-09T20:50:42.473088+00:00",
+      "issues": [],
+      "duration_seconds": 480.02
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 1,
+    "last_iteration": 1,
+    "last_status": "approved",
+    "issues_by_type": {}
+  },
+  "reviewReason": "completed"
 }
