@@ -12,6 +12,7 @@ mod benchmark;
 mod bridge;
 mod cards;
 mod colors;
+mod costs;
 mod diff;
 mod dispatcher;
 mod doctor;
@@ -372,6 +373,18 @@ enum Command {
     Bridge {
         #[command(subcommand)]
         sub: bridge::BridgeSubcommand,
+    },
+    /// Spend report aggregated from per-card logs/events.jsonl.
+    Costs {
+        /// Group rows by provider (default), day, or card.
+        #[arg(long, value_enum)]
+        by: Option<costs::CostsBy>,
+        /// Set daily budget (USD) in .cards/.bop/config.json.
+        #[arg(long)]
+        budget: Option<f64>,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Historical cost/token report across completed cards.
     Stats {
@@ -1083,6 +1096,7 @@ async fn main() -> anyhow::Result<()> {
             interval,
         } => providers::cmd_providers(watch, json, interval).await,
         Command::Bridge { sub } => bridge::cmd_bridge(sub).await,
+        Command::Costs { by, budget, json } => costs::cmd_costs(&root, by, json, budget),
         Command::Stats { by, json, card } => stats::cmd_stats(&root, by, json, card.as_deref()),
         Command::Benchmark {
             spec_file,
