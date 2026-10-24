@@ -245,12 +245,47 @@
       "checks": []
     }
   },
-  "qa_signoff": null,
+  "qa_signoff": {
+    "status": "approved",
+    "timestamp": "2026-03-25T00:20:00Z",
+    "qa_session": 1,
+    "report_file": "qa_report.md",
+    "tests_passed": {
+      "unit": "1030/1030 (bin) + 162 provider-specific",
+      "integration": "26/26 (job_control: 17, merge_gate: 4, serve_smoke: 5)",
+      "bop_core": "111/111",
+      "e2e": "N/A"
+    },
+    "issues_found": [],
+    "verified_by": "qa_agent"
+  },
   "status": "human_review",
   "planStatus": "review",
   "xstateState": "human_review",
   "executionPhase": "complete",
-  "updated_at": "2026-03-25T06:34:41.689Z",
-  "last_updated": "2026-03-25T06:34:41.215878+00:00",
-  "reviewReason": "completed"
+  "updated_at": "2026-03-25T18:01:35.684Z",
+  "last_updated": "2026-03-25T00:20:00Z",
+  "reviewReason": "completed",
+  "lastEvent": {
+    "eventId": "5f738e85-e049-4e87-8372-83a347c3bbcb",
+    "sequence": 1,
+    "type": "QA_PASSED",
+    "timestamp": "2026-03-25T07:18:20.137244+00:00"
+  },
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2026-03-25T07:18:20.136143+00:00",
+      "issues": [],
+      "duration_seconds": 2560
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 1,
+    "last_iteration": 1,
+    "last_status": "approved",
+    "issues_by_type": {}
+  },
+  "recoveryNote": "Task recovered from stuck state at 2026-03-25T18:01:35.684Z"
 }
