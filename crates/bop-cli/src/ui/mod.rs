@@ -160,7 +160,7 @@ fn draw(
             AppTab::Log(card_id) => {
                 render_log_pane(frame, zones[1], app, card_id);
             }
-            AppTab::Kanban => {
+            AppTab::Detail(_) | AppTab::Kanban => {
                 render_kanban(frame, zones[1], app);
 
                 // ── Detail overlay (right 50% of body) ────────────────
@@ -245,6 +245,7 @@ fn render_minimal_status(frame: &mut ratatui::Frame, area: ratatui::layout::Rect
     let mode_str = match &app.tab {
         AppTab::Factory => "factory",
         AppTab::Log(_) => "log",
+        AppTab::Detail(_) => "detail",
         AppTab::Kanban => match app.mode {
             Mode::Normal => "normal",
             Mode::Filter => "filter",
@@ -286,7 +287,7 @@ mod snapshot_tests {
     use ratatui::Terminal;
 
     use crate::render::CardView;
-    use crate::ui::app::{App, AppTab, KanbanColumn, Mode};
+    use crate::ui::app::{App, AppTab, DetailTab, KanbanColumn, Mode};
     use crate::ui::factory_tab::FactoryTabState;
     use crate::ui::widgets::header::{ProviderMeter, ProviderStatus};
     use crate::ui::widgets::{
@@ -363,6 +364,8 @@ mod snapshot_tests {
             tick_count: 0,
             prev_done_count: 0,
             detail_scroll: 0,
+            detail_tab: DetailTab::Meta,
+            detail_log_follow: true,
             action_list_state: ratatui::widgets::ListState::default(),
             log_scroll: 0,
             log_follow: false,

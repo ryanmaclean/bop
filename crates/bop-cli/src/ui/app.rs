@@ -68,6 +68,7 @@ pub enum Mode {
 }
 
 /// Active tab inside the detail panel.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DetailTab {
     Meta,
@@ -85,6 +86,7 @@ pub enum AppTab {
     /// Factory services panel body.
     Factory,
     /// Full-screen card detail panel for a card ID.
+    #[allow(dead_code)]
     Detail(String),
     /// Integrated log pane for a card (`logs/stdout.log`).
     Log(String),
@@ -190,8 +192,10 @@ pub struct App {
     /// Scroll offset for the Detail overlay (lines scrolled from top).
     pub detail_scroll: usize,
     /// Active detail sub-tab (`Meta`, `Diff`, `Replay`, `Output`, `Log`).
+    #[allow(dead_code)]
     pub detail_tab: DetailTab,
     /// Follow mode for detail Log tab.
+    #[allow(dead_code)]
     pub detail_log_follow: bool,
     /// Ratatui selection state for the ActionPopup list widget.
     pub action_list_state: ListState,
@@ -282,6 +286,8 @@ impl App {
             tick_count: 0,
             prev_done_count: done_count,
             detail_scroll: 0,
+            detail_tab: DetailTab::Meta,
+            detail_log_follow: true,
             action_list_state: ListState::default(),
             log_scroll: 0,
             log_follow: false,

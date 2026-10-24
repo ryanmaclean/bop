@@ -10,6 +10,7 @@ mod acplan;
 mod bridge;
 mod cards;
 mod colors;
+mod comments;
 mod diff;
 mod dispatcher;
 mod doctor;
@@ -152,6 +153,15 @@ enum Command {
         /// Keep streaming as new output arrives (like tail -f).
         #[arg(short, long)]
         follow: bool,
+    },
+    /// Append a timestamped comment to logs/comments.jsonl for a card.
+    Comment {
+        id: String,
+        message: String,
+    },
+    /// Print comment history from logs/comments.jsonl for a card.
+    Comments {
+        id: String,
     },
     /// Show what a card changed (git diff, output, or open its worktree).
     Diff {
@@ -705,6 +715,8 @@ async fn main() -> anyhow::Result<()> {
         Command::Kill { id } => cards::cmd_kill(&root, &id).await,
         Command::Approve { id } => cards::cmd_approve(&root, &id),
         Command::Logs { id, follow } => logs::cmd_logs(&root, &id, follow).await,
+        Command::Comment { id, message } => comments::cmd_comment(&root, &id, &message),
+        Command::Comments { id } => comments::cmd_comments(&root, &id),
         Command::Diff {
             id,
             stat,

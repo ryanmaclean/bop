@@ -225,6 +225,7 @@ pub fn render_footer(frame: &mut Frame, area: Rect, app: &App, terminal_height: 
     let mut legend_spans = match &app.tab {
         AppTab::Factory => factory_legend(),
         AppTab::Log(_) => log_pane_legend(app.log_pane_follow),
+        AppTab::Detail(_) => detail_legend(),
         AppTab::Kanban => match app.mode {
             Mode::Normal => {
                 if let Some(query) = active_filter_query {
