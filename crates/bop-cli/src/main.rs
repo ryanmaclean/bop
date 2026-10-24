@@ -3,6 +3,7 @@ use bop_core::VcsEngine as CoreVcsEngine;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::IsTerminal;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -26,6 +27,7 @@ mod inspect;
 mod list;
 mod lock;
 mod logs;
+mod managed_watch;
 mod memory;
 mod merge_gate;
 mod paths;
@@ -84,6 +86,23 @@ enum Command {
         /// Watch for changes and update status automatically.
         #[arg(short, long)]
         watch: bool,
+    },
+    /// Internal entry point for a dedicated Zellij command pane.
+    #[command(name = "__watch-pane", hide = true)]
+    WatchPane {
+        origin_dev: u64,
+        origin_ino: u64,
+        ack_socket: PathBuf,
+        ack_token: u128,
+    },
+    /// Internal notify worker; stdout is a fixed-byte IPC pipe.
+    #[command(name = "__watch-worker", hide = true)]
+    WatchWorker,
+    /// Internal bounded board collector; stdout is JSON to the pane owner.
+    #[command(name = "__watch-render", hide = true)]
+    WatchRender {
+        width: u16,
+        height: u16,
     },
     Validate {
         id: String,
@@ -828,7 +847,10 @@ async fn main() -> anyhow::Result<()> {
         Command::Status { id, watch } => {
             if id.trim().is_empty() {
                 if watch {
-                    return list::list_cards_watch(&root, "active").await;
+                    if std::io::stdout().is_terminal() {
+                        return managed_watch::launch_cards_watch(&root).await;
+                    }
+                    return managed_watch::list_cards_watch(&root, false, None).await;
                 } else {
                     return doctor::print_status_summary(&root);
                 }
@@ -853,6 +875,25 @@ async fn main() -> anyhow::Result<()> {
             }
             println!("{}", serde_json::to_string_pretty(&meta)?);
             Ok(())
+        }
+        Command::WatchPane {
+            origin_dev,
+            origin_ino,
+            ack_socket,
+            ack_token,
+        } => {
+            managed_watch::run_managed_pane(
+                &root,
+                origin_dev,
+                origin_ino,
+                &ack_socket,
+                ack_token,
+            )
+            .await
+        }
+        Command::WatchWorker => managed_watch::run_watch_worker(&root),
+        Command::WatchRender { width, height } => {
+            managed_watch::run_render_worker(&root, width, height)
         }
         Command::Validate { id, realtime } => {
             let card = paths::find_card(&root, &id).context("card not found")?;
