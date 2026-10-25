@@ -84,3 +84,7 @@ crates/jc-zellij-plugin/target/ echo .auto-claude/dispatch-lock.json ./target/de
 # H1 hygiene: Auto-Claude runtime files must never be tracked, even if the
 # broad ignore above is narrowed later. .env.example is force-added below.
 !.auto-claude/.env.example
+
+# Agent scratch verification artifacts (spec 043 left these at the repo root / .cards)
+/verify_*.sh
+.cards/test-*.html
