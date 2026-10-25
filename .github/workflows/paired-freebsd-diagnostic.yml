@@ -48,6 +48,12 @@ jobs:
           echo 'd16018d33360816f65c6fc3c1f27efeb87f3dc6b38b7399c357a27a4668a8c81  Cargo.lock' | sha256sum --check --status
           echo 'befd91e188696989d415870792acb3f9fa5a5d3bd79fe8823989264714b6fe51  moth-paired/Cargo.lock' | sha256sum --check --status
 
+      - name: Seed incomplete native receipt before VM work
+        shell: bash
+        run: |
+          mkdir -p receipts/paired-native
+          printf '%s\n' 'VM status unknown; no native or license acceptance' > receipts/paired-native/INCOMPLETE
+
       - name: Admit selected license graphs and run synthetic native pair
         uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc
         with:
@@ -58,6 +64,10 @@ jobs:
             set -eu
             mkdir -p receipts/paired-native
             PAIR_ROOT="$(pwd -P)"
+            # A nonzero VM script skips vmactions copyback. Preserve its real
+            # status in a receipt, return zero for sync, then fail on the host.
+            trap 'status=$?; trap - EXIT; set +e; if [ -d "$PAIR_ROOT/receipts/paired-native/raw" ]; then (find "$PAIR_ROOT/receipts/paired-native/raw" -type f -print | LC_ALL=C sort | while IFS= read -r file; do sha256 "$file" || exit 1; done) > "$PAIR_ROOT/receipts/paired-native/raw-SHA256SUMS.txt" || status=1; fi; printf "%s\n" "$status" > "$PAIR_ROOT/receipts/paired-native/VM-EXIT-CODE" || exit 1; exit 0' EXIT
+            exec > "$PAIR_ROOT/receipts/paired-native/VM-RAW.log" 2>&1
             test "$(git -c safe.directory="$PAIR_ROOT" -C "$PAIR_ROOT" rev-parse HEAD)" = '617666ce6eab93fc91d378e97c21f3acb8914a97'
             test "$(git -c safe.directory="$PAIR_ROOT/moth-paired" -C "$PAIR_ROOT/moth-paired" rev-parse HEAD)" = 'd9d2aca1f940ee3d845fca92ce46e3106b05d656'
             test "$(sha256 -q Cargo.lock)" = 'd16018d33360816f65c6fc3c1f27efeb87f3dc6b38b7399c357a27a4668a8c81'
@@ -119,9 +129,8 @@ jobs:
             sha256 "$fixture_source" "$MOTH_AGENT_BIN" > receipts/paired-native/derived-source-and-agent.sha256
             mkdir -p receipts/paired-native/raw
             chmod 700 receipts/paired-native/raw
-            # On ordinary command failure, retain a digest index of every
-            # synthetic file. Forced VM death remains unknown, not clean.
-            trap 'status=$?; find receipts/paired-native/raw -type f -print | LC_ALL=C sort | while IFS= read -r file; do sha256 "$file"; done > receipts/paired-native/raw-SHA256SUMS.txt; exit "$status"' EXIT
+            # The early EXIT trap indexes raw synthetic files on success and
+            # ordinary failure. Forced VM death leaves INCOMPLETE on the host.
             for fixture in \
               dispatcher_moth_receipt_matches_full_rendered_prompt \
               dispatcher_moth_timeout_keeps_card_fenced_until_owned_work_retires \
@@ -152,6 +161,21 @@ jobs:
               esac
             done
             printf '%s\n' 'synthetic native pair completed; no real provider acceptance' > receipts/paired-native/SCOPE.txt
+
+      - name: Require VM gate success after receipt copyback
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f receipts/paired-native/INCOMPLETE
+          test -s receipts/paired-native/VM-EXIT-CODE
+          vm_status="$(cat receipts/paired-native/VM-EXIT-CODE)"
+          [[ "$vm_status" =~ ^[0-9]+$ ]]
+          test "$vm_status" -eq 0
+          test -s receipts/paired-native/VM-RAW.log
+          test -s receipts/paired-native/raw-SHA256SUMS.txt
+          test -s receipts/paired-native/SCOPE.txt
+          rm receipts/paired-native/INCOMPLETE
 
       - name: Retain diagnostic receipts even when a gate fails
         if: always()
