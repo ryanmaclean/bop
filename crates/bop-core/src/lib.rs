@@ -2,12 +2,14 @@ pub mod bench;
 pub mod cardchars;
 pub mod config;
 pub mod fsversion;
+mod home;
 pub mod lineage;
 pub mod realtime;
 pub mod translog;
 pub mod worktree;
 
 pub use config::{load_config, Config};
+pub use home::home_dir;
 
 use anyhow::Context as _;
 use chrono::{DateTime, Utc};
