@@ -58,8 +58,8 @@ jobs:
             set -eu
             mkdir -p receipts/paired-native
             PAIR_ROOT="$(pwd -P)"
-            test "$(git rev-parse HEAD)" = '617666ce6eab93fc91d378e97c21f3acb8914a97'
-            test "$(git -C moth-paired rev-parse HEAD)" = 'd9d2aca1f940ee3d845fca92ce46e3106b05d656'
+            test "$(git -c safe.directory="$PAIR_ROOT" -C "$PAIR_ROOT" rev-parse HEAD)" = '617666ce6eab93fc91d378e97c21f3acb8914a97'
+            test "$(git -c safe.directory="$PAIR_ROOT/moth-paired" -C "$PAIR_ROOT/moth-paired" rev-parse HEAD)" = 'd9d2aca1f940ee3d845fca92ce46e3106b05d656'
             test "$(sha256 -q Cargo.lock)" = 'd16018d33360816f65c6fc3c1f27efeb87f3dc6b38b7399c357a27a4668a8c81'
             test "$(sha256 -q moth-paired/Cargo.lock)" = 'befd91e188696989d415870792acb3f9fa5a5d3bd79fe8823989264714b6fe51'
             pkg info > receipts/paired-native/freebsd-packages.txt
