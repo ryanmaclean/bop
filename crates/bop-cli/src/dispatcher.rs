@@ -2327,7 +2327,7 @@ mod tests {
 
             assert_eq!(
                 meta_io.reads.load(Ordering::SeqCst),
-                if matches!(fault, PreSpawnFault::Read) { 2 } else { 1 },
+                if matches!(fault, PreSpawnFault::Pass) { 1 } else { 2 },
                 "{fault:?}"
             );
             assert_eq!(
