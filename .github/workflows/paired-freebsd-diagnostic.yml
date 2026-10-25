@@ -1,0 +1,155 @@
+# INACTIVE SOURCE CANDIDATE. Not installed in either repository.
+# User waived the protected-environment reviewer requirement for this paired
+# run. Dispatch remains a one-use, exact-source synthetic native diagnostic.
+name: BOP19 Moth5 paired FreeBSD diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bop19-moth5-paired-freebsd
+  cancel-in-progress: false
+
+jobs:
+  paired-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout BOP exact PR19 head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: ryanmaclean/bop
+          ref: 617666ce6eab93fc91d378e97c21f3acb8914a97
+          persist-credentials: false
+
+      - name: Checkout public Moth exact PR5 head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: ryanmaclean/moth
+          ref: d9d2aca1f940ee3d845fca92ce46e3106b05d656
+          path: moth-paired
+          persist-credentials: false
+
+      - name: Verify exact source and lock bytes before VM work
+        run: |
+          test "$(git rev-parse HEAD)" = '617666ce6eab93fc91d378e97c21f3acb8914a97'
+          test "$(git -C moth-paired rev-parse HEAD)" = 'd9d2aca1f940ee3d845fca92ce46e3106b05d656'
+          echo 'd16018d33360816f65c6fc3c1f27efeb87f3dc6b38b7399c357a27a4668a8c81  Cargo.lock' | sha256sum --check --status
+          echo 'befd91e188696989d415870792acb3f9fa5a5d3bd79fe8823989264714b6fe51  moth-paired/Cargo.lock' | sha256sum --check --status
+
+      - name: Admit selected license graphs and run synthetic native pair
+        uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc
+        with:
+          usesh: true
+          prepare: |
+            pkg install -y curl ca_root_nss gmake perl5 git coreutils
+          run: |
+            set -eu
+            mkdir -p receipts/paired-native
+            PAIR_ROOT="$(pwd -P)"
+            test "$(git rev-parse HEAD)" = '617666ce6eab93fc91d378e97c21f3acb8914a97'
+            test "$(git -C moth-paired rev-parse HEAD)" = 'd9d2aca1f940ee3d845fca92ce46e3106b05d656'
+            test "$(sha256 -q Cargo.lock)" = 'd16018d33360816f65c6fc3c1f27efeb87f3dc6b38b7399c357a27a4668a8c81'
+            test "$(sha256 -q moth-paired/Cargo.lock)" = 'befd91e188696989d415870792acb3f9fa5a5d3bd79fe8823989264714b6fe51'
+            pkg info > receipts/paired-native/freebsd-packages.txt
+            uname -a > receipts/paired-native/freebsd-uname.txt
+            curl --proto '=https' --tlsv1.2 -fsS https://sh.rustup.rs | sh -s -- -y --default-toolchain none --profile minimal
+            . "$HOME/.cargo/env"
+            rustup toolchain install 1.94.1 --profile minimal
+            rustup toolchain install nightly-2026-02-20 --profile minimal
+            rustc +1.94.1 -V > receipts/paired-native/moth-rustc.txt
+            rustc +nightly-2026-02-20 -V > receipts/paired-native/bop-rustc.txt
+            cd /tmp
+            cargo +1.94.1 install cargo-deny --version 0.20.2 --locked
+            cd "$PAIR_ROOT"
+            RUSTUP_TOOLCHAIN=1.94.1 cargo deny --version > receipts/paired-native/cargo-deny-version.txt
+            test "$(RUSTUP_TOOLCHAIN=1.94.1 cargo deny --version)" = 'cargo-deny 0.20.2'
+            # Every command runs behind the same finite VM/job timeout. No
+            # continue-on-error: rejected dependencies stop before binaries.
+            cd moth-paired
+            cargo +1.94.1 tree --locked --target x86_64-unknown-freebsd -p cli > ../receipts/paired-native/moth-tree.txt
+            RUSTUP_TOOLCHAIN=1.94.1 cargo deny --manifest-path cli/Cargo.toml --target x86_64-unknown-freebsd --locked check licenses > ../receipts/paired-native/moth-cli-selected-license.txt 2>&1
+            cd ..
+            cargo +nightly-2026-02-20 tree --locked --target x86_64-unknown-freebsd -p bop --features timeout-process-tree-fixture > receipts/paired-native/bop-tree.txt
+            RUSTUP_TOOLCHAIN=nightly-2026-02-20 cargo deny --manifest-path crates/bop-cli/Cargo.toml --features timeout-process-tree-fixture --target x86_64-unknown-freebsd --locked check licenses > receipts/paired-native/bop-fixture-selected-license.txt 2>&1
+            cd moth-paired
+            cargo +1.94.1 build --locked --frozen --offline -p cli > ../receipts/paired-native/moth-build.txt 2>&1
+            cd ..
+            test -x moth-paired/target/debug/agent
+            export MOTH_AGENT_BIN="$(pwd -P)/moth-paired/target/debug/agent"
+            # CI-only custody overlay: exact PR source is checked before edit;
+            # the three synthetic fixtures use retained, unique 0700 dirs.
+            # This derivative test source is not a production source change.
+            fixture_source=crates/bop-cli/tests/dispatcher_harness.rs
+            test "$(sha256 -q "$fixture_source")" = '33a5555ed37dcee74345db38991689a3c90b15aa4589704e81b59765fed13a9b'
+            cp "$fixture_source" receipts/paired-native/dispatcher_harness.original.rs
+            sed -i '' \
+              -e '804s@let td = tempfile::tempdir().unwrap();@let td = paired_retained_tempdir();@' \
+              -e '950s@let td=tempfile::tempdir().unwrap();@let td=paired_retained_tempdir();@' \
+              -e '1048s@let td=tempfile::tempdir().unwrap();@let td=paired_retained_tempdir();@' \
+              "$fixture_source"
+            cat >> "$fixture_source" <<'RUST_CUSTODY'
+
+            #[cfg(all(target_os = "freebsd", feature = "timeout-process-tree-fixture"))]
+            struct PairedRetainedDir(PathBuf);
+            #[cfg(all(target_os = "freebsd", feature = "timeout-process-tree-fixture"))]
+            impl PairedRetainedDir { fn path(&self) -> &Path { &self.0 } }
+            #[cfg(all(target_os = "freebsd", feature = "timeout-process-tree-fixture"))]
+            fn paired_retained_tempdir() -> PairedRetainedDir {
+                let parent = PathBuf::from(std::env::var_os("BOP_PAIRED_FIXTURE_ROOT")
+                    .expect("synthetic receipt root required"));
+                assert!(parent.is_absolute() && parent.is_dir());
+                PairedRetainedDir(tempfile::Builder::new().prefix("synthetic-")
+                    .tempdir_in(parent).expect("retained fixture dir").keep())
+            }
+            RUST_CUSTODY
+            test "$(grep -c 'let td.*paired_retained_tempdir();' "$fixture_source")" -eq 3
+            diff -u receipts/paired-native/dispatcher_harness.original.rs "$fixture_source" > receipts/paired-native/fixture-custody-overlay.diff || test "$?" -eq 1
+            sha256 "$fixture_source" "$MOTH_AGENT_BIN" > receipts/paired-native/derived-source-and-agent.sha256
+            mkdir -p receipts/paired-native/raw
+            chmod 700 receipts/paired-native/raw
+            # On ordinary command failure, retain a digest index of every
+            # synthetic file. Forced VM death remains unknown, not clean.
+            trap 'status=$?; find receipts/paired-native/raw -type f -print | LC_ALL=C sort | while IFS= read -r file; do sha256 "$file"; done > receipts/paired-native/raw-SHA256SUMS.txt; exit "$status"' EXIT
+            for fixture in \
+              dispatcher_moth_receipt_matches_full_rendered_prompt \
+              dispatcher_moth_timeout_keeps_card_fenced_until_owned_work_retires \
+              moth_owner_timeout_retires_separate_session_and_preserves_sentinel
+            do
+              fixture_root="$(pwd -P)/receipts/paired-native/raw/$fixture"
+              mkdir -m 700 "$fixture_root"
+              export BOP_PAIRED_FIXTURE_ROOT="$fixture_root"
+              (while :; do date -u '+%Y-%m-%dT%H:%M:%SZ'; ps -axo pid,ppid,pgid,sid,state,comm | awk 'NR == 1 || /agent|bop|timeout.process.tree/'; sleep 1; done) > "$fixture_root/process-samples.txt" 2>&1 &
+              sampler_pid=$!
+              set +e
+              gtimeout -k 10s 180s cargo +nightly-2026-02-20 test --locked -p bop \
+                --features timeout-process-tree-fixture --test dispatcher_harness \
+                "$fixture" -- --ignored --exact --nocapture \
+                > "receipts/paired-native/${fixture}.txt" 2>&1
+              fixture_status=$?
+              kill "$sampler_pid" 2>/dev/null || true
+              wait "$sampler_pid" 2>/dev/null || true
+              set -e
+              printf '%s\n' "$fixture_status" > "$fixture_root/test-exit-code.txt"
+              test "$fixture_status" -eq 0
+              test -s "$fixture_root/process-samples.txt"
+              case "$fixture" in
+                dispatcher_moth_receipt_matches_full_rendered_prompt|dispatcher_moth_timeout_keeps_card_fenced_until_owned_work_retires)
+                  test -n "$(find "$fixture_root" -type f -name '*.jsonl' -print -quit)" ;;
+                moth_owner_timeout_retires_separate_session_and_preserves_sentinel)
+                  test -n "$(find "$fixture_root" -type f -name prompt -print -quit)" ;;
+              esac
+            done
+            printf '%s\n' 'synthetic native pair completed; no real provider acceptance' > receipts/paired-native/SCOPE.txt
+
+      - name: Retain diagnostic receipts even when a gate fails
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: bop19-moth5-paired-freebsd-diagnostic
+          path: receipts/paired-native/
+          if-no-files-found: error
+          retention-days: 7
