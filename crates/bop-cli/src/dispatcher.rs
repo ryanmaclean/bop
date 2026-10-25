@@ -2201,9 +2201,9 @@ mod tests {
 
     impl RunMetadataIo for FaultRunMetadataIo {
         fn read(&self, card_dir: &Path) -> anyhow::Result<Meta> {
-            self.reads.fetch_add(1, Ordering::SeqCst);
-            if matches!(self.fault, PreSpawnFault::Read) {
-                anyhow::bail!("injected second metadata read failure");
+            let read_index = self.reads.fetch_add(1, Ordering::SeqCst);
+            if matches!(self.fault, PreSpawnFault::Read) && read_index == 0 {
+                anyhow::bail!("injected pre-spawn metadata read failure");
             }
             bop_core::read_meta(card_dir)
         }
@@ -2325,7 +2325,11 @@ mod tests {
             .await
             .unwrap();
 
-            assert_eq!(meta_io.reads.load(Ordering::SeqCst), 1, "{fault:?}");
+            assert_eq!(
+                meta_io.reads.load(Ordering::SeqCst),
+                if matches!(fault, PreSpawnFault::Read) { 2 } else { 1 },
+                "{fault:?}"
+            );
             assert_eq!(
                 meta_io.writes.load(Ordering::SeqCst),
                 usize::from(!matches!(
