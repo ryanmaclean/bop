@@ -37,14 +37,14 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: ryanmaclean/moth
-          ref: 4f40852765259129b24cfa56a4de6f26ec991337
+          ref: 1d0a7dc1108ab0090d49fb834cc0d428ee31322d
           path: moth-paired
           persist-credentials: false
 
       - name: Verify exact source and lock bytes before VM work
         run: |
           test "$(git rev-parse HEAD)" = '1c0b62bf3b3c06fa3e18f81ccb7371df6af38081'
-          test "$(git -C moth-paired rev-parse HEAD)" = '4f40852765259129b24cfa56a4de6f26ec991337'
+          test "$(git -C moth-paired rev-parse HEAD)" = '1d0a7dc1108ab0090d49fb834cc0d428ee31322d'
           echo 'd16018d33360816f65c6fc3c1f27efeb87f3dc6b38b7399c357a27a4668a8c81  Cargo.lock' | sha256sum --check --status
           echo 'befd91e188696989d415870792acb3f9fa5a5d3bd79fe8823989264714b6fe51  moth-paired/Cargo.lock' | sha256sum --check --status
 
@@ -69,7 +69,7 @@ jobs:
             trap 'status=$?; trap - EXIT; set +e; if [ -d "$PAIR_ROOT/receipts/paired-native/raw" ]; then (find "$PAIR_ROOT/receipts/paired-native/raw" -type f -print | LC_ALL=C sort | while IFS= read -r file; do sha256 "$file" || exit 1; done) > "$PAIR_ROOT/receipts/paired-native/raw-SHA256SUMS.txt" || status=1; fi; printf "%s\n" "$status" > "$PAIR_ROOT/receipts/paired-native/VM-EXIT-CODE" || exit 1; exit 0' EXIT
             exec > "$PAIR_ROOT/receipts/paired-native/VM-RAW.log" 2>&1
             test "$(git -c safe.directory="$PAIR_ROOT" -C "$PAIR_ROOT" rev-parse HEAD)" = '1c0b62bf3b3c06fa3e18f81ccb7371df6af38081'
-            test "$(git -c safe.directory="$PAIR_ROOT/moth-paired" -C "$PAIR_ROOT/moth-paired" rev-parse HEAD)" = '4f40852765259129b24cfa56a4de6f26ec991337'
+            test "$(git -c safe.directory="$PAIR_ROOT/moth-paired" -C "$PAIR_ROOT/moth-paired" rev-parse HEAD)" = '1d0a7dc1108ab0090d49fb834cc0d428ee31322d'
             test "$(sha256 -q Cargo.lock)" = 'd16018d33360816f65c6fc3c1f27efeb87f3dc6b38b7399c357a27a4668a8c81'
             test "$(sha256 -q moth-paired/Cargo.lock)" = 'befd91e188696989d415870792acb3f9fa5a5d3bd79fe8823989264714b6fe51'
             pkg info > receipts/paired-native/freebsd-packages.txt
@@ -101,7 +101,7 @@ jobs:
             RUSTUP_TOOLCHAIN=nightly-2026-02-20 cargo fetch --locked --target x86_64-unknown-freebsd --manifest-path crates/bop-cli/Cargo.toml
             RUSTUP_TOOLCHAIN=1.94.1 cargo fetch --locked --target x86_64-unknown-freebsd --manifest-path moth-paired/cli/Cargo.toml
             RUSTUP_TOOLCHAIN=nightly-2026-02-20 nu .github/scripts/selected-notices.nu crates/bop-cli/Cargo.toml bop timeout-process-tree-fixture Cargo.lock d16018d33360816f65c6fc3c1f27efeb87f3dc6b38b7399c357a27a4668a8c81 1c0b62bf3b3c06fa3e18f81ccb7371df6af38081 receipts/paired-native/notices/bop
-            RUSTUP_TOOLCHAIN=1.94.1 nu .github/scripts/selected-notices.nu moth-paired/cli/Cargo.toml cli - moth-paired/Cargo.lock befd91e188696989d415870792acb3f9fa5a5d3bd79fe8823989264714b6fe51 4f40852765259129b24cfa56a4de6f26ec991337 receipts/paired-native/notices/moth
+            RUSTUP_TOOLCHAIN=1.94.1 nu .github/scripts/selected-notices.nu moth-paired/cli/Cargo.toml cli - moth-paired/Cargo.lock befd91e188696989d415870792acb3f9fa5a5d3bd79fe8823989264714b6fe51 1d0a7dc1108ab0090d49fb834cc0d428ee31322d receipts/paired-native/notices/moth
             test -s receipts/paired-native/notices/bop/COMPLETE
             test -s receipts/paired-native/notices/moth/COMPLETE
             cd moth-paired
