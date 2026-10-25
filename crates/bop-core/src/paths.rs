@@ -70,7 +70,11 @@ mod platform {
         // insufficient buffer. Growing/retrying would change failure semantics.
         // SAFETY: sysconf takes a constant selector and no caller-owned pointers.
         let suggested = unsafe { libc::sysconf(libc::_SC_GETPW_R_SIZE_MAX) };
-        let size = if suggested < 0 { 512 } else { suggested as usize };
+        let size = if suggested < 0 {
+            512
+        } else {
+            suggested as usize
+        };
         let mut storage = Vec::<libc::c_char>::with_capacity(size);
         let mut record = MaybeUninit::<libc::passwd>::zeroed();
         let mut found = ptr::null_mut();

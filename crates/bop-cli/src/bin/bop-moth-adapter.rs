@@ -15,7 +15,6 @@ use tokio::process::Command;
 #[path = "../owner_client.rs"]
 mod owner_client;
 
-
 use serde::Deserialize;
 
 const HELP_TIMEOUT_MS: u64 = 3000;
@@ -72,7 +71,8 @@ async fn run() -> Result<ExitCode, String> {
         &card_dir,
         &logs_dir,
         &mut stderr_file,
-    ).await;
+    )
+    .await;
     if let Err(error) = &outcome {
         let _ = writeln!(stderr_file, "bop-moth-adapter: {error}");
     }
@@ -129,7 +129,11 @@ async fn run_validated(
     require_prompt_stdin_capability(&agent_bin).await?;
 
     let mock = test_mock_mode(env::var_os("BOP_MOTH_TEST_MOCK"), cfg!(debug_assertions))?;
-    let mock_script = test_mock_script(env::var_os("BOP_MOTH_TEST_MOCK_SCRIPT"), mock, cfg!(debug_assertions))?;
+    let mock_script = test_mock_script(
+        env::var_os("BOP_MOTH_TEST_MOCK_SCRIPT"),
+        mock,
+        cfg!(debug_assertions),
+    )?;
     let runlog_dir = prepare_runlog_dir(logs_dir)?;
     let receipt = runlog_dir.join(format!("{run_id}.jsonl"));
     match fs::symlink_metadata(&receipt) {
@@ -142,33 +146,64 @@ async fn run_validated(
     let prompt = read_prompt_snapshot(&prompt_file)?;
     let mut stdout_file = open_log(stdout_log, "stdout_log")?;
     let mut command = owned_command(&agent_bin, 86400000, 67108864, prompt.len() as u64);
-    command.arg(&agent_bin).arg("run").arg("--runlog").arg(&runlog_dir).arg("--prompt-stdin")
-        .current_dir(workdir).env("BOP_RUN_ID", &run_id);
-    if let Some(path) = mock_script { command.arg("--mock-script").arg(path); }
-    else if mock { command.arg("--mock"); }
+    command
+        .arg(&agent_bin)
+        .arg("run")
+        .arg("--runlog")
+        .arg(&runlog_dir)
+        .arg("--prompt-stdin")
+        .current_dir(workdir)
+        .env("BOP_RUN_ID", &run_id);
+    if let Some(path) = mock_script {
+        command.arg("--mock-script").arg(path);
+    } else if mock {
+        command.arg("--mock");
+    }
     let owner = owner_client::start(format!("moth-run:{run_id}"), command, prompt, 67108864)?;
     let completion = owner.release().await?;
-    stdout_file.write_all(&completion.stdout).map_err(|e| format!("stdout_log: {e}"))?;
-    stderr_file.write_all(&completion.stderr).map_err(|e| format!("stderr_log: {e}"))?;
+    stdout_file
+        .write_all(&completion.stdout)
+        .map_err(|e| format!("stdout_log: {e}"))?;
+    stderr_file
+        .write_all(&completion.stderr)
+        .map_err(|e| format!("stderr_log: {e}"))?;
     let code = u8::try_from(completion.exit_code()).map_err(|_| "unsupported Moth exit code")?;
-    if code == 0 { validate_success_receipt(&receipt, &run_id)?; }
+    if code == 0 {
+        validate_success_receipt(&receipt, &run_id)?;
+    }
     Ok(ExitCode::from(code))
 }
 
 fn owned_command(agent: &Path, deadline: u64, cap: usize, input: u64) -> Command {
-    let mut command=Command::new(agent);
-    command.arg("__moth_owner_v1").arg("--deadline-ms").arg(deadline.to_string())
-        .arg("--capture-bytes").arg(cap.to_string()).arg("--input-bytes").arg(input.to_string()).arg("--");
+    let mut command = Command::new(agent);
+    command
+        .arg("__moth_owner_v1")
+        .arg("--deadline-ms")
+        .arg(deadline.to_string())
+        .arg("--capture-bytes")
+        .arg(cap.to_string())
+        .arg("--input-bytes")
+        .arg(input.to_string())
+        .arg("--");
     command
 }
 async fn require_prompt_stdin_capability(agent_bin: &Path) -> Result<(), String> {
-    let mut command=owned_command(agent_bin, HELP_TIMEOUT_MS, HELP_MAX_BYTES, 0);
+    let mut command = owned_command(agent_bin, HELP_TIMEOUT_MS, HELP_MAX_BYTES, 0);
     command.arg(agent_bin).arg("run").arg("--help");
-    let completion=owner_client::start("moth-capability".into(),command,Vec::new(),HELP_MAX_BYTES)?.release().await?;
-    let marker=b"--prompt-stdin";
-    let advertised=completion.stdout.windows(marker.len()).any(|w| w==marker)
-        || completion.stderr.windows(marker.len()).any(|w| w==marker);
-    if completion.exit_code()!=0 || !advertised { return Err("MOTH_AGENT_BIN lacks required agent run --prompt-stdin support".into()); }
+    let completion = owner_client::start(
+        "moth-capability".into(),
+        command,
+        Vec::new(),
+        HELP_MAX_BYTES,
+    )?
+    .release()
+    .await?;
+    let marker = b"--prompt-stdin";
+    let advertised = completion.stdout.windows(marker.len()).any(|w| w == marker)
+        || completion.stderr.windows(marker.len()).any(|w| w == marker);
+    if completion.exit_code() != 0 || !advertised {
+        return Err("MOTH_AGENT_BIN lacks required agent run --prompt-stdin support".into());
+    }
     Ok(())
 }
 
@@ -422,13 +457,25 @@ fn valid_bop_run_id(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn test_mock_script(value:Option<OsString>, mock:bool, debug:bool)->Result<Option<PathBuf>,String> {
-    let Some(raw)=value else { return Ok(None); };
-    if !debug || !mock { return Err("BOP_MOTH_TEST_MOCK_SCRIPT requires explicit debug-only mock mode".into()); }
-    let path=PathBuf::from(raw);
-    if !path.is_absolute() { return Err("BOP_MOTH_TEST_MOCK_SCRIPT must be absolute".into()); }
-    let meta=fs::symlink_metadata(&path).map_err(|e|format!("mock script metadata: {e}"))?;
-    if meta.file_type().is_symlink() || !meta.is_file() { return Err("mock script must be a regular non-symlink file".into()); }
+fn test_mock_script(
+    value: Option<OsString>,
+    mock: bool,
+    debug: bool,
+) -> Result<Option<PathBuf>, String> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    if !debug || !mock {
+        return Err("BOP_MOTH_TEST_MOCK_SCRIPT requires explicit debug-only mock mode".into());
+    }
+    let path = PathBuf::from(raw);
+    if !path.is_absolute() {
+        return Err("BOP_MOTH_TEST_MOCK_SCRIPT must be absolute".into());
+    }
+    let meta = fs::symlink_metadata(&path).map_err(|e| format!("mock script metadata: {e}"))?;
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return Err("mock script must be a regular non-symlink file".into());
+    }
     Ok(Some(path))
 }
 
@@ -444,7 +491,7 @@ fn test_mock_mode(value: Option<OsString>, debug_assertions: bool) -> Result<boo
 
 #[cfg(test)]
 mod tests {
-    use super::{test_mock_script, test_mock_mode, valid_bop_run_id, validate_success_receipt};
+    use super::{test_mock_mode, test_mock_script, valid_bop_run_id, validate_success_receipt};
     use std::ffi::OsString;
     use std::fs;
 

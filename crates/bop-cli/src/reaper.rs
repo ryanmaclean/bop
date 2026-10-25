@@ -18,7 +18,9 @@ pub const MOTH_OWNER_UNRETIRED: &str = "moth-owner-v1:unretired";
 
 pub fn has_unretired_moth_owner(meta: &bop_core::Meta) -> bool {
     meta.runs.iter().any(|run| {
-        run.note.as_deref().is_some_and(|note| note.starts_with(MOTH_OWNER_UNRETIRED))
+        run.note
+            .as_deref()
+            .is_some_and(|note| note.starts_with(MOTH_OWNER_UNRETIRED))
     })
 }
 
@@ -26,12 +28,18 @@ fn recovery_metadata(card_dir: &Path) -> Option<bop_core::Meta> {
     match bop_core::read_meta(card_dir) {
         Ok(meta) if !has_unretired_moth_owner(&meta) => Some(meta),
         Ok(_) => {
-            eprintln!("retaining card {}: Moth owner retirement is unconfirmed", card_dir.display());
+            eprintln!(
+                "retaining card {}: Moth owner retirement is unconfirmed",
+                card_dir.display()
+            );
             None
         }
         Err(error) => {
             // Reconstructing minimal metadata would erase unknown ownership.
-            eprintln!("retaining card {}: unreadable ownership metadata: {error}", card_dir.display());
+            eprintln!(
+                "retaining card {}: unreadable ownership metadata: {error}",
+                card_dir.display()
+            );
             None
         }
     }
@@ -811,7 +819,10 @@ mod tests {
         assert!(recovered.is_empty());
         assert!(card_dir.exists());
         assert!(!pending.join("corrupt-card.bop").exists());
-        assert_eq!(fs::read_to_string(card_dir.join("meta.json")).unwrap(), "{ invalid json }");
+        assert_eq!(
+            fs::read_to_string(card_dir.join("meta.json")).unwrap(),
+            "{ invalid json }"
+        );
     }
 
     #[tokio::test]
@@ -879,28 +890,39 @@ mod tests {
 
     #[tokio::test]
     async fn both_recovery_paths_preserve_unretired_owner_then_accept_confirmed_retirement() {
-        let td=tempdir().unwrap();
-        let (running,pending,failed)=setup_card_dirs(td.path());
-        let mut meta=test_meta("owned",Some(0));
-        meta.runs.push(serde_json::from_value(serde_json::json!({
-            "run_id":"0123456789abcdef0123456789abcdef", "stage":"implement",
-            "provider":"moth", "model":"test", "adapter":"bop-moth-adapter",
-            "started_at":"2026-10-11T00:00:00Z", "outcome":"running",
-            "note":MOTH_OWNER_UNRETIRED
-        })).unwrap());
-        create_running_card(&running,"owned",999999,&meta);
-        let card=running.join("owned.bop");
-        let before=fs::read(card.join("meta.json")).unwrap();
-        reap_orphans(&running,&pending,&failed,3,Duration::from_secs(1)).await.unwrap();
-        assert!(recover_orphans(&running,&pending).await.unwrap().is_empty());
-        assert_eq!(fs::read(card.join("meta.json")).unwrap(),before);
+        let td = tempdir().unwrap();
+        let (running, pending, failed) = setup_card_dirs(td.path());
+        let mut meta = test_meta("owned", Some(0));
+        meta.runs.push(
+            serde_json::from_value(serde_json::json!({
+                "run_id":"0123456789abcdef0123456789abcdef", "stage":"implement",
+                "provider":"moth", "model":"test", "adapter":"bop-moth-adapter",
+                "started_at":"2026-10-11T00:00:00Z", "outcome":"running",
+                "note":MOTH_OWNER_UNRETIRED
+            }))
+            .unwrap(),
+        );
+        create_running_card(&running, "owned", 999999, &meta);
+        let card = running.join("owned.bop");
+        let before = fs::read(card.join("meta.json")).unwrap();
+        reap_orphans(&running, &pending, &failed, 3, Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert!(recover_orphans(&running, &pending)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(fs::read(card.join("meta.json")).unwrap(), before);
         assert!(!pending.join("owned.bop").exists());
         // Simulate the production transition only after a live owner retirement
         // barrier. This metadata unit case does not prove native retirement.
-        meta.runs[0].note=None;
-        meta.runs[0].ended_at=Some("2026-10-11T00:00:01Z".into());
-        meta.runs[0].outcome="failed".into();
-        write_meta(&card,&meta).unwrap();
-        assert_eq!(recover_orphans(&running,&pending).await.unwrap(),vec!["owned"]);
+        meta.runs[0].note = None;
+        meta.runs[0].ended_at = Some("2026-10-11T00:00:01Z".into());
+        meta.runs[0].outcome = "failed".into();
+        write_meta(&card, &meta).unwrap();
+        assert_eq!(
+            recover_orphans(&running, &pending).await.unwrap(),
+            vec!["owned"]
+        );
     }
 }

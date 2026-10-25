@@ -779,12 +779,20 @@ fn done_stdout(cards: &Path, id: &str) -> String {
 static NATIVE_OWNER_FIXTURE_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[cfg(all(target_os = "freebsd", feature = "timeout-process-tree-fixture"))]
-async fn sentinel_ready(beat:&std::path::Path,child:&mut std::process::Child) {
-    let until=tokio::time::Instant::now()+std::time::Duration::from_secs(5);
+async fn sentinel_ready(beat: &std::path::Path, child: &mut std::process::Child) {
+    let until = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
-        assert!(child.try_wait().unwrap().is_none(),"sentinel exited before readiness");
-        if fs::metadata(beat).is_ok_and(|m|m.len()>0) { return; }
-        assert!(tokio::time::Instant::now()<until,"sentinel readiness deadline");
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "sentinel exited before readiness"
+        );
+        if fs::metadata(beat).is_ok_and(|m| m.len() > 0) {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < until,
+            "sentinel readiness deadline"
+        );
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
 }
@@ -837,28 +845,65 @@ async fn dispatcher_moth_receipt_matches_full_rendered_prompt() {
     assert!(expected.chars().count() > 80);
 
     struct Sentinel(std::process::Child);
-    impl Drop for Sentinel { fn drop(&mut self) { let _=self.0.kill(); let _=self.0.wait(); } }
-    let sentinel_beat=td.path().join("sentinel-beat");
-    let mut sentinel=Sentinel(Command::new(env!("CARGO_BIN_EXE_bop-timeout-process-tree-fixture"))
-        .arg("sentinel").env("BOP_TIMEOUT_TREE_PID_FILE",td.path().join("sentinel-pid"))
-        .env("BOP_TIMEOUT_TREE_BEAT_FILE",&sentinel_beat).spawn().unwrap());
-    sentinel_ready(&sentinel_beat,&mut sentinel.0).await;
-    let mut command=tokio::process::Command::new(&moth_bin);
-    command.args(["__moth_owner_v1","--deadline-ms","60000","--capture-bytes","1048576","--input-bytes","0","--"])
-        .arg(bop_bin()).env("MOTH_AGENT_BIN",&moth_bin)
-        .env("BOP_MOTH_TEST_MOCK","1").env("MOTH_TEST_ECHO_FULL_PROMPT",&expected)
-        .env("BOP_RUN_ID","spoofed-parent-id").env("AGENT_RUN_ID","inherited-agent-conflict")
-        .args(["--cards-dir",cards.to_str().unwrap(),"dispatcher","--adapter",adapter.to_str().unwrap(),"--once"]);
-    let owner=owner_client::start("outer-real-bop".into(),command,Vec::new(),1048576).unwrap();
-    let result=owner.release().await;
+    impl Drop for Sentinel {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let sentinel_beat = td.path().join("sentinel-beat");
+    let mut sentinel = Sentinel(
+        Command::new(env!("CARGO_BIN_EXE_bop-timeout-process-tree-fixture"))
+            .arg("sentinel")
+            .env("BOP_TIMEOUT_TREE_PID_FILE", td.path().join("sentinel-pid"))
+            .env("BOP_TIMEOUT_TREE_BEAT_FILE", &sentinel_beat)
+            .spawn()
+            .unwrap(),
+    );
+    sentinel_ready(&sentinel_beat, &mut sentinel.0).await;
+    let mut command = tokio::process::Command::new(&moth_bin);
+    command
+        .args([
+            "__moth_owner_v1",
+            "--deadline-ms",
+            "60000",
+            "--capture-bytes",
+            "1048576",
+            "--input-bytes",
+            "0",
+            "--",
+        ])
+        .arg(bop_bin())
+        .env("MOTH_AGENT_BIN", &moth_bin)
+        .env("BOP_MOTH_TEST_MOCK", "1")
+        .env("MOTH_TEST_ECHO_FULL_PROMPT", &expected)
+        .env("BOP_RUN_ID", "spoofed-parent-id")
+        .env("AGENT_RUN_ID", "inherited-agent-conflict")
+        .args([
+            "--cards-dir",
+            cards.to_str().unwrap(),
+            "dispatcher",
+            "--adapter",
+            adapter.to_str().unwrap(),
+            "--once",
+        ]);
+    let owner = owner_client::start("outer-real-bop".into(), command, Vec::new(), 1048576).unwrap();
+    let result = owner.release().await;
     // Unknown cannot return a false clean test outcome or discard authority.
     owner_client::retirement_barrier().await;
-    let output=result.expect("outer owner retirement must be confirmed");
-    assert_eq!(output.exit_code(),0,"dispatcher failed without native receipt");
-    assert!(sentinel.0.try_wait().unwrap().is_none(),"unrelated sentinel was terminated");
-    let before=fs::metadata(&sentinel_beat).unwrap().len();
+    let output = result.expect("outer owner retirement must be confirmed");
+    assert_eq!(
+        output.exit_code(),
+        0,
+        "dispatcher failed without native receipt"
+    );
+    assert!(
+        sentinel.0.try_wait().unwrap().is_none(),
+        "unrelated sentinel was terminated"
+    );
+    let before = fs::metadata(&sentinel_beat).unwrap().len();
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    assert!(fs::metadata(&sentinel_beat).unwrap().len()>before);
+    assert!(fs::metadata(&sentinel_beat).unwrap().len() > before);
 
     let card = find_card_in(&cards, "done", "mothbridge");
     assert!(card.exists(), "Moth card must finish in done/");
@@ -935,101 +980,192 @@ async fn dispatcher_moth_receipt_matches_full_rendered_prompt() {
     );
 }
 
-
 /// Uses the actual dispatcher, adapter, Moth actor and selected VShell owner.
 /// Scripted model events select work; they are not evidence of model prompt echo.
 #[cfg(all(target_os = "freebsd", feature = "timeout-process-tree-fixture"))]
 #[tokio::test]
 #[ignore = "requires admitted FreeBSD and exact composed debug MOTH_AGENT_BIN; unrun"]
 async fn dispatcher_moth_timeout_keeps_card_fenced_until_owned_work_retires() {
-    let _serial=NATIVE_OWNER_FIXTURE_GATE.lock().await;
-    let agent=PathBuf::from(std::env::var_os("MOTH_AGENT_BIN").expect("paired composed agent required"));
+    let _serial = NATIVE_OWNER_FIXTURE_GATE.lock().await;
+    let agent =
+        PathBuf::from(std::env::var_os("MOTH_AGENT_BIN").expect("paired composed agent required"));
     assert!(agent.is_absolute() && agent.is_file());
-    let adapter=PathBuf::from(env!("CARGO_BIN_EXE_bop-moth-adapter"));
-    let helper=PathBuf::from(env!("CARGO_BIN_EXE_bop-timeout-process-tree-fixture"));
-    let td=tempfile::tempdir().unwrap();
-    let cards=td.path().join(".cards");
+    let adapter = PathBuf::from(env!("CARGO_BIN_EXE_bop-moth-adapter"));
+    let helper = PathBuf::from(env!("CARGO_BIN_EXE_bop-timeout-process-tree-fixture"));
+    let td = tempfile::tempdir().unwrap();
+    let cards = td.path().join(".cards");
     let providers=serde_json::json!({"providers":{"moth":{"command":adapter.to_str().unwrap(),"rate_limit_exit":75}}}).to_string();
-    setup_routing_case(&cards,r#"["moth"]"#,&providers,"moth-owned-timeout");
-    let pending=find_card_in(&cards,"pending","moth-owned-timeout");
-    fs::write(pending.join("spec.md"),"Synthetic timeout full prompt 雪🙂\n".repeat(40)).unwrap();
-    let mut meta=bop_core::read_meta(&pending).unwrap();
-    meta.timeout_seconds=Some(10);
-    bop_core::write_meta(&pending,&meta).unwrap();
-    let stage=meta.stage.clone();
-    let target=std::env::temp_dir().join(format!("bop-target-{}",meta.id));
-    assert!(!target.exists(),"fixture must not reuse another target directory");
-    let expected=bop_core::render_prompt(&fs::read_to_string(pending.join("prompt.md")).unwrap(),&bop_core::PromptContext::from_files(&pending,&meta).unwrap());
-    let beat=td.path().join("owned-beat");
-    let tool_input=td.path().join("tool-stdin");
-    let owned_pid=td.path().join("owned-pid");
+    setup_routing_case(&cards, r#"["moth"]"#, &providers, "moth-owned-timeout");
+    let pending = find_card_in(&cards, "pending", "moth-owned-timeout");
+    fs::write(
+        pending.join("spec.md"),
+        "Synthetic timeout full prompt 雪🙂\n".repeat(40),
+    )
+    .unwrap();
+    let mut meta = bop_core::read_meta(&pending).unwrap();
+    meta.timeout_seconds = Some(10);
+    bop_core::write_meta(&pending, &meta).unwrap();
+    let stage = meta.stage.clone();
+    let target = std::env::temp_dir().join(format!("bop-target-{}", meta.id));
+    assert!(
+        !target.exists(),
+        "fixture must not reuse another target directory"
+    );
+    let expected = bop_core::render_prompt(
+        &fs::read_to_string(pending.join("prompt.md")).unwrap(),
+        &bop_core::PromptContext::from_files(&pending, &meta).unwrap(),
+    );
+    let beat = td.path().join("owned-beat");
+    let tool_input = td.path().join("tool-stdin");
+    let owned_pid = td.path().join("owned-pid");
     // This is parsed only by first-party VShell. The public tool label is bash;
     // no external Bash executable or separate script is introduced.
-    let quote=|p:&std::path::Path|format!("'{}'",p.to_str().unwrap().replace('\'',"'\\''"));
+    let quote = |p: &std::path::Path| format!("'{}'", p.to_str().unwrap().replace('\'', "'\\''"));
     let command=format!("BOP_TIMEOUT_TREE_PROMPT_FILE={} BOP_TIMEOUT_TREE_PID_FILE={} BOP_TIMEOUT_TREE_BEAT_FILE={} BOP_TIMEOUT_TREE_TARGET_DIR={} BOP_TIMEOUT_TREE_SEPARATE_SESSION=1 {} run",quote(&tool_input),quote(&owned_pid),quote(&beat),quote(&target),quote(&helper));
-    let script=td.path().join("mock-turns.json");
+    let script = td.path().join("mock-turns.json");
     fs::write(&script,serde_json::to_vec(&serde_json::json!({"turns":[[
         {"type":"tool_use_start","id":"owned-timeout-tool","name":"bash"},
         {"type":"tool_use_input_delta","delta":serde_json::json!({"command":command}).to_string()},
         {"type":"block_stop"},{"type":"stop","reason":"tool_use"}
     ]]})).unwrap()).unwrap();
     struct Sentinel(std::process::Child);
-    impl Drop for Sentinel { fn drop(&mut self){let _=self.0.kill();let _=self.0.wait();} }
-    let outside=td.path().join("outside-beat");
-    let mut sentinel=Sentinel(Command::new(&helper).arg("sentinel")
-        .env("BOP_TIMEOUT_TREE_PID_FILE",td.path().join("outside-pid"))
-        .env("BOP_TIMEOUT_TREE_BEAT_FILE",&outside).spawn().unwrap());
-    sentinel_ready(&outside,&mut sentinel.0).await;
-    let mut command=tokio::process::Command::new(&agent);
-    command.args(["__moth_owner_v1","--deadline-ms","60000","--capture-bytes","1048576","--input-bytes","0","--"])
-        .arg(bop_bin()).env("MOTH_AGENT_BIN",&agent).env("BOP_MOTH_TEST_MOCK","1")
-        .env("BOP_MOTH_TEST_MOCK_SCRIPT",&script).env("BOP_RUN_ID","spoofed-timeout-parent")
-        .env("AGENT_RUN_ID","spoofed-timeout-agent")
-        .args(["--cards-dir",cards.to_str().unwrap(),"dispatcher","--adapter",adapter.to_str().unwrap(),"--once"]);
-    let owner=owner_client::start("outer-real-bop-timeout".into(),command,vec![],1048576).unwrap();
+    impl Drop for Sentinel {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let outside = td.path().join("outside-beat");
+    let mut sentinel = Sentinel(
+        Command::new(&helper)
+            .arg("sentinel")
+            .env("BOP_TIMEOUT_TREE_PID_FILE", td.path().join("outside-pid"))
+            .env("BOP_TIMEOUT_TREE_BEAT_FILE", &outside)
+            .spawn()
+            .unwrap(),
+    );
+    sentinel_ready(&outside, &mut sentinel.0).await;
+    let mut command = tokio::process::Command::new(&agent);
+    command
+        .args([
+            "__moth_owner_v1",
+            "--deadline-ms",
+            "60000",
+            "--capture-bytes",
+            "1048576",
+            "--input-bytes",
+            "0",
+            "--",
+        ])
+        .arg(bop_bin())
+        .env("MOTH_AGENT_BIN", &agent)
+        .env("BOP_MOTH_TEST_MOCK", "1")
+        .env("BOP_MOTH_TEST_MOCK_SCRIPT", &script)
+        .env("BOP_RUN_ID", "spoofed-timeout-parent")
+        .env("AGENT_RUN_ID", "spoofed-timeout-agent")
+        .args([
+            "--cards-dir",
+            cards.to_str().unwrap(),
+            "dispatcher",
+            "--adapter",
+            adapter.to_str().unwrap(),
+            "--once",
+        ]);
+    let owner =
+        owner_client::start("outer-real-bop-timeout".into(), command, vec![], 1048576).unwrap();
     // Preserve cleanup authority even when a fixture assertion fails.
-    let observed=async {
-        let until=tokio::time::Instant::now()+std::time::Duration::from_secs(7);
-        while !fs::metadata(&beat).is_ok_and(|m|m.len()>0) {
-            assert!(tokio::time::Instant::now()<until,"actual VShell descendant did not become ready");
+    let observed = async {
+        let until = tokio::time::Instant::now() + std::time::Duration::from_secs(7);
+        while !fs::metadata(&beat).is_ok_and(|m| m.len() > 0) {
+            assert!(
+                tokio::time::Instant::now() < until,
+                "actual VShell descendant did not become ready"
+            );
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }
-        let running=find_card_in(&cards,"running","moth-owned-timeout");
-        assert_eq!(fs::read(running.join("prompt.md")).unwrap(),expected.as_bytes());
-        let live=bop_core::read_meta(&running).unwrap();
-        assert_eq!(live.runs.len(),1);
+        let running = find_card_in(&cards, "running", "moth-owned-timeout");
+        assert_eq!(
+            fs::read(running.join("prompt.md")).unwrap(),
+            expected.as_bytes()
+        );
+        let live = bop_core::read_meta(&running).unwrap();
+        assert_eq!(live.runs.len(), 1);
         assert!(live.runs[0].ended_at.is_none());
-        assert!(live.runs[0].note.as_deref().is_some_and(|n|n.starts_with("moth-owner-v1:unretired")));
-        assert!(target.join("owned-fixture").exists(),"target was removed while native work remained");
+        assert!(live.runs[0]
+            .note
+            .as_deref()
+            .is_some_and(|n| n.starts_with("moth-owner-v1:unretired")));
+        assert!(
+            target.join("owned-fixture").exists(),
+            "target was removed while native work remained"
+        );
     };
     // Catch assertion unwind without moving the retained owner out of scope.
-    let observed=owner_client::test_catch_poll(observed).await;
-    if observed.is_err(){owner.cancel();}
-    let result=owner.release().await;
+    let observed = owner_client::test_catch_poll(observed).await;
+    if observed.is_err() {
+        owner.cancel();
+    }
+    let result = owner.release().await;
     owner_client::retirement_barrier().await;
-    if let Err(panic)=observed {std::panic::resume_unwind(panic);}
-    let retired=result.expect("actual outer native retirement must be confirmed");
-    assert_eq!(retired.reason,0,"outer deadline must not masquerade as BOP timeout");
-    let failed=find_card_in(&cards,"failed","moth-owned-timeout");
-    let final_meta=bop_core::read_meta(&failed).unwrap();
-    assert_eq!(final_meta.runs.len(),1);
-    let run=&final_meta.runs[0];
-    assert_eq!(run.outcome,"timeout");assert!(run.ended_at.is_some());
-    assert!(!run.note.as_deref().is_some_and(|n|n.starts_with("moth-owner-v1:unretired")));
-    assert_eq!(final_meta.stages[&stage].status,bop_core::StageStatus::Failed);
-    assert!(!target.exists(),"confirmed retired target was not removed");
-    assert!(fs::read(&tool_input).unwrap().is_empty(),"VShell helper input is intentionally empty, not an alleged Moth prompt echo");
-    assert_eq!(run.run_id.len(),32);assert_ne!(run.run_id,"spoofed-timeout-parent");assert_ne!(run.run_id,"spoofed-timeout-agent");
-    let jsonl=fs::read(failed.join("logs/moth").join(format!("{}.jsonl",run.run_id))).unwrap();
-    assert_eq!(jsonl.last(),Some(&b'\n'));
-    let events:Vec<serde_json::Value>=std::str::from_utf8(&jsonl).unwrap().lines().map(|l|serde_json::from_str(l).unwrap()).collect();
-    assert!(!events.is_empty());assert_eq!(events[0]["kind"],"start");
-    for (seq,event) in events.iter().enumerate(){assert_eq!(event["seq"].as_u64(),Some(seq as u64));assert_eq!(event["run_id"].as_str(),Some(run.run_id.as_str()));assert_ne!(event["kind"],"done");}
-    assert!(events.iter().any(|e|e["kind"]=="tool_use_start"),"runlog must cover actual tool admission");
-    let stopped=fs::metadata(&beat).unwrap().len();let before=fs::metadata(&outside).unwrap().len();
+    if let Err(panic) = observed {
+        std::panic::resume_unwind(panic);
+    }
+    let retired = result.expect("actual outer native retirement must be confirmed");
+    assert_eq!(
+        retired.reason, 0,
+        "outer deadline must not masquerade as BOP timeout"
+    );
+    let failed = find_card_in(&cards, "failed", "moth-owned-timeout");
+    let final_meta = bop_core::read_meta(&failed).unwrap();
+    assert_eq!(final_meta.runs.len(), 1);
+    let run = &final_meta.runs[0];
+    assert_eq!(run.outcome, "timeout");
+    assert!(run.ended_at.is_some());
+    assert!(!run
+        .note
+        .as_deref()
+        .is_some_and(|n| n.starts_with("moth-owner-v1:unretired")));
+    assert_eq!(
+        final_meta.stages[&stage].status,
+        bop_core::StageStatus::Failed
+    );
+    assert!(!target.exists(), "confirmed retired target was not removed");
+    assert!(
+        fs::read(&tool_input).unwrap().is_empty(),
+        "VShell helper input is intentionally empty, not an alleged Moth prompt echo"
+    );
+    assert_eq!(run.run_id.len(), 32);
+    assert_ne!(run.run_id, "spoofed-timeout-parent");
+    assert_ne!(run.run_id, "spoofed-timeout-agent");
+    let jsonl = fs::read(
+        failed
+            .join("logs/moth")
+            .join(format!("{}.jsonl", run.run_id)),
+    )
+    .unwrap();
+    assert_eq!(jsonl.last(), Some(&b'\n'));
+    let events: Vec<serde_json::Value> = std::str::from_utf8(&jsonl)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert!(!events.is_empty());
+    assert_eq!(events[0]["kind"], "start");
+    for (seq, event) in events.iter().enumerate() {
+        assert_eq!(event["seq"].as_u64(), Some(seq as u64));
+        assert_eq!(event["run_id"].as_str(), Some(run.run_id.as_str()));
+        assert_ne!(event["kind"], "done");
+    }
+    assert!(
+        events.iter().any(|e| e["kind"] == "tool_use_start"),
+        "runlog must cover actual tool admission"
+    );
+    let stopped = fs::metadata(&beat).unwrap().len();
+    let before = fs::metadata(&outside).unwrap().len();
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    assert_eq!(fs::metadata(&beat).unwrap().len(),stopped);
-    assert!(fs::metadata(&outside).unwrap().len()>before);assert!(sentinel.0.try_wait().unwrap().is_none());
+    assert_eq!(fs::metadata(&beat).unwrap().len(), stopped);
+    assert!(fs::metadata(&outside).unwrap().len() > before);
+    assert!(sentinel.0.try_wait().unwrap().is_none());
 }
 
 /// Complementary native owner failure fixture. The preceding test exercises the
@@ -1042,36 +1178,69 @@ async fn moth_owner_timeout_retires_separate_session_and_preserves_sentinel() {
     let _serial = NATIVE_OWNER_FIXTURE_GATE.lock().await;
     use std::process::Stdio;
     struct Sentinel(std::process::Child);
-    impl Drop for Sentinel { fn drop(&mut self) { let _=self.0.kill();let _=self.0.wait(); } }
-    let agent=PathBuf::from(std::env::var_os("MOTH_AGENT_BIN").expect("paired agent required"));
-    let fixture=PathBuf::from(env!("CARGO_BIN_EXE_bop-timeout-process-tree-fixture"));
-    let td=tempfile::tempdir().unwrap();
-    let sentinel_beat=td.path().join("sentinel-beat");
-    let mut sentinel=Sentinel(Command::new(&fixture).arg("sentinel")
-        .env("BOP_TIMEOUT_TREE_PID_FILE",td.path().join("sentinel-pid"))
-        .env("BOP_TIMEOUT_TREE_BEAT_FILE",&sentinel_beat).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
-    sentinel_ready(&sentinel_beat,&mut sentinel.0).await;
-    let beat=td.path().join("owned-beat");
-    let prompt=td.path().join("prompt");
-    let expected="separate-session full prompt 雪🙂\n".repeat(30).into_bytes();
-    let mut command=tokio::process::Command::new(agent);
-    command.args(["__moth_owner_v1","--deadline-ms","2000","--capture-bytes","1048576","--input-bytes"])
-        .arg(expected.len().to_string()).arg("--").arg(&fixture).arg("run")
-        .env("BOP_TIMEOUT_TREE_PROMPT_FILE",&prompt)
-        .env("BOP_TIMEOUT_TREE_PID_FILE",td.path().join("owned-pid"))
-        .env("BOP_TIMEOUT_TREE_BEAT_FILE",&beat).env("BOP_TIMEOUT_TREE_SEPARATE_SESSION","1");
-    let owner=owner_client::start("separate-session-native".into(),command,expected.clone(),1048576).unwrap();
-    let result=owner.release().await;
+    impl Drop for Sentinel {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let agent = PathBuf::from(std::env::var_os("MOTH_AGENT_BIN").expect("paired agent required"));
+    let fixture = PathBuf::from(env!("CARGO_BIN_EXE_bop-timeout-process-tree-fixture"));
+    let td = tempfile::tempdir().unwrap();
+    let sentinel_beat = td.path().join("sentinel-beat");
+    let mut sentinel = Sentinel(
+        Command::new(&fixture)
+            .arg("sentinel")
+            .env("BOP_TIMEOUT_TREE_PID_FILE", td.path().join("sentinel-pid"))
+            .env("BOP_TIMEOUT_TREE_BEAT_FILE", &sentinel_beat)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    sentinel_ready(&sentinel_beat, &mut sentinel.0).await;
+    let beat = td.path().join("owned-beat");
+    let prompt = td.path().join("prompt");
+    let expected = "separate-session full prompt 雪🙂\n"
+        .repeat(30)
+        .into_bytes();
+    let mut command = tokio::process::Command::new(agent);
+    command
+        .args([
+            "__moth_owner_v1",
+            "--deadline-ms",
+            "2000",
+            "--capture-bytes",
+            "1048576",
+            "--input-bytes",
+        ])
+        .arg(expected.len().to_string())
+        .arg("--")
+        .arg(&fixture)
+        .arg("run")
+        .env("BOP_TIMEOUT_TREE_PROMPT_FILE", &prompt)
+        .env("BOP_TIMEOUT_TREE_PID_FILE", td.path().join("owned-pid"))
+        .env("BOP_TIMEOUT_TREE_BEAT_FILE", &beat)
+        .env("BOP_TIMEOUT_TREE_SEPARATE_SESSION", "1");
+    let owner = owner_client::start(
+        "separate-session-native".into(),
+        command,
+        expected.clone(),
+        1048576,
+    )
+    .unwrap();
+    let result = owner.release().await;
     owner_client::retirement_barrier().await;
-    let completed=result.expect("native owner must confirm full retirement");
-    assert_eq!(completed.reason,2);assert_eq!(completed.exit_code(),124);
-    assert_eq!(fs::read(prompt).unwrap(),expected);
-    let stopped=fs::metadata(&beat).unwrap().len();
-    let outside=fs::metadata(&sentinel_beat).unwrap().len();
-    assert!(stopped>0 && outside>0);
+    let completed = result.expect("native owner must confirm full retirement");
+    assert_eq!(completed.reason, 2);
+    assert_eq!(completed.exit_code(), 124);
+    assert_eq!(fs::read(prompt).unwrap(), expected);
+    let stopped = fs::metadata(&beat).unwrap().len();
+    let outside = fs::metadata(&sentinel_beat).unwrap().len();
+    assert!(stopped > 0 && outside > 0);
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    assert_eq!(fs::metadata(&beat).unwrap().len(),stopped);
-    assert!(fs::metadata(&sentinel_beat).unwrap().len()>outside);
+    assert_eq!(fs::metadata(&beat).unwrap().len(), stopped);
+    assert!(fs::metadata(&sentinel_beat).unwrap().len() > outside);
     assert!(sentinel.0.try_wait().unwrap().is_none());
 }
 

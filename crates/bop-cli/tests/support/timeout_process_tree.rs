@@ -21,16 +21,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut prompt = Vec::new();
             std::io::stdin().read_to_end(&mut prompt)?;
             fs::write(prompt_path, &prompt)?;
-            if let Some(path)=env::var_os("BOP_TIMEOUT_TREE_TARGET_DIR") {
+            if let Some(path) = env::var_os("BOP_TIMEOUT_TREE_TARGET_DIR") {
                 fs::create_dir_all(&path)?;
-                fs::write(std::path::Path::new(&path).join("owned-fixture"),b"native work began")?;
+                fs::write(
+                    std::path::Path::new(&path).join("owned-fixture"),
+                    b"native work began",
+                )?;
             }
             let mut command = Command::new(env::current_exe()?);
             #[cfg(unix)]
             if env::var_os("BOP_TIMEOUT_TREE_SEPARATE_SESSION").is_some() {
                 use std::os::unix::process::CommandExt;
                 // Only the async-signal-safe native setsid call runs after fork.
-                unsafe { command.pre_exec(|| { if libc::setsid()==-1 { Err(std::io::Error::last_os_error()) } else { Ok(()) } }); }
+                unsafe {
+                    command.pre_exec(|| {
+                        if libc::setsid() == -1 {
+                            Err(std::io::Error::last_os_error())
+                        } else {
+                            Ok(())
+                        }
+                    });
+                }
             }
             let mut grandchild = command
                 .arg("grandchild")
@@ -45,7 +56,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let beat_file = required_path("BOP_TIMEOUT_TREE_BEAT_FILE")?;
             fs::write(pid_file, std::process::id().to_string())?;
             // Finite lifetime bounds any orphan if the regression reappears.
-            let ticks=if args.first().map(String::as_str)==Some("sentinel") { 1200 } else { 150 };
+            let ticks = if args.first().map(String::as_str) == Some("sentinel") {
+                1200
+            } else {
+                150
+            };
             for _ in 0..ticks {
                 OpenOptions::new()
                     .create(true)
