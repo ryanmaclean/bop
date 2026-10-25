@@ -18,7 +18,7 @@ impl Completion {
         match self.raw_status { Some(s) if s & 0x7f == 0 => ((s >> 8) & 255) as i32, _ => 1 }
     }
 }
-struct Entry { pid: u32, cancel: AtomicBool, result: Mutex<Option<Result<Completion, String>>>, task: Mutex<JoinState> }
+struct Entry { #[allow(dead_code)] pid: u32, cancel: AtomicBool, result: Mutex<Option<Result<Completion, String>>>, task: Mutex<JoinState> }
 enum JoinState { Starting, Running(tokio::task::JoinHandle<()>), Done(Result<(),String>) }
 struct WakeNothing;
 impl std::task::Wake for WakeNothing { fn wake(self: Arc<Self>) {} }
@@ -54,8 +54,11 @@ fn registry() -> &'static Mutex<BTreeMap<String, Arc<Entry>>> { REGISTRY.get_or_
 pub struct Handle { key: String, entry: Arc<Entry> }
 impl Drop for Handle { fn drop(&mut self) { self.entry.cancel.store(true, Ordering::Release); } }
 impl Handle {
+    #[allow(dead_code)]
     pub fn pid(&self) -> u32 { self.entry.pid }
+    #[allow(dead_code)]
     pub fn cancel(&self) { self.entry.cancel.store(true, Ordering::Release); }
+    #[allow(dead_code)]
     pub async fn observe(&self, bound: Duration) -> Result<Option<Completion>, String> {
         match tokio::time::timeout(bound, self.wait()).await { Ok(result)=>result.map(Some), Err(_)=>Ok(None) }
     }
@@ -210,19 +213,17 @@ async fn drive(child: &mut Child, input: Vec<u8>, cap: usize, entry: &Entry) -> 
         if outgoing.is_empty() && stdin.is_some() {
             if entry.cancel.load(Ordering::Acquire) && !sent_cancel { outgoing=frame(0x13,&[]); sent_cancel=true; }
             else if wire.ready && !sent_start && !sent_cancel { outgoing=frame(0x10,&[]); sent_start=true; }
-            else if wire.started && !sent_cancel && input_offset<input.len() {
-                if wire.credit>0 {
-                    let count=CHUNK.min(wire.credit).min(input.len()-input_offset);
-                    outgoing=frame(0x11,&input[input_offset..input_offset+count]); input_offset+=count; wire.credit-=count;
-                }
+            else if wire.started && !sent_cancel && input_offset<input.len() && wire.credit>0 {
+                let count=CHUNK.min(wire.credit).min(input.len()-input_offset);
+                outgoing=frame(0x11,&input[input_offset..input_offset+count]); input_offset+=count; wire.credit-=count;
             }
         }
         if owner_status.is_none() { match child.try_wait() { Ok(s)=>owner_status=s, Err(e)=>{failure.get_or_insert(format!("owner wait: {e}"));} } }
-        if owner_status.is_some() && eof {
-            stdin=None;
+        if let (Some(status), true) = (owner_status.as_ref(), eof) {
+            drop(stdin.take());
             if !incoming.is_empty() { failure.get_or_insert("truncated owner frame".into()); }
             if let Some(error)=failure { return Err(error); }
-            if !owner_status.as_ref().unwrap().success() { return Err("owner exited unsuccessfully; retirement unconfirmed".into()); }
+            if !status.success() { return Err("owner exited unsuccessfully; retirement unconfirmed".into()); }
             let (reason,raw_status)=wire.retired.ok_or("owner exit/EOF without retirement")?;
             if reason==0 && input_written!=input.len() { return Err("normal retirement before complete input delivery".into()); }
             return Ok(Completion { reason,raw_status,stdout:wire.out,stderr:wire.err });
@@ -248,7 +249,18 @@ async fn drive(child: &mut Child, input: Vec<u8>, cap: usize, entry: &Entry) -> 
                 }
             }
             write=async { stdin.as_mut().unwrap().write(&outgoing[offset..]).await }, if stdin.is_some() && !outgoing.is_empty() => {
-                match write { Ok(0)=>{failure=Some("owner control short write".into());},Ok(n)=>{offset+=n;if offset==outgoing.len(){if outgoing[4]==0x11 { input_written+=outgoing.len()-5; } if outgoing[4]==0x10 { wire.start_sent=true; } outgoing.clear();offset=0;}},Err(e)=>{failure=Some(format!("owner control write: {e}"));} }
+                match write {
+                    Ok(0) => { failure=Some("owner control short write".into()); },
+                    Ok(n) => {
+                        offset+=n;
+                        if offset==outgoing.len() {
+                            if outgoing[4]==0x11 { input_written+=outgoing.len()-5; }
+                            if outgoing[4]==0x10 { wire.start_sent=true; }
+                            outgoing.clear(); offset=0;
+                        }
+                    },
+                    Err(e) => { failure=Some(format!("owner control write: {e}")); }
+                }
             }
             _=tokio::time::sleep(Duration::from_millis(25))=>{}
         }
