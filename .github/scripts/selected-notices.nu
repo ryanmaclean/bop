@@ -99,7 +99,30 @@ def main [
       $text_rows = ($text_rows | append {id: $pkg.id, member: $member, raw_file: ($out | path basename), sha256: (sha256_file $out), bytes: $bytes, direct: (not ($rel | str contains '/'))})
       $n = $n + 1
     }
-    if $direct_count == 0 { fail $"no direct legal text in exact archive: ($pkg.id)" }
+    if $direct_count == 0 {
+      # governor 0.6.3 declares MIT but omitted LICENSE from its published crate.
+      # Its exact Cargo archive records the upstream VCS commit; retain that
+      # commit's pinned, byte-identical MIT text as an explicit external notice.
+      if $pkg.id != 'registry+https://github.com/rust-lang/crates.io-index#governor@0.6.3' or $checksum != '68a7f542ee6b35af73b06abc0dad1c1bae89964e4e253bc4b587b91c9637867b' or ($pkg.license? | default '') != 'MIT' {
+        fail $"no direct legal text in exact archive: ($pkg.id)"
+      }
+      let vcs_result = (^tar -xOzf $archive $"($prefix).cargo_vcs_info.json" | complete)
+      if $vcs_result.exit_code != 0 { fail 'governor VCS metadata extraction failed' }
+      let vcs = ($vcs_result.stdout | from json)
+      if ($vcs.git.sha1? | default '') != 'be3ae0878968fd869b17e4fee871127abad5bae5' or ($vcs.path_in_vcs? | default '') != 'governor' {
+        fail 'governor published VCS provenance differs'
+      }
+      let legal_source = ($root | path join '.github/license/upstream/governor-0.6.3-MIT.txt')
+      let expected_text_sha = '2248fdedb215c73b6431d4c0419c6476c0aa19621fa94041aa7c5a3ce952e5cc'
+      if (sha256_file $legal_source) != $expected_text_sha { fail 'governor upstream MIT text differs' }
+      let out = ($texts_dir | path join $"($n).raw")
+      ^cp $legal_source $out
+      if $env.LAST_EXIT_CODE != 0 or (sha256_file $out) != $expected_text_sha { fail 'governor upstream MIT text copy failed' }
+      let bytes = (^stat -f '%z' $out | str trim | into int)
+      if $bytes == 0 { fail 'governor upstream MIT text empty' }
+      $text_rows = ($text_rows | append {id: $pkg.id, member: 'upstream-vcs:boinkor-net/governor@be3ae0878968fd869b17e4fee871127abad5bae5:LICENSE', raw_file: ($out | path basename), sha256: $expected_text_sha, bytes: $bytes, direct: false})
+      $n = $n + 1
+    }
     $rows = ($rows | append {id: $pkg.id, source_kind: 'crates-io-registry', archive_sha256: $checksum, direct_legal_texts: $direct_count})
   }
   $rows | sort-by id | to json | save -f ($receipt_dir | path join 'selected-ids.json')
