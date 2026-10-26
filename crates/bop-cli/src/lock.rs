@@ -1,7 +1,10 @@
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::fs::OpenOptions;
 use std::io::ErrorKind;
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -107,66 +110,37 @@ pub fn acquire_dispatcher_lock(cards_dir: &Path) -> anyhow::Result<DispatcherLoc
     )
 }
 
-/// Acquire a singleton lock for `bop status --watch`.
-///
-/// Uses the same mkdir-atomicity pattern as the dispatcher lock.
-/// Returns a guard that removes the lock directory on drop.
-/// If another watch instance is already running (live PID), returns an error
-/// with a human-readable message so the caller can print and exit gracefully.
-pub fn acquire_watch_lock(cards_dir: &Path) -> anyhow::Result<DispatcherLockGuard> {
-    let lock_dir = cards_dir.join(WATCH_LOCK_REL);
-    if let Some(parent) = lock_dir.parent() {
-        fs::create_dir_all(parent)?;
-    }
+/// The file descriptor, rather than a PID record, is the watch singleton's
+/// owner. The kernel releases it only after the worker process exits.
+pub struct WatchLockGuard {
+    _file: fs::File,
+}
 
-    let owner = DispatcherLockOwner {
-        pid: std::process::id() as i32,
-        host: util::host_name(),
-        started_at: Utc::now(),
-    };
-    let owner_json = serde_json::to_vec_pretty(&owner)?;
+pub fn acquire_watch_lock(cards_dir: &Path) -> anyhow::Result<WatchLockGuard> {
+    #[cfg(not(unix))]
+    anyhow::bail!("mediated watch requires a Unix PTY and file lock");
 
-    for _ in 0..2 {
-        match fs::create_dir(&lock_dir) {
-            Ok(()) => {
-                if let Err(err) = fs::write(lock_owner_path(&lock_dir), &owner_json) {
-                    let _ = fs::remove_dir_all(&lock_dir);
-                    return Err(err.into());
-                }
-                return Ok(DispatcherLockGuard { path: lock_dir });
-            }
-            Err(err) if err.kind() == ErrorKind::AlreadyExists => {
-                let lock_owner = fs::read(lock_owner_path(&lock_dir))
-                    .ok()
-                    .and_then(|bytes| serde_json::from_slice::<DispatcherLockOwner>(&bytes).ok());
-
-                let stale = lock_owner
-                    .as_ref()
-                    .map(|o| !util::pid_is_alive_sync(o.pid))
-                    .unwrap_or(true);
-                if stale {
-                    let _ = fs::remove_dir_all(&lock_dir);
-                    continue;
-                }
-
-                if let Some(owner) = lock_owner {
-                    anyhow::bail!(
-                        "bop status --watch already running (pid {} on {}, started {})\nOnly one watch instance allowed.",
-                        owner.pid,
-                        owner.host,
-                        owner.started_at
-                    );
-                }
-                anyhow::bail!(
-                    "bop status --watch lock already exists at {}; remove stale lock if no watch is running",
-                    lock_dir.display()
-                );
-            }
-            Err(err) => return Err(err.into()),
+    #[cfg(unix)]
+    {
+        let lock_path = cards_dir.join(WATCH_LOCK_REL);
+        if let Some(parent) = lock_path.parent() {
+            fs::create_dir_all(parent)?;
         }
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)?;
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            return Err(anyhow::anyhow!(
+                "bop status --watch singleton unavailable at {}: {}",
+                lock_path.display(),
+                std::io::Error::last_os_error()
+            ));
+        }
+        Ok(WatchLockGuard { _file: file })
     }
-
-    anyhow::bail!("failed to acquire watch lock at {}", lock_dir.display())
 }
 
 pub fn write_run_lease(card_dir: &Path, lease: &RunLease) -> anyhow::Result<()> {

@@ -1,55 +1,49 @@
-# cargo-deny configuration
-# Everything not in the allow list is denied by default (cargo-deny >= 0.14).
-# GPL/LGPL/AGPL/MPL/CDDL/BSD-4-Clause are blocked by omission from the
-# allow list and are never added there, even via exception, per fleet
-# licensing policy (see ~/.claude/CLAUDE.md "Licensing").
+# cargo-deny configuration for the baseline MIT/BSD/Apache-2.0 policy.
+# Extra licenses are confined to the exact selected BOP tooling versions below.
+# New packages and versions remain denied until reviewed.
 
 [licenses]
-# Policy set only: MIT, BSD-2/3, Apache-2.0 (+ LLVM exception variant),
-# plus the transitive set the fleet policy documents as pre-approved:
-# ISC, Zlib, Unicode-3.0.
 allow = [
   "MIT",
   "Apache-2.0",
-  "Apache-2.0 WITH LLVM-exception",
   "BSD-2-Clause",
   "BSD-3-Clause",
-  "ISC", # ISC approved 2026-09-23
-  "Zlib",
-  "Unicode-3.0",
+]
+include-dev = true
+exceptions = [
+  # Exact selected BOP CLI graph from paired FreeBSD diagnostic run 40160164120.
+  { crate = "aws-lc-rs@1.18.1", allow = ["ISC"] },
+  { crate = "aws-lc-sys@0.45.0", allow = ["ISC"] },
+  { crate = "foldhash@0.1.5", allow = ["Zlib"] },
+  { crate = "forwarded-header-value@0.1.1", allow = ["ISC"] },
+  { crate = "icu_collections@2.1.1", allow = ["Unicode-3.0"] },
+  { crate = "icu_locale_core@2.1.1", allow = ["Unicode-3.0"] },
+  { crate = "icu_normalizer@2.1.1", allow = ["Unicode-3.0"] },
+  { crate = "icu_normalizer_data@2.1.1", allow = ["Unicode-3.0"] },
+  { crate = "icu_properties@2.1.2", allow = ["Unicode-3.0"] },
+  { crate = "icu_properties_data@2.1.2", allow = ["Unicode-3.0"] },
+  { crate = "icu_provider@2.1.1", allow = ["Unicode-3.0"] },
+  { crate = "litemap@0.8.1", allow = ["Unicode-3.0"] },
+  { crate = "notify@6.1.1", allow = ["CC0-1.0"] },
+  { crate = "potential_utf@0.1.4", allow = ["Unicode-3.0"] },
+  { crate = "ring@0.17.14", allow = ["ISC"] },
+  { crate = "rustls-webpki@0.103.15", allow = ["ISC"] },
+  { crate = "tinystr@0.8.2", allow = ["Unicode-3.0"] },
+  { crate = "unicode-ident@1.0.24", allow = ["Unicode-3.0"] },
+  { crate = "untrusted@0.9.0", allow = ["ISC"] },
+  { crate = "webpki-roots@1.0.6", allow = ["CDLA-Permissive-2.0"] },
+  { crate = "writeable@0.6.2", allow = ["Unicode-3.0"] },
+  { crate = "yoke@0.8.1", allow = ["Unicode-3.0"] },
+  { crate = "yoke-derive@0.8.1", allow = ["Unicode-3.0"] },
+  { crate = "zerofrom@0.1.6", allow = ["Unicode-3.0"] },
+  { crate = "zerofrom-derive@0.1.6", allow = ["Unicode-3.0"] },
+  { crate = "zerotrie@0.2.3", allow = ["Unicode-3.0"] },
+  { crate = "zerovec@0.11.5", allow = ["Unicode-3.0"] },
+  { crate = "zerovec-derive@0.11.2", allow = ["Unicode-3.0"] },
 ]
 
-# Every license outside the policy set above gets a narrowly-scoped,
-# dated exception here instead of a blanket allow-list entry. Each
-# exception names the exact dependency path it covers and a review date
-# for re-evaluating whether the dependency (and its license) is still
-# needed.
-[[licenses.exceptions]]
-# CDLA-Permissive-2.0: permissive data license, not on the banned
-# copyleft list. Pulled in by the TLS root store used for HTTPS clients.
-# Path: bop -> reqwest -> hyper-rustls -> webpki-roots.
-# Review by: 2026-12-31
-allow = ["CDLA-Permissive-2.0"]
-name = "webpki-roots"
-
-[[licenses.exceptions]]
-# MPL-2.0: `option-ext` remains through `dirs` -> `dirs-sys`. Keep its
-# exception scoped until that path is removed in a separately reviewed change.
-# Path: bop(-core) -> dirs -> dirs-sys -> option-ext.
-# Review by: 2026-12-31
-allow = ["MPL-2.0"]
-name = "option-ext"
-
-[[licenses.exceptions]]
-# CC0-1.0: public-domain-equivalent dedication, not copyleft. Used by the
-# file-watcher crate.
-# Path: bop -> notify.
-# Review by: 2026-12-31
-allow = ["CC0-1.0"]
-name = "notify"
-
 [bans]
-# No explicit bans needed — license check handles this.
+# No explicit package bans needed for the license check.
 deny = []
 
 [advisories]

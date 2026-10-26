@@ -3,10 +3,10 @@ use bop_core::config::WebhookEvent;
 use bop_core::{append_event, write_meta, Event, Meta, RunRecord};
 use chrono::Utc;
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
+use rand::RngCore;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::process::Command as TokioCommand;
@@ -16,6 +16,34 @@ use super::VcsEngine;
 use crate::{
     cards, inspect, lock, memory, paths, power, providers, quicklook, reaper, util, workspace,
 };
+
+// The adapter is the leader of a process group created at spawn. Its Moth child
+// inherits the group unless it deliberately moves itself elsewhere.
+#[cfg(unix)]
+fn kill_owned_adapter_group(pid: i32) -> std::io::Result<()> {
+    if pid <= 1 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "adapter PID is not a safe process-group ID",
+        ));
+    }
+    // A positive, unreaped child PID prevents this group ID being recycled
+    // before the signal. Refuse to signal if the child left its own group.
+    let observed_group = unsafe { libc::getpgid(pid) };
+    if observed_group == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if observed_group != pid {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "adapter is no longer leader of its owned process group",
+        ));
+    }
+    if unsafe { libc::killpg(pid, libc::SIGKILL) } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
 
 #[derive(Clone)]
 struct Dispatcher {
@@ -162,6 +190,49 @@ fn resolve_adapter(
     (fallback.to_string(), "global --adapter")
 }
 
+trait RunMetadataIo {
+    fn read(&self, card_dir: &Path) -> anyhow::Result<Meta>;
+    fn write(&self, card_dir: &Path, meta: &Meta) -> anyhow::Result<()>;
+}
+
+struct FilesystemRunMetadataIo;
+
+impl RunMetadataIo for FilesystemRunMetadataIo {
+    fn read(&self, card_dir: &Path) -> anyhow::Result<Meta> {
+        bop_core::read_meta(card_dir)
+    }
+
+    fn write(&self, card_dir: &Path, meta: &Meta) -> anyhow::Result<()> {
+        write_meta(card_dir, meta)
+    }
+}
+
+trait WorkspacePreparation {
+    fn prepare(
+        &self,
+        vcs_engine: VcsEngine,
+        cards_dir: &Path,
+        card_dir: &Path,
+        card_id: &str,
+        meta: &mut Option<Meta>,
+    ) -> anyhow::Result<Option<workspace::WorkspaceInfo>>;
+}
+
+struct FilesystemWorkspacePreparation;
+
+impl WorkspacePreparation for FilesystemWorkspacePreparation {
+    fn prepare(
+        &self,
+        vcs_engine: VcsEngine,
+        cards_dir: &Path,
+        card_dir: &Path,
+        card_id: &str,
+        meta: &mut Option<Meta>,
+    ) -> anyhow::Result<Option<workspace::WorkspaceInfo>> {
+        workspace::prepare_workspace(vcs_engine, cards_dir, card_dir, card_id, meta)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run_dispatcher(
     cards_dir: &Path,
@@ -174,6 +245,42 @@ pub async fn run_dispatcher(
     no_reap: bool,
     once: bool,
     validation_fail_threshold: f64,
+) -> anyhow::Result<()> {
+    let meta_io = FilesystemRunMetadataIo;
+    let workspace_preparation = FilesystemWorkspacePreparation;
+    run_dispatcher_with_meta_io(
+        cards_dir,
+        vcs_engine,
+        global_adapter,
+        max_workers,
+        _poll_ms,
+        max_retries,
+        reap_ms,
+        no_reap,
+        once,
+        validation_fail_threshold,
+        &meta_io,
+        &workspace_preparation,
+        &short_run_id,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_dispatcher_with_meta_io<I: RunMetadataIo, W: WorkspacePreparation>(
+    cards_dir: &Path,
+    vcs_engine: VcsEngine,
+    global_adapter: &str,
+    max_workers: usize,
+    _poll_ms: u64,
+    max_retries: u32,
+    reap_ms: u64,
+    no_reap: bool,
+    once: bool,
+    validation_fail_threshold: f64,
+    meta_io: &I,
+    workspace_preparation: &W,
+    mint_run_id: &dyn Fn() -> anyhow::Result<String>,
 ) -> anyhow::Result<()> {
     paths::ensure_cards_layout(cards_dir)?;
     let dispatcher = Dispatcher::from_cards_dir(cards_dir)?;
@@ -450,7 +557,7 @@ pub async fn run_dispatcher(
                         .as_ref()
                         .map(|m| m.id.clone())
                         .unwrap_or_else(|| name.trim_end_matches(".bop").to_string());
-                    let ws_info = match workspace::prepare_workspace(
+                    let ws_info = match workspace_preparation.prepare(
                         vcs_engine,
                         cards_dir,
                         &running_path,
@@ -618,7 +725,7 @@ pub async fn run_dispatcher(
                         name, card_adapter, provider_name, adapter_source
                     );
 
-                    let (exit_code, mut meta) = run_card(
+                    let (exit_code, mut meta, run_card_error) = match run_card_with_meta_io(
                         cards_dir,
                         &running_path,
                         &card_adapter,
@@ -626,11 +733,33 @@ pub async fn run_dispatcher(
                         &provider_env,
                         provider_model.as_deref(),
                         rate_limit_exit,
+                        meta_io,
+                        mint_run_id,
                     )
                     .await
-                    .unwrap_or((1, None));
+                    {
+                        Ok((exit_code, meta)) => (exit_code, meta, false),
+                        Err(err) => {
+                            eprintln!(
+                                "[dispatcher] card '{}' failed before completion: {err:#}",
+                                name
+                            );
+                            match meta_io.read(&running_path) {
+                                Ok(m) if !reaper::has_unretired_moth_owner(&m) => {
+                                    (1, Some(m), true)
+                                }
+                                _ => {
+                                    eprintln!(
+                                        "[dispatcher] retaining {}: ownership metadata unresolved",
+                                        name
+                                    );
+                                    continue;
+                                }
+                            }
+                        }
+                    };
 
-                    let is_rate_limited = exit_code == rate_limit_exit;
+                    let is_rate_limited = !run_card_error && exit_code == rate_limit_exit;
 
                     // Run realtime validation on job output when the job succeeded.
                     let mut validation_triggered_fail = false;
@@ -717,7 +846,12 @@ pub async fn run_dispatcher(
                         "failed"
                     };
 
-                    let _ = fs::rename(&running_path, &target);
+                    fs::rename(&running_path, &target).with_context(|| {
+                        format!(
+                            "failed to move card '{}' from running/ to {to_state}/",
+                            name
+                        )
+                    })?;
                     // Log stage transition event (best-effort)
                     let _ = append_event(
                         &target,
@@ -891,6 +1025,44 @@ pub async fn run_card(
     provider_model: Option<&str>,
     rate_limit_exit: i32,
 ) -> anyhow::Result<(i32, Option<Meta>)> {
+    let meta_io = FilesystemRunMetadataIo;
+    run_card_with_meta_io(
+        cards_dir,
+        card_dir,
+        adapter,
+        provider_name,
+        provider_env,
+        provider_model,
+        rate_limit_exit,
+        &meta_io,
+        &short_run_id,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_card_with_meta_io<I: RunMetadataIo>(
+    cards_dir: &Path,
+    card_dir: &Path,
+    adapter: &str,
+    provider_name: &str,
+    provider_env: &std::collections::BTreeMap<String, String>,
+    provider_model: Option<&str>,
+    rate_limit_exit: i32,
+    meta_io: &I,
+    mint_run_id: &dyn Fn() -> anyhow::Result<String>,
+) -> anyhow::Result<(i32, Option<Meta>)> {
+    let strict_moth = provider_name == "moth"
+        || Path::new(adapter).file_stem().and_then(|s| s.to_str()) == Some("bop-moth-adapter");
+    if strict_moth && !cfg!(target_os = "freebsd") {
+        anyhow::bail!("strict Moth ownership requires FreeBSD; no fallback");
+    }
+    let existing = meta_io
+        .read(card_dir)
+        .context("read ownership before run admission")?;
+    if reaper::has_unretired_moth_owner(&existing) {
+        anyhow::bail!("previous Moth owner remains unretired");
+    }
     fs::create_dir_all(card_dir.join("logs"))?;
     fs::create_dir_all(card_dir.join("output"))?;
 
@@ -905,7 +1077,7 @@ pub async fn run_card(
     let _ = fs::remove_file(&memory_out_file);
 
     // Render prompt template with actual values
-    let mut meta = bop_core::read_meta(card_dir).ok();
+    let mut meta = Some(existing);
     let memory_namespace = meta
         .as_ref()
         .map(memory::memory_namespace_from_meta)
@@ -963,13 +1135,54 @@ pub async fn run_card(
         }
     };
 
+    let timeout_seconds = meta
+        .as_ref()
+        .and_then(|m| m.timeout_seconds)
+        .unwrap_or(3600);
+    let mut cmd = if strict_moth {
+        let agent = provider_env
+            .get("MOTH_AGENT_BIN")
+            .map(std::ffi::OsString::from)
+            .or_else(|| std::env::var_os("MOTH_AGENT_BIN"))
+            .context("MOTH_AGENT_BIN is required for owned Moth route")?;
+        if !Path::new(&agent).is_absolute() {
+            anyhow::bail!("MOTH_AGENT_BIN must be absolute");
+        }
+        let deadline_ms = timeout_seconds
+            .checked_mul(1000)
+            .filter(|v| *v > 0 && *v <= 86400000)
+            .context("Moth owner deadline outside supported range")?;
+        let mut c = TokioCommand::new(agent);
+        c.arg("__moth_owner_v1")
+            .arg("--deadline-ms")
+            .arg(deadline_ms.to_string())
+            .arg("--capture-bytes")
+            .arg("67108864")
+            .arg("--input-bytes")
+            .arg("0")
+            .arg("--")
+            .arg(adapter);
+        c
+    } else if adapter.ends_with(".nu") {
+        let mut c = TokioCommand::new("nu");
+        let adapter_path = if std::path::Path::new(adapter).is_absolute() {
+            adapter.to_string()
+        } else {
+            format!("{}/{}", std::env::current_dir()?.display(), adapter)
+        };
+        c.arg(adapter_path);
+        c
+    } else {
+        TokioCommand::new(adapter)
+    };
+
     let stage = meta
         .as_ref()
         .map(|m| m.stage.clone())
         .unwrap_or_else(|| "implement".to_string());
     let started_at = Utc::now();
     let started_at_iso = started_at.to_rfc3339();
-    let run_id = short_run_id();
+    let run_record_id = mint_run_id().context("failed to mint run-record ID")?;
     let mut run_idx: Option<usize> = None;
     if let Some(ref mut m) = meta {
         let rec = m
@@ -995,7 +1208,7 @@ pub async fn run_card(
             .or_else(|| model_from_provider_env(provider_env))
             .unwrap_or_else(|| provider_name.to_string());
         m.runs.push(RunRecord {
-            run_id: run_id.clone(),
+            run_id: run_record_id.clone(),
             stage: stage.clone(),
             provider: provider_name.to_string(),
             model: initial_model,
@@ -1007,37 +1220,38 @@ pub async fn run_card(
             completion_tokens: None,
             cost_usd: None,
             duration_s: None,
-            note: None,
+            note: strict_moth.then(|| reaper::MOTH_OWNER_UNRETIRED.to_string()),
         });
         run_idx = Some(m.runs.len().saturating_sub(1));
-        let _ = write_meta(card_dir, m);
+        meta_io
+            .write(card_dir, m)
+            .context("failed to write run record before adapter spawn")?;
     }
 
-    let mut cmd = if adapter.ends_with(".nu") {
-        let mut c = TokioCommand::new("nu");
-        let adapter_path = if std::path::Path::new(adapter).is_absolute() {
-            adapter.to_string()
-        } else {
-            format!("{}/{}", std::env::current_dir()?.display(), adapter)
-        };
-        c.arg(adapter_path);
-        c
-    } else {
-        TokioCommand::new(adapter)
-    };
+    #[cfg(unix)]
+    if !strict_moth {
+        cmd.process_group(0);
+    }
 
     // Per-job target dir in /tmp — outside the workspace so it doesn't accumulate
     // inside worktrees. Deleted immediately after the adapter exits regardless of
     // outcome. /tmp is cleaned by the OS on reboot as a backstop.
-    let run_id = meta
+    let card_id = meta
         .as_ref()
         .map(|m| m.id.as_str())
         .or_else(|| card_dir.file_name().and_then(|n| n.to_str()))
         .unwrap_or("unknown");
-    let target_dir = std::env::temp_dir().join(format!("bop-target-{}", run_id));
+    let target_dir = std::env::temp_dir().join(format!("bop-target-{}", card_id));
 
-    let mut child = cmd
-        .arg(&workdir)
+    // Include synchronous spawn and PID bookkeeping in the card budget. Tokio
+    // cannot interrupt spawn or filesystem calls, but no child process is
+    // awaited before the first deadline check below.
+    let timeout_seconds = meta
+        .as_ref()
+        .and_then(|m| m.timeout_seconds)
+        .unwrap_or(3600);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_seconds);
+    cmd.arg(&workdir)
         .arg(&prompt_file)
         .arg(&stdout_log)
         .arg(&stderr_log)
@@ -1046,6 +1260,7 @@ pub async fn run_card(
         .env("BOP_MEMORY_NAMESPACE", &memory_namespace)
         .env("CARGO_TARGET_DIR", &target_dir)
         .envs(provider_env)
+        .env("BOP_RUN_ID", &run_record_id)
         // Card identity — lets any agent orient itself
         .env(
             "BOP_CARD_ID",
@@ -1055,63 +1270,161 @@ pub async fn run_card(
         .env("BOP_CARDS_DIR", cards_dir)
         .env("BOP_STAGE", &stage)
         .env("BOP_PROVIDER", provider_name)
-        .env("BOP_TARGET_DIR", &target_dir)
-        .spawn()
-        .with_context(|| format!("failed to spawn adapter: {}", adapter))?;
+        .env("BOP_TARGET_DIR", &target_dir);
 
-    let timeout_seconds = meta
-        .as_ref()
-        .and_then(|m| m.timeout_seconds)
-        .unwrap_or(3600);
-    let pid = child
-        .id()
-        .map(|v| v as i32)
-        .with_context(|| "spawned adapter without a child PID")?;
-    let pid_str = pid.to_string();
-    let _ = fs::write(card_dir.join("logs").join("pid"), &pid_str);
-    let _ = TokioCommand::new("xattr")
-        .arg("-w")
-        .arg("sh.bop.agent-pid")
-        .arg(&pid_str)
-        .arg(card_dir)
-        .status()
-        .await;
-
-    let mut lease = lock::RunLease {
-        run_id: util::next_run_id(child.id()),
-        pid,
-        pid_start_time: started_at,
-        started_at,
-        heartbeat_at: started_at,
-        host: util::host_name(),
-    };
-    let _ = lock::write_run_lease(card_dir, &lease);
-
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_seconds);
-    let mut timed_out = false;
-    let status = loop {
-        let now = tokio::time::Instant::now();
-        if now >= deadline {
-            timed_out = true;
-            let _ = child.kill().await;
-            break None;
+    let (exit_code, timed_out) = if strict_moth {
+        let owner =
+            match crate::owner_client::start(run_record_id.clone(), cmd, Vec::new(), 67108864) {
+                Ok(owner) => owner,
+                Err(crate::owner_client::StartError::NotSpawned(error)) => {
+                    // This typed path proves Command::spawn never returned a child.
+                    // Post-acquisition failure must never enter this branch.
+                    if let Some(ref mut m) = meta {
+                        if let Some(index) = run_idx {
+                            if let Some(run) = m.runs.get_mut(index) {
+                                run.note = None;
+                                run.outcome = "failed".into();
+                                run.ended_at = Some(Utc::now().to_rfc3339());
+                            }
+                        }
+                        if let Some(record) = m.stages.get_mut(&stage) {
+                            record.status = bop_core::StageStatus::Failed;
+                        }
+                        meta_io
+                            .write(card_dir, m)
+                            .context("persist definitive owner spawn failure")?;
+                    }
+                    anyhow::bail!("owner not spawned: {error}");
+                }
+                Err(crate::owner_client::StartError::Retained(error)) => {
+                    anyhow::bail!("owner acquisition retained: {error}")
+                }
+            };
+        let pid = i32::try_from(owner.pid()).context("owner PID outside supported range")?;
+        fs::write(card_dir.join("logs/pid"), pid.to_string())?;
+        if let Err(e) = reaper::refresh_legacy_xattr_pid(card_dir, pid) {
+            let _ = util::append_log_line(&stderr_log, &format!("owner xattr: {e}"));
         }
-        let remaining = deadline.saturating_duration_since(now);
-        let wait_slice = std::cmp::min(lock::LEASE_HEARTBEAT_INTERVAL, remaining);
-        match tokio::time::timeout(wait_slice, child.wait()).await {
-            Ok(res) => break Some(res?),
-            Err(_) => {
-                lease.heartbeat_at = Utc::now();
-                let _ = lock::write_run_lease(card_dir, &lease);
+        let mut lease = lock::RunLease {
+            run_id: run_record_id.clone(),
+            pid,
+            pid_start_time: started_at,
+            started_at,
+            heartbeat_at: started_at,
+            host: util::host_name(),
+        };
+        let mut cancelled = false;
+        let completion = loop {
+            tokio::select! {
+                result=owner.wait()=>break result.map_err(anyhow::Error::msg)?,
+                signal=tokio::signal::ctrl_c(), if !cancelled => { let _=signal;cancelled=true;owner.cancel(); }
+                _=tokio::time::sleep(lock::LEASE_HEARTBEAT_INTERVAL)=>{ lease.heartbeat_at=Utc::now();let _=lock::write_run_lease(card_dir,&lease); }
             }
+        };
+        owner.release().await.map_err(anyhow::Error::msg)?;
+        // These are adapter diagnostics; payload logs retain their existing paths.
+        if !completion.stdout.is_empty() {
+            let _ =
+                util::append_log_line(&stderr_log, &String::from_utf8_lossy(&completion.stdout));
         }
-    };
-    let exit_code = if timed_out {
-        124
+        if !completion.stderr.is_empty() {
+            let _ =
+                util::append_log_line(&stderr_log, &String::from_utf8_lossy(&completion.stderr));
+        }
+        (completion.exit_code(), completion.reason == 2)
     } else {
-        status.and_then(|s| s.code()).unwrap_or(1)
+        let mut child = cmd
+            .spawn()
+            .with_context(|| format!("failed to spawn adapter: {}", adapter))?;
+
+        let pid = match child
+            .id()
+            .and_then(|value| i32::try_from(value).ok())
+            .filter(|value| *value > 1)
+        {
+            Some(pid) => pid,
+            None => {
+                let _ = child.start_kill();
+                let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
+                anyhow::bail!("spawned adapter without a safe child PID");
+            }
+        };
+        let pid_str = pid.to_string();
+        let _ = fs::write(card_dir.join("logs").join("pid"), &pid_str);
+        // Refresh the legacy attribute to this run's PID without a subprocess.
+        // A failed refresh leaves any old value visible as conflict evidence.
+        if let Err(error) = reaper::refresh_legacy_xattr_pid(card_dir, pid) {
+            let _ = util::append_log_line(
+                &stderr_log,
+                &format!("legacy PID xattr refresh failed: {error}"),
+            );
+        }
+
+        let mut lease = lock::RunLease {
+            run_id: util::next_run_id(child.id()),
+            pid,
+            pid_start_time: started_at,
+            started_at,
+            heartbeat_at: started_at,
+            host: util::host_name(),
+        };
+        let _ = lock::write_run_lease(card_dir, &lease);
+
+        let mut timed_out = false;
+        let status = loop {
+            let now = tokio::time::Instant::now();
+            if now >= deadline {
+                timed_out = true;
+                #[cfg(unix)]
+                let signal_result = kill_owned_adapter_group(pid);
+                #[cfg(not(unix))]
+                let signal_result = child.start_kill();
+                if let Err(error) = signal_result {
+                    let _ = util::append_log_line(
+                        &stderr_log,
+                        &format!("adapter process-group termination unconfirmed: {error}"),
+                    );
+                    // Preserve the direct-child fallback if the group check or
+                    // signal fails; descendants may survive this error path.
+                    let _ = child.start_kill();
+                }
+                match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(error)) => {
+                        let _ = util::append_log_line(
+                            &stderr_log,
+                            &format!("adapter child reap failed after timeout: {error}"),
+                        );
+                    }
+                    Err(_) => {
+                        let _ = util::append_log_line(
+                            &stderr_log,
+                            "adapter child reap exceeded 2 seconds after timeout",
+                        );
+                    }
+                }
+                break None;
+            }
+            let remaining = deadline.saturating_duration_since(now);
+            let wait_slice = std::cmp::min(lock::LEASE_HEARTBEAT_INTERVAL, remaining);
+            match tokio::time::timeout(wait_slice, child.wait()).await {
+                Ok(res) => break Some(res?),
+                Err(_) => {
+                    lease.heartbeat_at = Utc::now();
+                    let _ = lock::write_run_lease(card_dir, &lease);
+                }
+            }
+        };
+        let exit_code = if timed_out {
+            124
+        } else {
+            status.and_then(|s| s.code()).unwrap_or(1)
+        };
+
+        (exit_code, timed_out)
     };
 
+    // For Moth, complete domain retirement and controller join were confirmed.
     // Adapter has exited — delete the ephemeral target dir immediately.
     // Nothing else needs it: build artifacts are only useful during the run.
     let _ = fs::remove_dir_all(&target_dir);
@@ -1155,6 +1468,9 @@ pub async fn run_card(
 
         if let Some(idx) = run_idx {
             if let Some(run) = m.runs.get_mut(idx) {
+                if strict_moth {
+                    run.note = None;
+                }
                 run.ended_at = Some(finished_at.to_rfc3339());
                 run.duration_s = duration_s;
                 run.outcome = if timed_out {
@@ -1186,6 +1502,13 @@ pub async fn run_card(
         }
     }
 
+    if strict_moth {
+        if let Some(ref m) = meta {
+            meta_io
+                .write(card_dir, m)
+                .context("persist confirmed owner retirement")?;
+        }
+    }
     Ok((exit_code, meta))
 }
 
@@ -1197,14 +1520,20 @@ pub struct RunUsage {
     pub cost_usd: Option<f64>,
 }
 
-pub fn short_run_id() -> String {
-    let now = Utc::now()
-        .timestamp_nanos_opt()
-        .unwrap_or_else(|| Utc::now().timestamp_micros() * 1000) as u64;
-    let pid = std::process::id() as u64;
-    let seq = util::RUN_ID_SEQ.fetch_add(1, Ordering::Relaxed);
-    let mixed = now ^ (pid << 16) ^ seq;
-    format!("{:08x}", (mixed & 0xffff_ffff) as u32)
+fn run_id_with_entropy(
+    fill: impl FnOnce(&mut [u8; 16]) -> anyhow::Result<()>,
+) -> anyhow::Result<String> {
+    let mut bytes = [0u8; 16];
+    fill(&mut bytes).context("failed to obtain run ID entropy")?;
+    Ok(format!("{:032x}", u128::from_be_bytes(bytes)))
+}
+
+pub fn short_run_id() -> anyhow::Result<String> {
+    let mut rng = rand::rngs::OsRng;
+    run_id_with_entropy(|bytes| {
+        rng.try_fill_bytes(bytes)
+            .map_err(|err| anyhow::anyhow!("{err}"))
+    })
 }
 
 pub fn model_from_provider_env(env: &BTreeMap<String, String>) -> Option<String> {
@@ -1429,22 +1758,31 @@ pub fn load_feed_config(card_dir: &Path) -> bop_core::realtime::FeedConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::Ordering;
     use tempfile::tempdir;
 
     // ── short_run_id ──────────────────────────────────────────────────────────
 
     #[test]
-    fn short_run_id_returns_8_char_hex() {
-        let id = short_run_id();
-        assert_eq!(id.len(), 8);
-        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+    fn short_run_id_returns_32_char_hex() {
+        let id = short_run_id().unwrap();
+        assert_eq!(id.len(), 32);
+        assert!(id
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
     }
 
     #[test]
     fn short_run_id_returns_different_values() {
-        let a = short_run_id();
-        let b = short_run_id();
+        let a = short_run_id().unwrap();
+        let b = short_run_id().unwrap();
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn run_id_entropy_failure_is_an_error() {
+        let err = run_id_with_entropy(|_| anyhow::bail!("simulated entropy failure")).unwrap_err();
+        assert!(format!("{err:#}").contains("simulated entropy failure"));
     }
 
     // ── resolve_adapter ───────────────────────────────────────────────────────
@@ -1910,5 +2248,287 @@ mod tests {
         let elapsed = start.elapsed();
         // Should complete within 3 seconds (2s timeout + overhead)
         assert!(elapsed < Duration::from_secs(3));
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum PreSpawnFault {
+        Read,
+        Write,
+        Entropy,
+        Pass,
+    }
+
+    struct FaultRunMetadataIo {
+        fault: PreSpawnFault,
+        reads: std::sync::atomic::AtomicUsize,
+        writes: std::sync::atomic::AtomicUsize,
+    }
+
+    impl RunMetadataIo for FaultRunMetadataIo {
+        fn read(&self, card_dir: &Path) -> anyhow::Result<Meta> {
+            let read_index = self.reads.fetch_add(1, Ordering::SeqCst);
+            if matches!(self.fault, PreSpawnFault::Read) && read_index == 0 {
+                anyhow::bail!("injected pre-spawn metadata read failure");
+            }
+            bop_core::read_meta(card_dir)
+        }
+
+        fn write(&self, card_dir: &Path, meta: &Meta) -> anyhow::Result<()> {
+            self.writes.fetch_add(1, Ordering::SeqCst);
+            if matches!(self.fault, PreSpawnFault::Write) {
+                anyhow::bail!("injected pre-spawn metadata write failure");
+            }
+            write_meta(card_dir, meta)
+        }
+    }
+
+    struct NoWorkspacePreparation;
+
+    impl WorkspacePreparation for NoWorkspacePreparation {
+        fn prepare(
+            &self,
+            _vcs_engine: VcsEngine,
+            _cards_dir: &Path,
+            _card_dir: &Path,
+            _card_id: &str,
+            _meta: &mut Option<Meta>,
+        ) -> anyhow::Result<Option<workspace::WorkspaceInfo>> {
+            Ok(None)
+        }
+    }
+
+    #[tokio::test]
+    async fn pre_spawn_faults_fail_and_real_rate_limit_one_requeues() {
+        for (fault, rate_limit_exit) in [
+            (PreSpawnFault::Read, 1),
+            (PreSpawnFault::Read, 75),
+            (PreSpawnFault::Write, 1),
+            (PreSpawnFault::Write, 75),
+            (PreSpawnFault::Entropy, 1),
+            (PreSpawnFault::Entropy, 75),
+            (PreSpawnFault::Pass, 1),
+        ] {
+            let td = tempfile::tempdir().unwrap();
+            let cards = td.path().join(".cards");
+            paths::ensure_cards_layout(&cards).unwrap();
+            fs::create_dir_all(cards.join(".bop")).unwrap();
+            fs::write(
+                cards.join(".bop").join("config.json"),
+                r#"{"dispatch":{"auto_select_provider":false},"webhooks":[]}"#,
+            )
+            .unwrap();
+            assert!(crate::webhook::load_webhooks(&cards).unwrap().is_empty());
+
+            let marker = td.path().join("adapter-ran");
+            let adapter = td.path().join("marker.nu");
+            let mock_exit = if matches!(fault, PreSpawnFault::Pass) {
+                "1"
+            } else {
+                "0"
+            };
+            fs::write(
+                &adapter,
+                "def main [workdir: string, prompt_file: string, stdout_log: string, stderr_log: string, ...rest] {\n    'ran' | save --force $env.BOP_TEST_MARKER\n    exit (if \"BOP_TEST_EXIT\" in $env { $env.BOP_TEST_EXIT | into int } else { 0 })\n}\n",
+            )
+            .unwrap();
+            fs::write(
+                cards.join("providers.json"),
+                serde_json::json!({
+                    "providers": {
+                        "mock": {
+                            "command": adapter.to_str().unwrap(),
+                            "rate_limit_exit": rate_limit_exit,
+                            "env": {
+                                "BOP_TEST_MARKER": marker.to_str().unwrap(),
+                                "BOP_TEST_EXIT": mock_exit
+                            }
+                        }
+                    }
+                })
+                .to_string(),
+            )
+            .unwrap();
+
+            let pending = cards.join("pending").join("fault.bop");
+            fs::create_dir_all(pending.join("logs")).unwrap();
+            fs::write(
+                pending.join("meta.json"),
+                r#"{"id":"fault","created":"2026-03-01T00:00:00Z","stage":"implement","provider_chain":["mock"],"stages":{},"acceptance_criteria":[]}"#,
+            )
+            .unwrap();
+            fs::write(pending.join("spec.md"), "fault fixture").unwrap();
+            fs::write(pending.join("prompt.md"), "{{spec}}\n").unwrap();
+
+            let meta_io = FaultRunMetadataIo {
+                fault,
+                reads: std::sync::atomic::AtomicUsize::new(0),
+                writes: std::sync::atomic::AtomicUsize::new(0),
+            };
+            let mint_calls = std::sync::atomic::AtomicUsize::new(0);
+            let mint_run_id = || {
+                mint_calls.fetch_add(1, Ordering::SeqCst);
+                if matches!(fault, PreSpawnFault::Entropy) {
+                    anyhow::bail!("injected run ID entropy failure");
+                }
+                Ok("0123456789abcdef0123456789abcdef".to_string())
+            };
+            run_dispatcher_with_meta_io(
+                &cards,
+                VcsEngine::GitGt,
+                adapter.to_str().unwrap(),
+                1,
+                100,
+                0,
+                60_000,
+                true,
+                true,
+                0.1,
+                &meta_io,
+                &NoWorkspacePreparation,
+                &mint_run_id,
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(
+                meta_io.reads.load(Ordering::SeqCst),
+                if matches!(fault, PreSpawnFault::Pass) {
+                    1
+                } else {
+                    2
+                },
+                "{fault:?}"
+            );
+            assert_eq!(
+                meta_io.writes.load(Ordering::SeqCst),
+                usize::from(!matches!(
+                    fault,
+                    PreSpawnFault::Read | PreSpawnFault::Entropy
+                )),
+                "{fault:?}"
+            );
+            assert_eq!(
+                mint_calls.load(Ordering::SeqCst),
+                usize::from(!matches!(fault, PreSpawnFault::Read)),
+                "{fault:?} minted the wrong number of IDs"
+            );
+            if matches!(fault, PreSpawnFault::Pass) {
+                assert!(
+                    marker.exists(),
+                    "real adapter rate-limit control did not launch"
+                );
+                let pending = cards.join("pending").join("fault.bop");
+                assert!(pending.is_dir(), "real adapter exit 1 must requeue");
+                for state in ["running", "done", "failed"] {
+                    assert!(!cards.join(state).join("fault.bop").exists());
+                }
+                let persisted = bop_core::read_meta(&pending).unwrap();
+                assert_eq!(persisted.runs.len(), 1);
+                assert_eq!(persisted.runs[0].outcome, "rate_limited");
+                let events = fs::read_to_string(pending.join("logs/events.jsonl")).unwrap();
+                let requeues = events
+                    .lines()
+                    .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+                    .filter(|event| {
+                        event["event"] == "stage_transition"
+                            && event["from"] == "running"
+                            && event["to"] == "pending"
+                    })
+                    .count();
+                assert_eq!(requeues, 1, "real adapter rate-limit transition changed");
+            } else {
+                assert!(!marker.exists(), "{fault:?} launched the adapter");
+                for state in ["pending", "running", "done"] {
+                    assert!(
+                        !cards.join(state).join("fault.bop").exists(),
+                        "{fault:?} left a card in {state}/"
+                    );
+                }
+                let failed = cards.join("failed").join("fault.bop");
+                assert!(failed.is_dir(), "{fault:?} did not leave a failed card");
+                assert!(
+                    bop_core::read_meta(&failed).unwrap().runs.is_empty(),
+                    "{fault:?} persisted a run record before launch"
+                );
+                let failed_count = fs::read_dir(cards.join("failed"))
+                    .unwrap()
+                    .flatten()
+                    .filter(|entry| {
+                        entry.path().extension().and_then(|s| s.to_str()) == Some("bop")
+                    })
+                    .count();
+                assert_eq!(failed_count, 1, "{fault:?} created multiple failed cards");
+
+                let events = fs::read_to_string(failed.join("logs/events.jsonl")).unwrap();
+                let failed_transitions = events
+                    .lines()
+                    .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+                    .filter(|event| {
+                        event["event"] == "stage_transition"
+                            && event["from"] == "running"
+                            && event["to"] == "failed"
+                    })
+                    .count();
+                assert_eq!(
+                    failed_transitions, 1,
+                    "{fault:?} emitted duplicate failed transitions"
+                );
+
+                // Positive control after no-spawn assertions: the marker script works.
+                let marker_status = TokioCommand::new("nu")
+                    .arg(&adapter)
+                    .args([
+                        "unused-workdir",
+                        "unused-prompt",
+                        "unused-stdout",
+                        "unused-stderr",
+                    ])
+                    .env("BOP_TEST_MARKER", &marker)
+                    .env_remove("BOP_TEST_EXIT")
+                    .status()
+                    .await
+                    .unwrap();
+                assert!(marker_status.success(), "marker adapter control failed");
+                assert!(
+                    marker.exists(),
+                    "marker adapter control did not create the marker"
+                );
+            }
+        }
+    }
+    #[cfg(target_os = "freebsd")]
+    #[tokio::test]
+    #[ignore = "requires admitted native FreeBSD process-spawn path; authored, unrun"]
+    async fn definitive_owner_spawn_failure_clears_only_its_unretired_marker() {
+        let td = tempdir().unwrap();
+        let cards = td.path().join("cards");
+        let card = cards.join("running/no-owner.bop");
+        fs::create_dir_all(&card).unwrap();
+        let meta = Meta {
+            id: "no-owner".into(),
+            stage: "implement".into(),
+            timeout_seconds: Some(1),
+            ..Default::default()
+        };
+        write_meta(&card, &meta).unwrap();
+        let mut env = BTreeMap::new();
+        env.insert(
+            "MOTH_AGENT_BIN".into(),
+            td.path()
+                .join("definitely-absent-agent")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        let result = run_card(&cards, &card, "bop-moth-adapter", "moth", &env, None, 75).await;
+        assert!(format!("{:#}", result.unwrap_err()).contains("owner not spawned"));
+        let meta = bop_core::read_meta(&card).unwrap();
+        assert_eq!(meta.runs.len(), 1);
+        assert!(!reaper::has_unretired_moth_owner(&meta));
+        assert_eq!(meta.runs[0].outcome, "failed");
+        assert!(meta.runs[0].ended_at.is_some());
+        assert_eq!(
+            meta.stages["implement"].status,
+            bop_core::StageStatus::Failed
+        );
     }
 }

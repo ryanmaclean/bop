@@ -4,10 +4,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
-use std::sync::atomic::AtomicU64;
 use walkdir::WalkDir;
-
-pub static RUN_ID_SEQ: AtomicU64 = AtomicU64::new(0);
 
 pub fn host_name() -> String {
     std::env::var("HOSTNAME")
