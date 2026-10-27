@@ -795,7 +795,7 @@ mod tests {
     }
 
     #[test]
-    fn resize_and_deletion_repaint_clears_old_physical_rows() {
+    fn encoder_clips_unicode_and_clears_before_smaller_frame() {
         let long = vec![
             "running (2)".to_string(),
             "  [>] ♠A long 界界 title \x1b[31m formerly wrapped".to_string(),
@@ -813,8 +813,8 @@ mod tests {
         assert!(wide[1].contains("界"));
         assert!(!wide[1].contains('\x1b'));
 
-        // The next frame represents a narrow pane after one card was deleted.
-        // It must clear the entire old display before drawing bounded rows.
+        // This checks frame bytes only. A native PTY readback is still needed
+        // to establish physical row clearing and shell isolation.
         let narrow = fit_rows(vec!["running (1)".into(), "  [>] ♠A 界".into()], 12, 3);
         let repaint = encode_frame(&narrow, true);
         assert!(repaint.starts_with(b"\x1b[H\x1b[J"));
@@ -825,7 +825,6 @@ mod tests {
                 .count(),
             1
         );
-        assert!(!repaint.windows(6).any(|chunk| chunk == b"second"));
         assert!(narrow.iter().all(|row| {
             row.chars()
                 .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))

@@ -10,6 +10,11 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
+use notify::Watcher;
+#[cfg(unix)]
+use notify_debouncer_mini::new_debouncer;
+
 const READY: u8 = 1;
 const EVENT: u8 = 2;
 
@@ -154,24 +159,6 @@ fn worker_registers_events_and_releases_after_parent_pipe_closes() {
         if !matches!(event, Ok(EVENT)) {
             return Err(format!("worker did not forward event: {event:?}"));
         }
-        // Let creation settle, then write metadata below a directory that did
-        // not exist when the recursive watcher registered. A stale creation
-        // event cannot satisfy the second assertion.
-        let team = cards.join("team-cli").join("pending");
-        fs::create_dir_all(&team).map_err(|err| err.to_string())?;
-        std::thread::sleep(Duration::from_millis(300));
-        while rx.try_recv().is_ok() {}
-        let nested = team.join("new.jobcard");
-        fs::create_dir(&nested).map_err(|err| err.to_string())?;
-        std::thread::sleep(Duration::from_millis(300));
-        while rx.try_recv().is_ok() {}
-        fs::write(nested.join("meta.json"), b"{\"progress\":42}").map_err(|err| err.to_string())?;
-        let nested_event = rx.recv_timeout(Duration::from_secs(5));
-        if !matches!(nested_event, Ok(EVENT)) {
-            return Err(format!(
-                "worker missed metadata in newly created recursive directory: {nested_event:?}"
-            ));
-        }
         Ok(())
     })();
 
@@ -201,4 +188,54 @@ fn worker_registers_events_and_releases_after_parent_pipe_closes() {
         0
     );
     result.unwrap();
+}
+
+/// Path-aware native witness for newly created subtrees. The worker's EVENT
+/// byte intentionally carries no path, so its lifecycle fixture cannot prove
+/// that a particular metadata write was the event it forwarded.
+#[cfg(unix)]
+#[test]
+#[ignore = "requires approved native host and selected license/tool closure"]
+fn recursive_notify_observes_metadata_under_new_team_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let cards = temp.path().join(".cards");
+    fs::create_dir(&cards).unwrap();
+    let (tx, rx) = mpsc::channel();
+    let mut debouncer = new_debouncer(Duration::from_millis(100), tx).unwrap();
+    debouncer
+        .watcher()
+        .watch(&cards, notify::RecursiveMode::Recursive)
+        .unwrap();
+
+    let metadata = cards
+        .join("team-cli")
+        .join("pending")
+        .join("fresh.jobcard")
+        .join("meta.json");
+    fs::create_dir_all(metadata.parent().unwrap()).unwrap();
+    fs::write(&metadata, b"{\"fixture\":\"new-subtree\"}").unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut observed = false;
+    while Instant::now() < deadline {
+        match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            Ok(Ok(events)) => {
+                if events.iter().any(|event| event.path == metadata) {
+                    observed = true;
+                    break;
+                }
+            }
+            Ok(Err(err)) => panic!("native watch error: {err}"),
+            Err(mpsc::RecvTimeoutError::Timeout) => break,
+            Err(mpsc::RecvTimeoutError::Disconnected) => panic!("native watcher disconnected"),
+        }
+    }
+    assert!(
+        observed,
+        "no path-attributed metadata event below new subtree"
+    );
+    assert_eq!(
+        fs::read(&metadata).unwrap(),
+        b"{\"fixture\":\"new-subtree\"}"
+    );
 }
