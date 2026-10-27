@@ -788,7 +788,7 @@ mod tests {
         }
 
         fn text(&self) -> String {
-            self.cells.iter().flatten().collect()
+            self.cells.iter().flatten().copied().collect()
         }
     }
 
