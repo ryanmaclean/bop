@@ -225,12 +225,29 @@ fn recursive_notify_observes_metadata_under_new_team_directory() {
                 Ok(Ok(events)) => {
                     for event in events {
                         if traced < 64 {
-                            let relative = event.path.strip_prefix(&cards).unwrap_or(&event.path);
+                            let path_label = event
+                                .path
+                                .strip_prefix(&cards)
+                                .ok()
+                                .filter(|relative| {
+                                    relative.components().all(|component| {
+                                        matches!(component, std::path::Component::Normal(_))
+                                    })
+                                })
+                                .and_then(|relative| relative.to_str())
+                                .filter(|relative| {
+                                    !relative.is_empty()
+                                        && relative.bytes().all(|byte| {
+                                            byte.is_ascii_alphanumeric()
+                                                || matches!(byte, b'/' | b'.' | b'_' | b'-')
+                                        })
+                                })
+                                .unwrap_or("<outside-or-unsafe-path>");
                             println!(
                                 "native_event elapsed_ms={} kind={:?} path={}",
                                 started.elapsed().as_millis(),
                                 event.kind,
-                                relative.display()
+                                path_label
                             );
                             traced += 1;
                         } else {
