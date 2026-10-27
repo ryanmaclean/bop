@@ -215,24 +215,57 @@ fn recursive_notify_observes_metadata_under_new_team_directory() {
     fs::create_dir_all(metadata.parent().unwrap()).unwrap();
     fs::write(&metadata, b"{\"fixture\":\"new-subtree\"}").unwrap();
 
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let mut observed = false;
-    while Instant::now() < deadline {
-        match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-            Ok(Ok(events)) => {
-                if events.iter().any(|event| event.path == metadata) {
-                    observed = true;
-                    break;
+    let started = Instant::now();
+    let mut traced = 0usize;
+    let mut suppressed = 0usize;
+    let mut receive_until = |target: &std::path::Path, deadline: Instant| {
+        let mut matched = false;
+        while Instant::now() < deadline {
+            match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(Ok(events)) => {
+                    for event in events {
+                        if traced < 64 {
+                            let relative = event.path.strip_prefix(&cards).unwrap_or(&event.path);
+                            println!(
+                                "native_event elapsed_ms={} kind={:?} path={}",
+                                started.elapsed().as_millis(),
+                                event.kind,
+                                relative.display()
+                            );
+                            traced += 1;
+                        } else {
+                            suppressed += 1;
+                        }
+                        matched |= event.path.as_path() == target;
+                    }
+                    if matched {
+                        break;
+                    }
                 }
+                Ok(Err(err)) => panic!("native watch error: {err}"),
+                Err(mpsc::RecvTimeoutError::Timeout) => break,
+                Err(mpsc::RecvTimeoutError::Disconnected) => panic!("native watcher disconnected"),
             }
-            Ok(Err(err)) => panic!("native watch error: {err}"),
-            Err(mpsc::RecvTimeoutError::Timeout) => break,
-            Err(mpsc::RecvTimeoutError::Disconnected) => panic!("native watcher disconnected"),
         }
-    }
+        matched
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let observed = receive_until(&metadata, deadline);
+    // A separately named late probe distinguishes a rapid-create registration
+    // gap from a watcher that never reports paths in this new subtree.
+    let late_probe = metadata.with_file_name("late-probe.json");
+    let late_observed = if observed {
+        false
+    } else {
+        fs::write(&late_probe, b"late-probe").unwrap();
+        receive_until(&late_probe, Instant::now() + Duration::from_secs(3))
+    };
+    println!(
+        "native_event_summary initial_metadata={observed} late_probe={late_observed} traced={traced} suppressed={suppressed}"
+    );
     assert!(
         observed,
-        "no path-attributed metadata event below new subtree"
+        "no path-attributed immediate metadata event below new subtree; late_probe={late_observed}"
     );
     assert_eq!(
         fs::read(&metadata).unwrap(),
