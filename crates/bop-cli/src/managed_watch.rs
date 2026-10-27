@@ -714,6 +714,84 @@ fn row_color(row: &str) -> Option<&'static [u8]> {
 mod tests {
     use super::*;
 
+    /// Small cell model for the fixed CSI sequences emitted by `encode_frame`.
+    /// It deliberately consumes bytes from both frames, rather than inspecting
+    /// only the replacement frame's input strings.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct VirtualPane {
+        width: usize,
+        cells: Vec<Vec<char>>,
+        x: usize,
+        y: usize,
+    }
+
+    impl VirtualPane {
+        fn new(width: usize, height: usize) -> Self {
+            Self {
+                width,
+                cells: vec![vec![' '; width]; height],
+                x: 0,
+                y: 0,
+            }
+        }
+
+        fn resize_with_reflow(&mut self, width: usize) {
+            let height = self.cells.len();
+            let old: Vec<char> = self.cells.iter().flatten().copied().collect();
+            self.width = width;
+            self.cells = vec![vec![' '; width]; height];
+            for (index, ch) in old.into_iter().take(width * height).enumerate() {
+                self.cells[index / width][index % width] = ch;
+            }
+            self.x = 0;
+            self.y = 0;
+        }
+
+        fn feed(&mut self, bytes: &[u8]) {
+            let text = std::str::from_utf8(bytes).unwrap();
+            let mut chars = text.chars();
+            while let Some(ch) = chars.next() {
+                match ch {
+                    '\x1b' => {
+                        assert_eq!(chars.next(), Some('['));
+                        let final_byte = chars.find(|c| c.is_ascii_alphabetic()).unwrap();
+                        match final_byte {
+                            'H' => (self.x, self.y) = (0, 0),
+                            'J' => {
+                                for row in self.cells.iter_mut().skip(self.y) {
+                                    row.fill(' ');
+                                }
+                            }
+                            'm' => {}
+                            other => panic!("unexpected CSI {other}"),
+                        }
+                    }
+                    '\r' => self.x = 0,
+                    '\n' => self.y += 1,
+                    _ if !ch.is_control() => {
+                        let cells = UnicodeWidthChar::width(ch).unwrap_or(0);
+                        if cells == 0 || self.y >= self.cells.len() {
+                            continue;
+                        }
+                        if self.x + cells > self.width {
+                            self.x = 0;
+                            self.y += 1;
+                        }
+                        if self.y < self.cells.len() {
+                            self.cells[self.y][self.x] = ch;
+                            self.x += cells;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        fn text(&self) -> String {
+            self.cells.iter().flatten().collect()
+        }
+    }
+
     #[test]
     fn row_is_bounded_and_control_free() {
         let row = sanitize_row("id \x1b[31m a界\u{202e}b", 8);
@@ -831,5 +909,36 @@ mod tests {
                 .sum::<usize>()
                 <= 11
         }));
+    }
+
+    #[test]
+    fn virtual_pane_repaint_erases_wrapped_deleted_card_after_resize() {
+        let mut watch = VirtualPane::new(28, 10);
+
+        let old = fit_rows(
+            vec![
+                "running (2)".into(),
+                "  [>] ♠A 界界 old title \x1b[31m".into(),
+                "  [>] ♠K deleted card".into(),
+            ],
+            28,
+            8,
+        );
+        watch.feed(&encode_frame(&old, true));
+        assert!(watch.text().contains('K'), "old card must occupy cells");
+        watch.resize_with_reflow(12);
+        assert!(watch.text().contains('K'), "old card must survive resize");
+
+        let new = fit_rows(vec!["running (1)".into(), "  [>] ♠A 界".into()], 12, 8);
+        watch.feed(&encode_frame(&new, true));
+        assert!(watch.text().contains('A'));
+        assert!(
+            !watch.text().contains('K'),
+            "deleted card remained in cells"
+        );
+        assert!(
+            !watch.text().contains("[31m"),
+            "old title remained in cells"
+        );
     }
 }
