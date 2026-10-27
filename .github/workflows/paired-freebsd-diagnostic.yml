@@ -208,12 +208,24 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - name: Checkout reviewed PR23 fixture source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: b1664f77411961cc7942e38d7cbb1e65b2ece641
-          persist-credentials: false
-          submodules: false
+      - name: Fetch reviewed PR23 fixture source without submodule traversal
+        shell: bash
+        env:
+          GIT_TERMINAL_PROMPT: '0'
+          GIT_ASKPASS: /bin/false
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostic
+          printf '%s\n' 'INCOMPLETE: source, lock, and tests unverified' > diagnostic/INCOMPLETE
+          printf '%s\n' "$GITHUB_SHA" > diagnostic/workflow-commit.txt
+          trap 'status=$?; printf "%s\n" "$status" > diagnostic/fetch-exit-code.txt' EXIT
+          test -z "$(find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 ! -name diagnostic -print -quit)"
+          git init -q "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" remote add origin https://github.com/ryanmaclean/bop.git
+          git -C "$GITHUB_WORKSPACE" -c credential.helper= fetch --no-tags --no-recurse-submodules --depth=20 origin refs/pull/23/head
+          test "$(git -C "$GITHUB_WORKSPACE" rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
+          git -C "$GITHUB_WORKSPACE" cat-file -e 'b1664f77411961cc7942e38d7cbb1e65b2ece641^{commit}'
+          git -C "$GITHUB_WORKSPACE" -c submodule.recurse=false checkout --detach --force b1664f77411961cc7942e38d7cbb1e65b2ece641
 
       - name: Verify exact source and lock before compilation
         shell: bash
@@ -221,8 +233,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = 'b1664f77411961cc7942e38d7cbb1e65b2ece641'
           echo 'd16018d33360816f65c6fc3c1f27efeb87f3dc6b38b7399c357a27a4668a8c81  Cargo.lock' | sha256sum --check --status
-          test -z "$(git status --porcelain)"
-          mkdir -p diagnostic
+          test -z "$(git status --porcelain --untracked-files=no)"
           git rev-parse HEAD > diagnostic/source-commit.txt
           sha256sum Cargo.lock > diagnostic/lock-sha256.txt
 
@@ -246,6 +257,24 @@ jobs:
           cargo +nightly-2026-02-20 test --locked -p bop --test managed_watch_worker \
             recursive_notify_observes_metadata_under_new_team_directory \
             -- --ignored --exact --nocapture 2>&1 | tee diagnostic/recursive-path.log
+
+      - name: Mark scoped diagnostic complete
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat diagnostic/fetch-exit-code.txt)" = '0'
+          test -s diagnostic/source-commit.txt
+          test -s diagnostic/lock-sha256.txt
+          test -s diagnostic/virtual-pane.log
+          test -s diagnostic/recursive-path.log
+          grep -Fq 'running 1 test' diagnostic/virtual-pane.log
+          grep -Fq 'test managed_watch::tests::virtual_pane_repaint_erases_wrapped_deleted_card_after_resize ... ok' diagnostic/virtual-pane.log
+          grep -Fq '1 passed; 0 failed' diagnostic/virtual-pane.log
+          grep -Fq 'running 1 test' diagnostic/recursive-path.log
+          grep -Fq 'test recursive_notify_observes_metadata_under_new_team_directory ... ok' diagnostic/recursive-path.log
+          grep -Fq '1 passed; 0 failed' diagnostic/recursive-path.log
+          rm diagnostic/INCOMPLETE
+          printf '%s\n' 'two scoped Linux fixture commands completed successfully' > diagnostic/SCOPE.txt
 
       - name: Retain scoped raw logs
         if: always()
