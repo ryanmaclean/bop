@@ -154,6 +154,24 @@ fn worker_registers_events_and_releases_after_parent_pipe_closes() {
         if !matches!(event, Ok(EVENT)) {
             return Err(format!("worker did not forward event: {event:?}"));
         }
+        // Let creation settle, then write metadata below a directory that did
+        // not exist when the recursive watcher registered. A stale creation
+        // event cannot satisfy the second assertion.
+        let team = cards.join("team-cli").join("pending");
+        fs::create_dir_all(&team).map_err(|err| err.to_string())?;
+        std::thread::sleep(Duration::from_millis(300));
+        while rx.try_recv().is_ok() {}
+        let nested = team.join("new.jobcard");
+        fs::create_dir(&nested).map_err(|err| err.to_string())?;
+        std::thread::sleep(Duration::from_millis(300));
+        while rx.try_recv().is_ok() {}
+        fs::write(nested.join("meta.json"), b"{\"progress\":42}").map_err(|err| err.to_string())?;
+        let nested_event = rx.recv_timeout(Duration::from_secs(5));
+        if !matches!(nested_event, Ok(EVENT)) {
+            return Err(format!(
+                "worker missed metadata in newly created recursive directory: {nested_event:?}"
+            ));
+        }
         Ok(())
     })();
 

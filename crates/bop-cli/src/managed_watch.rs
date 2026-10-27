@@ -793,4 +793,44 @@ mod tests {
         let safe_frame = encode_frame(&[unsafe_row], true);
         assert!(!safe_frame.windows(4).any(|window| window == b"\x1b[2J"));
     }
+
+    #[test]
+    fn resize_and_deletion_repaint_clears_old_physical_rows() {
+        let long = vec![
+            "running (2)".to_string(),
+            "  [>] ♠A long 界界 title \x1b[31m formerly wrapped".to_string(),
+            "  [>] ♠K second card".to_string(),
+            "3 total".to_string(),
+        ];
+        let wide = fit_rows(long, 28, 6);
+        assert_eq!(wide.len(), 4);
+        assert!(wide.iter().all(|row| {
+            row.chars()
+                .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
+                .sum::<usize>()
+                <= 27
+        }));
+        assert!(wide[1].contains("界"));
+        assert!(!wide[1].contains('\x1b'));
+
+        // The next frame represents a narrow pane after one card was deleted.
+        // It must clear the entire old display before drawing bounded rows.
+        let narrow = fit_rows(vec!["running (1)".into(), "  [>] ♠A 界".into()], 12, 3);
+        let repaint = encode_frame(&narrow, true);
+        assert!(repaint.starts_with(b"\x1b[H\x1b[J"));
+        assert_eq!(
+            repaint
+                .windows(3)
+                .filter(|chunk| *chunk == b"\x1b[H")
+                .count(),
+            1
+        );
+        assert!(!repaint.windows(6).any(|chunk| chunk == b"second"));
+        assert!(narrow.iter().all(|row| {
+            row.chars()
+                .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
+                .sum::<usize>()
+                <= 11
+        }));
+    }
 }
