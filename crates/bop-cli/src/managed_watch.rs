@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 #[cfg(unix)]
-use std::{fs, os::unix::fs::DirBuilderExt, os::unix::net::UnixStream as StdUnixStream};
+use std::{
+    fs, os::unix::fs::DirBuilderExt, os::unix::net::UnixStream as StdUnixStream, time::Instant,
+};
 
 use chrono::Local;
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
@@ -28,6 +30,10 @@ const START_TIMEOUT: Duration = Duration::from_secs(5);
 const STOP_TIMEOUT: Duration = Duration::from_secs(2);
 const RENDER_TIMEOUT: Duration = Duration::from_secs(2);
 const RENDER_MAX_BYTES: u64 = 2 * 1024 * 1024;
+#[cfg(unix)]
+const INITIAL_SIZE_TIMEOUT: Duration = Duration::from_secs(3);
+#[cfg(unix)]
+const INITIAL_SIZE_POLL: Duration = Duration::from_millis(50);
 #[cfg(unix)]
 const ACK_TIMEOUT: Duration = Duration::from_secs(20);
 #[cfg(unix)]
@@ -197,6 +203,7 @@ pub async fn run_managed_pane(
     };
     let result = async {
         verify_managed_pane(origin_dev, origin_ino)?;
+        wait_for_initial_pane_dimensions().await?;
         list_cards_watch(root, true, Some(&mut ack)).await
     }
     .await;
@@ -204,6 +211,27 @@ pub async fn run_managed_pane(
         ack.fail(error);
     }
     result
+}
+
+#[cfg(unix)]
+async fn wait_for_initial_pane_dimensions() -> anyhow::Result<()> {
+    let deadline = Instant::now() + INITIAL_SIZE_TIMEOUT;
+    loop {
+        if terminal_size().is_some() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            // Preserve the original failure and fixed per-FD size classification.
+            return frame_dimensions(true).map(|_| ());
+        }
+        tokio::select! {
+            signal = tokio::signal::ctrl_c() => {
+                signal?;
+                anyhow::bail!("watch pane interrupted before initial dimensions");
+            }
+            _ = tokio::time::sleep(INITIAL_SIZE_POLL) => {}
+        }
+    }
 }
 
 #[cfg(not(unix))]
