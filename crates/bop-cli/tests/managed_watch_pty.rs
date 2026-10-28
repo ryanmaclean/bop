@@ -42,6 +42,37 @@ const WATCH_ERRORS: [(&[u8], u32); 9] = [
     (b"Error: ", 256),
 ];
 
+const STARTUP_ERROR_PREFIX: &[u8] = b"watch pane startup failed:";
+const INNER_STARTUP_ERRORS: [(&[u8], &str); 9] = [
+    (
+        b"watch pane requires a Zellij-owned terminal",
+        "pane_terminal_missing",
+    ),
+    (
+        b"watch pane is still using the invoking shell's PTY",
+        "pane_reused_origin_pty",
+    ),
+    (
+        b"terminal identity component is negative",
+        "invalid_terminal_identity",
+    ),
+    (b"watch worker stdout pipe missing", "worker_pipe_missing"),
+    (
+        b"watch worker failed to register every required path",
+        "worker_registration_failed",
+    ),
+    (
+        b"watch pane dimensions unavailable",
+        "dimensions_unavailable",
+    ),
+    (b"watch pane dimensions are zero", "dimensions_zero"),
+    (b"watch board collector failed", "initial_render_failed"),
+    (
+        b"watch board collection timed out",
+        "initial_render_timeout",
+    ),
+];
+
 fn classify_watch_bytes(window: &[u8]) -> u32 {
     WATCH_ERRORS.iter().fold(0, |flags, (needle, bit)| {
         if window.windows(needle.len()).any(|part| part == *needle) {
@@ -66,6 +97,26 @@ fn fixed_error_class(flags: u32) -> &'static str {
         0 => "no_error_text_seen",
         _ => "multiple_error_classes",
     }
+}
+
+fn fixed_inner_startup_class(raw: &[u8]) -> &'static str {
+    let Some(prefix_at) = raw
+        .windows(STARTUP_ERROR_PREFIX.len())
+        .position(|part| part == STARTUP_ERROR_PREFIX)
+    else {
+        return "no_startup_prefix";
+    };
+    let detail = &raw[prefix_at + STARTUP_ERROR_PREFIX.len()..];
+    let mut selected = None;
+    for (phrase, class) in INNER_STARTUP_ERRORS {
+        if detail.windows(phrase.len()).any(|part| part == phrase) {
+            if selected.is_some() {
+                return "multiple_inner_classes";
+            }
+            selected = Some(class);
+        }
+    }
+    selected.unwrap_or("unclassified_inner_error")
 }
 
 fn until<T>(description: &str, mut probe: impl FnMut() -> Option<T>) -> T {
@@ -128,22 +179,22 @@ impl Session {
         self.stderr_dir.path().join("pipe")
     }
 
-    fn child_stderr_summary(&self) -> (&'static str, &'static str) {
+    fn child_stderr_summary(&self) -> (&'static str, &'static str, &'static str) {
         if self.stderr_reader_error.load(Ordering::Relaxed) {
-            return ("capture_error", "untrusted");
+            return ("capture_error", "untrusted", "untrusted");
         }
         let path = self.stderr_dir.path().join("captured");
         let Ok(meta) = fs::symlink_metadata(&path) else {
-            return ("capture_missing", "untrusted");
+            return ("capture_missing", "untrusted", "untrusted");
         };
         if !meta.file_type().is_file() || meta.len() > STDERR_CAPTURE_CAP as u64 {
-            return ("capture_invalid", "untrusted");
+            return ("capture_invalid", "untrusted", "untrusted");
         }
         let Ok(raw) = fs::read(&path) else {
-            return ("capture_unreadable", "untrusted");
+            return ("capture_unreadable", "untrusted", "untrusted");
         };
         if raw.len() > STDERR_CAPTURE_CAP {
-            return ("capture_invalid", "untrusted");
+            return ("capture_invalid", "untrusted", "untrusted");
         }
         let state = if self.stderr_truncated.load(Ordering::Relaxed) {
             "truncated"
@@ -155,7 +206,12 @@ impl Session {
         } else {
             fixed_error_class(classify_watch_bytes(&raw))
         };
-        (state, class)
+        let inner = if state == "bounded" && class == "pane_startup_failed" {
+            fixed_inner_startup_class(&raw)
+        } else {
+            "not_classified"
+        };
+        (state, class, inner)
     }
 
     fn command(&self) -> Command {
@@ -470,22 +526,24 @@ fn fixed_marker(root: &Path, name: &str) -> &'static str {
 
 fn report_watch_probe(cards: &Path, temp_root: &Path, origin_id: (u64, u64), session: &Session) {
     // Diagnostics only: this never supplies a pane ID to the acceptance gate.
-    let (stderr_state, stderr_class) = session.child_stderr_summary();
+    let (stderr_state, stderr_class, inner_class) = session.child_stderr_summary();
     let Ok(bop) = fs::canonicalize(env!("CARGO_BIN_EXE_bop")) else {
         eprintln!(
-            "watch probe: executable=unreadable child_exit={} stderr_state={} stderr_class={}",
+            "watch probe: executable=unreadable child_exit={} stderr_state={} stderr_class={} inner_class={}",
             watch_child_exit(temp_root),
             stderr_state,
-            stderr_class
+            stderr_class,
+            inner_class
         );
         return;
     };
     let Ok(entries) = fs::read_dir("/proc") else {
         eprintln!(
-            "watch probe: proc=unreadable child_exit={} stderr_state={} stderr_class={}",
+            "watch probe: proc=unreadable child_exit={} stderr_state={} stderr_class={} inner_class={}",
             watch_child_exit(temp_root),
             stderr_state,
-            stderr_class
+            stderr_class,
+            inner_class
         );
         return;
     };
@@ -548,11 +606,12 @@ fn report_watch_probe(cards: &Path, temp_root: &Path, origin_id: (u64, u64), ses
         }
     }
     eprintln!(
-        "watch probe: child_exit={} error_class={} stderr_state={} stderr_class={} session_env={} session_match={} shell_stdout_tty={} zellij_on_path={} dev_tty_openable={} shell_live={} beat_nonempty={} proc_scan_truncated={} proc={} bop_exe={} cmdline_unreadable={} status_watch={} helper={} cards_match={} stdout_fd_meta={} distinct_fd_id={}",
+        "watch probe: child_exit={} error_class={} stderr_state={} stderr_class={} inner_class={} session_env={} session_match={} shell_stdout_tty={} zellij_on_path={} dev_tty_openable={} shell_live={} beat_nonempty={} proc_scan_truncated={} proc={} bop_exe={} cmdline_unreadable={} status_watch={} helper={} cards_match={} stdout_fd_meta={} distinct_fd_id={}",
         watch_child_exit(temp_root),
         session.watch_error_class(),
         stderr_state,
         stderr_class,
+        inner_class,
         fixed_marker(temp_root, "watch-session-env"),
         fixed_marker(temp_root, "watch-session-match"),
         fixed_marker(temp_root, "watch-shell-stdout-tty"),
