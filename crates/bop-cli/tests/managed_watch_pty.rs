@@ -192,6 +192,7 @@ struct Session {
     stderr_reader: Option<thread::JoinHandle<()>>,
     drain: Option<thread::JoinHandle<()>>,
     master: File,
+    outer_slave_id: (u64, u64),
 }
 
 impl Session {
@@ -399,6 +400,9 @@ fn start_session(root: &Path, zellij: &Path, session: String) -> Session {
     );
     let master = unsafe { File::from_raw_fd(master_fd) };
     let slave = unsafe { File::from_raw_fd(slave_fd) };
+    use std::os::unix::fs::MetadataExt;
+    let slave_meta = slave.metadata().expect("outer PTY slave metadata");
+    let outer_slave_id = (slave_meta.dev(), slave_meta.ino());
     let stdin = duplicate(&slave);
     let stdout = duplicate(&slave);
     let stderr = duplicate(&slave);
@@ -510,6 +514,34 @@ fn start_session(root: &Path, zellij: &Path, session: String) -> Session {
         stderr_reader: Some(stderr_reader),
         drain: Some(drain),
         master,
+        outer_slave_id,
+    }
+}
+
+fn fixed_tty_size(file: &File, expected: (u16, u16)) -> &'static str {
+    let mut size = libc::winsize {
+        ws_row: 0,
+        ws_col: 0,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    if unsafe { libc::ioctl(file.as_raw_fd(), libc::TIOCGWINSZ, &mut size) } != 0 {
+        "unreadable"
+    } else if (size.ws_row, size.ws_col) == expected {
+        "expected"
+    } else if size.ws_row == 0 || size.ws_col == 0 {
+        "zero"
+    } else {
+        "other"
+    }
+}
+
+fn fixed_proc_fd0(client_pid: i32, outer_slave_id: (u64, u64)) -> &'static str {
+    use std::os::unix::fs::MetadataExt;
+    match fs::metadata(format!("/proc/{client_pid}/fd/0")) {
+        Ok(meta) if (meta.dev(), meta.ino()) == outer_slave_id => "outer",
+        Ok(_) => "other",
+        Err(_) => "unreadable",
     }
 }
 
@@ -880,6 +912,44 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
     use std::os::unix::fs::MetadataExt;
     let origin_meta = fs::metadata(origin_path).unwrap();
     let origin_id = (origin_meta.dev(), origin_meta.ino());
+    let client_pid = session.child.id() as i32;
+    let client_running = matches!(session.child.try_wait(), Ok(None));
+    let client_executable = fs::canonicalize(format!("/proc/{client_pid}/exe")).ok();
+    let pinned_executable = fs::canonicalize(&session.zellij).ok();
+    let client_class = if !client_running {
+        "gone"
+    } else if pinned_executable.is_some() && client_executable == pinned_executable {
+        "matched"
+    } else {
+        "mismatch"
+    };
+    let pgid_class = if unsafe { libc::getpgid(client_pid) } == client_pid {
+        "matched"
+    } else {
+        "mismatch"
+    };
+    let client_fd0 = File::open(format!("/proc/{client_pid}/fd/0")).ok();
+    let fd0_class = match client_fd0.as_ref().and_then(|fd| fd.metadata().ok()) {
+        Some(meta) if (meta.dev(), meta.ino()) == session.outer_slave_id => "outer",
+        Some(_) => "other",
+        None => "unreadable",
+    };
+    let initial_fd0_size = client_fd0
+        .as_ref()
+        .map(|fd| fixed_tty_size(fd, (12, 90)))
+        .unwrap_or("unreadable");
+    eprintln!(
+        "physical client preflight: client={} pgid={} fd0={} fd0_initial={}",
+        client_class, pgid_class, fd0_class, initial_fd0_size,
+    );
+    assert!(
+        client_class == "matched"
+            && pgid_class == "matched"
+            && fd0_class == "outer"
+            && initial_fd0_size == "expected",
+        "attached Zellij client preflight failed"
+    );
+    let client_fd0 = client_fd0.expect("matched client FD 0 must be readable");
     // Zellij v0.43.1 ignores unchanged resize events. Exercise two real outer
     // PTY size transitions and require the same invoking shell to read both
     // sizes from its own /dev/tty before it may launch the watch child.
@@ -900,10 +970,28 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
         0,
         "outer PTY differential resize failed"
     );
+    let master_changed_size = fixed_tty_size(&session.master, (13, 91));
+    let client_changed_size = fixed_tty_size(&client_fd0, (13, 91));
+    let current_fd0_class = fixed_proc_fd0(client_pid, session.outer_slave_id);
+    eprintln!(
+        "physical client resize source: master={} fd0={} fd0_identity={}",
+        master_changed_size, client_changed_size, current_fd0_class,
+    );
+    assert!(
+        master_changed_size == "expected"
+            && client_changed_size == "expected"
+            && current_fd0_class == "outer",
+        "attached Zellij client resize source unavailable"
+    );
+    assert!(
+        matches!(session.child.try_wait(), Ok(None))
+            && fs::canonicalize(format!("/proc/{client_pid}/exe")).ok() == pinned_executable,
+        "attached Zellij client changed before resize signal"
+    );
     assert_eq!(
-        unsafe { libc::kill(-(session.child.id() as i32), libc::SIGWINCH) },
+        unsafe { libc::kill(client_pid, libc::SIGWINCH) },
         0,
-        "Zellij differential resize notification failed"
+        "direct Zellij client resize notification failed"
     );
     let deadline = Instant::now() + Duration::from_secs(8);
     while fixed_marker(root, "watch-pane-changed-size") != "yes" && Instant::now() < deadline {
@@ -937,10 +1025,28 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
         0,
         "outer PTY restore failed"
     );
+    let master_restored_size = fixed_tty_size(&session.master, (12, 90));
+    let client_restored_size = fixed_tty_size(&client_fd0, (12, 90));
+    let current_fd0_class = fixed_proc_fd0(client_pid, session.outer_slave_id);
+    eprintln!(
+        "physical client restore source: master={} fd0={} fd0_identity={}",
+        master_restored_size, client_restored_size, current_fd0_class,
+    );
+    assert!(
+        master_restored_size == "expected"
+            && client_restored_size == "expected"
+            && current_fd0_class == "outer",
+        "attached Zellij client restore source unavailable"
+    );
+    assert!(
+        matches!(session.child.try_wait(), Ok(None))
+            && fs::canonicalize(format!("/proc/{client_pid}/exe")).ok() == pinned_executable,
+        "attached Zellij client changed before restore signal"
+    );
     assert_eq!(
-        unsafe { libc::kill(-(session.child.id() as i32), libc::SIGWINCH) },
+        unsafe { libc::kill(client_pid, libc::SIGWINCH) },
         0,
-        "Zellij restore notification failed"
+        "direct Zellij client restore notification failed"
     );
     let deadline = Instant::now() + Duration::from_secs(8);
     while fixed_marker(root, "watch-pane-restored-size") != "yes" && Instant::now() < deadline {
