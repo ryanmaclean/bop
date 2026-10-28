@@ -1,0 +1,443 @@
+# INACTIVE SOURCE CANDIDATE. Exact reviewed BOP/Moth heads are pinned below.
+# User waived the protected-environment reviewer requirement for this paired
+# run. Dispatch remains a one-use, exact-source synthetic native diagnostic.
+name: BOP19 Moth5 paired FreeBSD diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      physical_pty:
+        description: 'Run the separate PR23 physical PTY/Zellij diagnostic'
+        type: boolean
+        default: false
+      physical_source_sha:
+        description: 'Full reviewed PR23 diagnostic commit SHA (required for physical_pty)'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bop19-moth5-paired-freebsd
+  cancel-in-progress: false
+
+jobs:
+  paired-native:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Fetch BOP exact PR19 head without submodule traversal
+        shell: bash
+        env:
+          GIT_TERMINAL_PROMPT: '0'
+          GIT_ASKPASS: /bin/false
+        run: |
+          set -euo pipefail
+          test -z "$(find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -print -quit)"
+          git init -q "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" remote add origin https://github.com/ryanmaclean/bop.git
+          git -C "$GITHUB_WORKSPACE" -c credential.helper= fetch --no-tags --no-recurse-submodules --depth=1 origin refs/pull/19/head
+          test "$(git -C "$GITHUB_WORKSPACE" rev-parse FETCH_HEAD)" = '1c0b62bf3b3c06fa3e18f81ccb7371df6af38081'
+          git -C "$GITHUB_WORKSPACE" -c submodule.recurse=false checkout --detach --force FETCH_HEAD
+          test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = '1c0b62bf3b3c06fa3e18f81ccb7371df6af38081'
+
+      - name: Checkout public Moth exact PR5 head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: ryanmaclean/moth
+          ref: 2ad30129a9af231b687b8821f2b9d062e41992f9
+          path: moth-paired
+          persist-credentials: false
+
+      - name: Verify exact source and lock bytes before VM work
+        run: |
+          test "$(git rev-parse HEAD)" = '1c0b62bf3b3c06fa3e18f81ccb7371df6af38081'
+          test "$(git -C moth-paired rev-parse HEAD)" = '2ad30129a9af231b687b8821f2b9d062e41992f9'
+          echo 'd16018d33360816f65c6fc3c1f27efeb87f3dc6b38b7399c357a27a4668a8c81  Cargo.lock' | sha256sum --check --status
+          echo 'befd91e188696989d415870792acb3f9fa5a5d3bd79fe8823989264714b6fe51  moth-paired/Cargo.lock' | sha256sum --check --status
+
+      - name: Seed incomplete native receipt before VM work
+        shell: bash
+        run: |
+          mkdir -p receipts/paired-native
+          printf '%s\n' 'VM status unknown; no native or license acceptance' > receipts/paired-native/INCOMPLETE
+
+      - name: Admit selected license graphs and run synthetic native pair
+        uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc
+        with:
+          usesh: true
+          prepare: |
+            pkg install -y curl ca_root_nss gmake perl5 git coreutils nushell
+          run: |
+            set -eu
+            mkdir -p receipts/paired-native
+            PAIR_ROOT="$(pwd -P)"
+            # A nonzero VM script skips vmactions copyback. Preserve its real
+            # status in a receipt, return zero for sync, then fail on the host.
+            trap 'status=$?; trap - EXIT; set +e; if [ -d "$PAIR_ROOT/receipts/paired-native/raw" ]; then (find "$PAIR_ROOT/receipts/paired-native/raw" -type f -print | LC_ALL=C sort | while IFS= read -r file; do sha256 "$file" || exit 1; done) > "$PAIR_ROOT/receipts/paired-native/raw-SHA256SUMS.txt" || status=1; fi; printf "%s\n" "$status" > "$PAIR_ROOT/receipts/paired-native/VM-EXIT-CODE" || exit 1; exit 0' EXIT
+            exec > "$PAIR_ROOT/receipts/paired-native/VM-RAW.log" 2>&1
+            test "$(git -c safe.directory="$PAIR_ROOT" -C "$PAIR_ROOT" rev-parse HEAD)" = '1c0b62bf3b3c06fa3e18f81ccb7371df6af38081'
+            test "$(git -c safe.directory="$PAIR_ROOT/moth-paired" -C "$PAIR_ROOT/moth-paired" rev-parse HEAD)" = '2ad30129a9af231b687b8821f2b9d062e41992f9'
+            test "$(sha256 -q Cargo.lock)" = 'd16018d33360816f65c6fc3c1f27efeb87f3dc6b38b7399c357a27a4668a8c81'
+            test "$(sha256 -q moth-paired/Cargo.lock)" = 'befd91e188696989d415870792acb3f9fa5a5d3bd79fe8823989264714b6fe51'
+            pkg info > receipts/paired-native/freebsd-packages.txt
+            uname -a > receipts/paired-native/freebsd-uname.txt
+            curl --proto '=https' --tlsv1.2 -fsS https://sh.rustup.rs | sh -s -- -y --default-toolchain none --profile minimal
+            . "$HOME/.cargo/env"
+            rustup toolchain install 1.94.1 --profile minimal
+            rustup toolchain install nightly-2026-02-20 --profile minimal
+            rustc +1.94.1 -V > receipts/paired-native/moth-rustc.txt
+            rustc +nightly-2026-02-20 -V > receipts/paired-native/bop-rustc.txt
+            cd /tmp
+            cargo +1.94.1 install cargo-deny --version 0.20.2 --locked
+            cd "$PAIR_ROOT"
+            RUSTUP_TOOLCHAIN=1.94.1 cargo deny --version > receipts/paired-native/cargo-deny-version.txt
+            test "$(RUSTUP_TOOLCHAIN=1.94.1 cargo deny --version)" = 'cargo-deny 0.20.2'
+            # Every command runs behind the same finite VM/job timeout. No
+            # continue-on-error: rejected dependencies stop before binaries.
+            cd moth-paired
+            cargo +1.94.1 tree --locked --target x86_64-unknown-freebsd -p cli > ../receipts/paired-native/moth-tree.txt
+            RUSTUP_TOOLCHAIN=1.94.1 cargo deny --manifest-path cli/Cargo.toml --target x86_64-unknown-freebsd --locked check licenses > ../receipts/paired-native/moth-cli-selected-license.txt 2>&1
+            cd ..
+            cargo +nightly-2026-02-20 tree --locked --target x86_64-unknown-freebsd -p bop --features timeout-process-tree-fixture > receipts/paired-native/bop-tree.txt
+            RUSTUP_TOOLCHAIN=nightly-2026-02-20 cargo deny --manifest-path crates/bop-cli/Cargo.toml --features timeout-process-tree-fixture --target x86_64-unknown-freebsd --locked check licenses > receipts/paired-native/bop-fixture-selected-license.txt 2>&1
+            # Exact normal-edge selected registry archive and raw legal text gate.
+            # The reviewed helper is present at the pinned BOP head.
+            export CARGO_HOME="$HOME/.cargo"
+            test -s .github/scripts/selected-notices.nu
+            mkdir -p receipts/paired-native/notices/bop receipts/paired-native/notices/moth
+            RUSTUP_TOOLCHAIN=nightly-2026-02-20 cargo fetch --locked --target x86_64-unknown-freebsd --manifest-path crates/bop-cli/Cargo.toml
+            RUSTUP_TOOLCHAIN=1.94.1 cargo fetch --locked --target x86_64-unknown-freebsd --manifest-path moth-paired/cli/Cargo.toml
+            RUSTUP_TOOLCHAIN=nightly-2026-02-20 nu .github/scripts/selected-notices.nu crates/bop-cli/Cargo.toml bop timeout-process-tree-fixture Cargo.lock d16018d33360816f65c6fc3c1f27efeb87f3dc6b38b7399c357a27a4668a8c81 1c0b62bf3b3c06fa3e18f81ccb7371df6af38081 receipts/paired-native/notices/bop
+            RUSTUP_TOOLCHAIN=1.94.1 nu .github/scripts/selected-notices.nu moth-paired/cli/Cargo.toml cli - moth-paired/Cargo.lock befd91e188696989d415870792acb3f9fa5a5d3bd79fe8823989264714b6fe51 2ad30129a9af231b687b8821f2b9d062e41992f9 receipts/paired-native/notices/moth
+            test -s receipts/paired-native/notices/bop/COMPLETE
+            test -s receipts/paired-native/notices/moth/COMPLETE
+            cd moth-paired
+            cargo +1.94.1 build --locked --frozen --offline -p cli > ../receipts/paired-native/moth-build.txt 2>&1
+            cd ..
+            test -x moth-paired/target/debug/agent
+            export MOTH_AGENT_BIN="$(pwd -P)/moth-paired/target/debug/agent"
+            # CI-only custody overlay: exact PR source is checked before edit;
+            # the three synthetic fixtures use retained, unique 0700 dirs.
+            # This derivative test source is not a production source change.
+            fixture_source=crates/bop-cli/tests/dispatcher_harness.rs
+            test "$(sha256 -q "$fixture_source")" = 'dacb7ddbb643bb4248da1d98634a131479d4cf6ed3fc2933d3eb4de47e7016d9'
+            cp "$fixture_source" receipts/paired-native/dispatcher_harness.original.rs
+            sed -i '' \
+              -e '812s@let td = tempfile::tempdir().unwrap();@let td = paired_retained_tempdir();@' \
+              -e '995s@let td = tempfile::tempdir().unwrap();@let td = paired_retained_tempdir();@' \
+              -e '1189s@let td = tempfile::tempdir().unwrap();@let td = paired_retained_tempdir();@' \
+              "$fixture_source"
+            cat >> "$fixture_source" <<'RUST_CUSTODY'
+
+            #[cfg(all(target_os = "freebsd", feature = "timeout-process-tree-fixture"))]
+            struct PairedRetainedDir(PathBuf);
+            #[cfg(all(target_os = "freebsd", feature = "timeout-process-tree-fixture"))]
+            impl PairedRetainedDir { fn path(&self) -> &Path { &self.0 } }
+            #[cfg(all(target_os = "freebsd", feature = "timeout-process-tree-fixture"))]
+            fn paired_retained_tempdir() -> PairedRetainedDir {
+                let parent = PathBuf::from(std::env::var_os("BOP_PAIRED_FIXTURE_ROOT")
+                    .expect("synthetic receipt root required"));
+                assert!(parent.is_absolute() && parent.is_dir());
+                PairedRetainedDir(tempfile::Builder::new().prefix("synthetic-")
+                    .tempdir_in(parent).expect("retained fixture dir").keep())
+            }
+            RUST_CUSTODY
+            test "$(grep -c 'let td.*paired_retained_tempdir();' "$fixture_source")" -eq 3
+            diff -u receipts/paired-native/dispatcher_harness.original.rs "$fixture_source" > receipts/paired-native/fixture-custody-overlay.diff || test "$?" -eq 1
+            sha256 "$fixture_source" "$MOTH_AGENT_BIN" > receipts/paired-native/derived-source-and-agent.sha256
+            mkdir -p receipts/paired-native/raw
+            chmod 700 receipts/paired-native/raw
+            # The early EXIT trap indexes raw synthetic files on success and
+            # ordinary failure. Forced VM death leaves INCOMPLETE on the host.
+            for fixture in \
+              dispatcher_moth_receipt_matches_full_rendered_prompt \
+              dispatcher_moth_timeout_keeps_card_fenced_until_owned_work_retires \
+              moth_owner_timeout_retires_separate_session_and_preserves_sentinel
+            do
+              fixture_root="$(pwd -P)/receipts/paired-native/raw/$fixture"
+              mkdir -m 700 "$fixture_root"
+              export BOP_PAIRED_FIXTURE_ROOT="$fixture_root"
+              (while :; do date -u '+%Y-%m-%dT%H:%M:%SZ'; ps -axo pid,ppid,pgid,sid,state,comm | awk 'NR == 1 || /agent|bop|timeout.process.tree/'; sleep 1; done) > "$fixture_root/process-samples.txt" 2>&1 &
+              sampler_pid=$!
+              set +e
+              gtimeout -k 10s 180s cargo +nightly-2026-02-20 test --locked -p bop \
+                --features timeout-process-tree-fixture --test dispatcher_harness \
+                "$fixture" -- --ignored --exact --nocapture \
+                > "receipts/paired-native/${fixture}.txt" 2>&1
+              fixture_status=$?
+              kill "$sampler_pid" 2>/dev/null || true
+              wait "$sampler_pid" 2>/dev/null || true
+              set -e
+              printf '%s\n' "$fixture_status" > "$fixture_root/test-exit-code.txt"
+              test "$fixture_status" -eq 0
+              test -s "$fixture_root/process-samples.txt"
+              case "$fixture" in
+                dispatcher_moth_receipt_matches_full_rendered_prompt|dispatcher_moth_timeout_keeps_card_fenced_until_owned_work_retires)
+                  test -n "$(find "$fixture_root" -type f -name '*.jsonl' -print -quit)" ;;
+                moth_owner_timeout_retires_separate_session_and_preserves_sentinel)
+                  test -n "$(find "$fixture_root" -type f -name prompt -print -quit)" ;;
+              esac
+            done
+            printf '%s\n' 'synthetic native pair completed; no real provider acceptance' > receipts/paired-native/SCOPE.txt
+
+      - name: Require VM gate success after receipt copyback
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f receipts/paired-native/INCOMPLETE
+          test -s receipts/paired-native/VM-EXIT-CODE
+          vm_status="$(cat receipts/paired-native/VM-EXIT-CODE)"
+          [[ "$vm_status" =~ ^[0-9]+$ ]]
+          test "$vm_status" -eq 0
+          test -s receipts/paired-native/VM-RAW.log
+          test -s receipts/paired-native/raw-SHA256SUMS.txt
+          test -s receipts/paired-native/SCOPE.txt
+          test -s receipts/paired-native/notices/bop/COMPLETE
+          test -s receipts/paired-native/notices/moth/COMPLETE
+          test -s receipts/paired-native/notices/bop/raw-text-index.json
+          test -s receipts/paired-native/notices/moth/raw-text-index.json
+          rm receipts/paired-native/INCOMPLETE
+
+      - name: Retain diagnostic receipts even when a gate fails
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: bop19-moth5-paired-freebsd-diagnostic
+          path: receipts/paired-native/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
+
+  pr23-scoped-linux:
+    if: github.ref == 'refs/heads/diagnostic/pr19-watch-terminal-held-20261027' && !inputs.physical_pty
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Fetch reviewed PR23 fixture source without submodule traversal
+        shell: bash
+        env:
+          GIT_TERMINAL_PROMPT: '0'
+          GIT_ASKPASS: /bin/false
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostic
+          printf '%s\n' 'INCOMPLETE: source, lock, and tests unverified' > diagnostic/INCOMPLETE
+          printf '%s\n' "$GITHUB_SHA" > diagnostic/workflow-commit.txt
+          trap 'status=$?; printf "%s\n" "$status" > diagnostic/fetch-exit-code.txt' EXIT
+          test -z "$(find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 ! -name diagnostic -print -quit)"
+          git init -q "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" remote add origin https://github.com/ryanmaclean/bop.git
+          git -C "$GITHUB_WORKSPACE" -c credential.helper= fetch --no-tags --no-recurse-submodules --depth=20 origin refs/pull/23/head
+          test "$(git -C "$GITHUB_WORKSPACE" rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
+          git -C "$GITHUB_WORKSPACE" cat-file -e '6f9507e4325dd2684c69b7690e9868a6860e894c^{commit}'
+          git -C "$GITHUB_WORKSPACE" -c submodule.recurse=false checkout --detach --force 6f9507e4325dd2684c69b7690e9868a6860e894c
+
+      - name: Verify exact source and lock before compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = '6f9507e4325dd2684c69b7690e9868a6860e894c'
+          echo 'd16018d33360816f65c6fc3c1f27efeb87f3dc6b38b7399c357a27a4668a8c81  Cargo.lock' | sha256sum --check --status
+          test -z "$(git status --porcelain --untracked-files=no)"
+          git rev-parse HEAD > diagnostic/source-commit.txt
+          sha256sum Cargo.lock > diagnostic/lock-sha256.txt
+
+      - name: Select pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        with:
+          toolchain: nightly-2026-02-20
+
+      - name: Read physical-row model from actual old and new frames
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +nightly-2026-02-20 test --locked -p bop --bin bop \
+            managed_watch::tests::virtual_pane_repaint_erases_wrapped_deleted_card_after_resize \
+            -- --exact --nocapture 2>&1 | tee diagnostic/virtual-pane.log
+
+      - name: Witness exact metadata path under newly created recursive subtree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +nightly-2026-02-20 test --locked -p bop --test managed_watch_worker \
+            recursive_notify_observes_metadata_under_new_team_directory \
+            -- --ignored --exact --nocapture 2>&1 | tee diagnostic/recursive-path.log
+
+      - name: Witness worker IPC for preexisting card metadata stimulus
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +nightly-2026-02-20 test --locked -p bop --test managed_watch_worker \
+            worker_ipc_forwards_preexisting_card_metadata_write_and_releases_lock \
+            -- --ignored --exact --nocapture 2>&1 | tee diagnostic/worker-ipc.log
+
+      - name: Mark scoped diagnostic complete
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat diagnostic/fetch-exit-code.txt)" = '0'
+          test -s diagnostic/source-commit.txt
+          test -s diagnostic/lock-sha256.txt
+          test -s diagnostic/virtual-pane.log
+          test -s diagnostic/recursive-path.log
+          test -s diagnostic/worker-ipc.log
+          grep -Fq 'running 1 test' diagnostic/virtual-pane.log
+          grep -Fq 'test managed_watch::tests::virtual_pane_repaint_erases_wrapped_deleted_card_after_resize ... ok' diagnostic/virtual-pane.log
+          grep -Fq '1 passed; 0 failed' diagnostic/virtual-pane.log
+          grep -Fq 'running 1 test' diagnostic/recursive-path.log
+          grep -Fq 'test recursive_notify_observes_metadata_under_new_team_directory ... ok' diagnostic/recursive-path.log
+          grep -Fq '1 passed; 0 failed' diagnostic/recursive-path.log
+          grep -Fq 'running 1 test' diagnostic/worker-ipc.log
+          grep -Fq 'test worker_ipc_forwards_preexisting_card_metadata_write_and_releases_lock ... ok' diagnostic/worker-ipc.log
+          grep -Fq '1 passed; 0 failed' diagnostic/worker-ipc.log
+          rm diagnostic/INCOMPLETE
+          printf '%s\n' 'three scoped Linux fixture commands completed successfully; worker EVENT is pathless; no physical PTY or shell sentinel tested' > diagnostic/SCOPE.txt
+
+      - name: Bound diagnostic receipts even on failure
+        id: bound
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d diagnostic && test ! -L diagnostic
+          test -f diagnostic/INCOMPLETE || test -f diagnostic/SCOPE.txt
+          test ! -f diagnostic/INCOMPLETE || test ! -f diagnostic/SCOPE.txt
+          test "$(find diagnostic -type f | wc -l)" -le 8
+          test -z "$(find diagnostic ! -type f ! -type d -print -quit)"
+          while IFS= read -r path; do
+            case "$path" in
+              diagnostic/INCOMPLETE|diagnostic/SCOPE.txt|diagnostic/workflow-commit.txt|diagnostic/fetch-exit-code.txt|diagnostic/source-commit.txt|diagnostic/lock-sha256.txt|diagnostic/virtual-pane.log|diagnostic/recursive-path.log|diagnostic/worker-ipc.log) ;;
+              *) exit 1 ;;
+            esac
+            test "$(wc -c < "$path")" -le 4194304
+          done < <(find diagnostic -type f -print)
+          test "$(du -sk diagnostic | cut -f1)" -le 8192
+
+      - name: Retain scoped raw logs
+        if: ${{ always() && steps.bound.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: bop-pr23-watch-terminal-diagnostic
+          path: diagnostic/
+          if-no-files-found: error
+
+  pr23-physical-linux:
+    if: github.ref == 'refs/heads/diagnostic/pr19-watch-terminal-held-20261027' && inputs.physical_pty
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Fetch exact reviewed PR23 physical fixture without submodules
+        shell: bash
+        env:
+          GIT_TERMINAL_PROMPT: '0'
+          GIT_ASKPASS: /bin/false
+          REVIEWED_SHA: ${{ inputs.physical_source_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p physical
+          printf '%s\n' 'INCOMPLETE: physical PTY and Zellij assertions unverified' > physical/INCOMPLETE
+          printf '%s\n' "$GITHUB_SHA" > physical/workflow-commit.txt
+          trap 'status=$?; printf "%s\n" "$status" > physical/fetch-exit-code.txt' EXIT
+          [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$REVIEWED_SHA" = "$GITHUB_SHA"
+          test -z "$(find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 ! -name physical -print -quit)"
+          git init -q "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" remote add origin https://github.com/ryanmaclean/bop.git
+          git -C "$GITHUB_WORKSPACE" -c credential.helper= fetch --no-tags --no-recurse-submodules --depth=1 origin refs/pull/23/head
+          test "$(git -C "$GITHUB_WORKSPACE" rev-parse FETCH_HEAD)" = "$REVIEWED_SHA"
+          git -C "$GITHUB_WORKSPACE" -c submodule.recurse=false checkout --detach --force "$REVIEWED_SHA"
+
+      - name: Verify source and lock before compilation
+        shell: bash
+        env:
+          REVIEWED_SHA: ${{ inputs.physical_source_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$REVIEWED_SHA"
+          echo 'd16018d33360816f65c6fc3c1f27efeb87f3dc6b38b7399c357a27a4668a8c81  Cargo.lock' | sha256sum --check --status
+          test -z "$(git status --porcelain --untracked-files=no)"
+          git rev-parse HEAD > physical/source-commit.txt
+          sha256sum Cargo.lock > physical/lock-sha256.txt
+
+      - name: Install pinned MIT Zellij in runner-private directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p physical/tool
+          curl --fail --location --silent --show-error --max-time 60 \
+            https://github.com/zellij-org/zellij/releases/download/v0.43.1/zellij-x86_64-unknown-linux-musl.tar.gz \
+            --output physical/tool/zellij.tar.gz
+          test "$(wc -c < physical/tool/zellij.tar.gz)" -eq 19108370
+          echo '541d98efef5558293ef85ad9acd29e4d920b6e881513b9e77255d8207020d75a  physical/tool/zellij.tar.gz' | sha256sum --check --status
+          test "$(tar -tzf physical/tool/zellij.tar.gz)" = 'zellij'
+          tar -xOzf physical/tool/zellij.tar.gz zellij > physical/tool/zellij
+          chmod 700 physical/tool/zellij
+          sha256sum physical/tool/zellij > physical/zellij-sha256.txt
+          test "$(physical/tool/zellij --version)" = 'zellij 0.43.1'
+          rm physical/tool/zellij.tar.gz
+
+      - name: Select pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        with:
+          toolchain: nightly-2026-02-20
+
+      - name: Exercise real PTY, Zellij cells, and invoking-shell sentinel
+        shell: bash
+        run: |
+          set -euo pipefail
+          BOP_TEST_ZELLIJ="$(pwd -P)/physical/tool/zellij"
+          export BOP_TEST_ZELLIJ
+          timeout --signal=TERM --kill-after=5s 180s \
+            cargo +nightly-2026-02-20 test --locked -p bop --test managed_watch_pty \
+              physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells \
+              -- --ignored --exact --nocapture > physical/physical-pty.log 2>&1
+
+      - name: Mark exact physical diagnostic complete
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat physical/fetch-exit-code.txt)" = '0'
+          test -s physical/source-commit.txt
+          test -s physical/lock-sha256.txt
+          test -s physical/zellij-sha256.txt
+          test -s physical/physical-pty.log
+          grep -Fq 'running 1 test' physical/physical-pty.log
+          grep -Fq 'physical PTY, distinct watch tty, live shell sentinel, create/resize/delete cells, Ctrl-C and lock release verified' physical/physical-pty.log
+          grep -Fq 'test physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells ... ok' physical/physical-pty.log
+          grep -Fq '1 passed; 0 failed' physical/physical-pty.log
+          rm physical/INCOMPLETE
+          printf '%s\n' 'Synthetic physical Linux PTY and Zellij watch path passed; no provider, BSD, or product release acceptance' > physical/SCOPE.txt
+
+      - name: Bound physical diagnostic receipts even on failure
+        id: bound-physical
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d physical && test ! -L physical
+          test -f physical/INCOMPLETE || test -f physical/SCOPE.txt
+          test ! -f physical/INCOMPLETE || test ! -f physical/SCOPE.txt
+          test ! -L physical/tool
+          rm -rf physical/tool
+          test "$(find physical -type f | wc -l)" -le 8
+          test -z "$(find physical ! -type f ! -type d -print -quit)"
+          while IFS= read -r path; do
+            case "$path" in
+              physical/INCOMPLETE|physical/SCOPE.txt|physical/workflow-commit.txt|physical/fetch-exit-code.txt|physical/source-commit.txt|physical/lock-sha256.txt|physical/zellij-sha256.txt|physical/physical-pty.log) ;;
+              *) exit 1 ;;
+            esac
+            test "$(wc -c < "$path")" -le 4194304
+          done < <(find physical -type f -print)
+          test "$(du -sk physical | cut -f1)" -le 8192
+
+      - name: Retain bounded physical diagnostic receipt
+        if: ${{ always() && steps.bound-physical.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: bop-pr23-physical-pty-diagnostic
+          path: physical/
+          if-no-files-found: error

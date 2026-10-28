@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 #[cfg(unix)]
-use std::{fs, os::unix::fs::DirBuilderExt, os::unix::net::UnixStream as StdUnixStream};
+use std::{
+    fs, os::unix::fs::DirBuilderExt, os::unix::net::UnixStream as StdUnixStream, time::Instant,
+};
 
 use chrono::Local;
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
@@ -28,6 +30,10 @@ const START_TIMEOUT: Duration = Duration::from_secs(5);
 const STOP_TIMEOUT: Duration = Duration::from_secs(2);
 const RENDER_TIMEOUT: Duration = Duration::from_secs(2);
 const RENDER_MAX_BYTES: u64 = 2 * 1024 * 1024;
+#[cfg(unix)]
+const INITIAL_SIZE_TIMEOUT: Duration = Duration::from_secs(3);
+#[cfg(unix)]
+const INITIAL_SIZE_POLL: Duration = Duration::from_millis(50);
 #[cfg(unix)]
 const ACK_TIMEOUT: Duration = Duration::from_secs(20);
 #[cfg(unix)]
@@ -197,6 +203,7 @@ pub async fn run_managed_pane(
     };
     let result = async {
         verify_managed_pane(origin_dev, origin_ino)?;
+        wait_for_initial_pane_dimensions().await?;
         list_cards_watch(root, true, Some(&mut ack)).await
     }
     .await;
@@ -204,6 +211,27 @@ pub async fn run_managed_pane(
         ack.fail(error);
     }
     result
+}
+
+#[cfg(unix)]
+async fn wait_for_initial_pane_dimensions() -> anyhow::Result<()> {
+    let deadline = Instant::now() + INITIAL_SIZE_TIMEOUT;
+    loop {
+        if terminal_size().is_some() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            // Preserve the original failure and fixed per-FD size classification.
+            return frame_dimensions(true).map(|_| ());
+        }
+        tokio::select! {
+            signal = tokio::signal::ctrl_c() => {
+                signal?;
+                anyhow::bail!("watch pane interrupted before initial dimensions");
+            }
+            _ = tokio::time::sleep(INITIAL_SIZE_POLL) => {}
+        }
+    }
 }
 
 #[cfg(not(unix))]
@@ -414,14 +442,45 @@ async fn stop_worker(
 
 fn frame_dimensions(managed: bool) -> anyhow::Result<Option<(u16, u16)>> {
     if managed {
-        let (Width(width), Height(height)) =
-            terminal_size().ok_or_else(|| anyhow::anyhow!("watch pane dimensions unavailable"))?;
+        let (Width(width), Height(height)) = terminal_size().ok_or_else(|| {
+            #[cfg(unix)]
+            {
+                anyhow::anyhow!(
+                    "watch pane dimensions unavailable: stdout={} stderr={} stdin={}",
+                    fixed_fd_size_class(libc::STDOUT_FILENO),
+                    fixed_fd_size_class(libc::STDERR_FILENO),
+                    fixed_fd_size_class(libc::STDIN_FILENO),
+                )
+            }
+            #[cfg(not(unix))]
+            {
+                anyhow::anyhow!("watch pane dimensions unavailable")
+            }
+        })?;
         if width == 0 || height == 0 {
             anyhow::bail!("watch pane dimensions are zero");
         }
         Ok(Some((width, height)))
     } else {
         Ok(None)
+    }
+}
+
+#[cfg(unix)]
+fn fixed_fd_size_class(fd: libc::c_int) -> &'static str {
+    if unsafe { libc::isatty(fd) } != 1 {
+        return "not_tty";
+    }
+    let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
+    if unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, size.as_mut_ptr()) } != 0 {
+        return "ioctl_failed";
+    }
+    let size = unsafe { size.assume_init() };
+    if size.ws_row == 0 || size.ws_col == 0 {
+        "zero"
+    } else {
+        // The second query can race a resize after terminal_size() returned None.
+        "positive_late"
     }
 }
 
@@ -714,6 +773,84 @@ fn row_color(row: &str) -> Option<&'static [u8]> {
 mod tests {
     use super::*;
 
+    /// Small cell model for the fixed CSI sequences emitted by `encode_frame`.
+    /// It deliberately consumes bytes from both frames, rather than inspecting
+    /// only the replacement frame's input strings.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct VirtualPane {
+        width: usize,
+        cells: Vec<Vec<char>>,
+        x: usize,
+        y: usize,
+    }
+
+    impl VirtualPane {
+        fn new(width: usize, height: usize) -> Self {
+            Self {
+                width,
+                cells: vec![vec![' '; width]; height],
+                x: 0,
+                y: 0,
+            }
+        }
+
+        fn resize_with_reflow(&mut self, width: usize) {
+            let height = self.cells.len();
+            let old: Vec<char> = self.cells.iter().flatten().copied().collect();
+            self.width = width;
+            self.cells = vec![vec![' '; width]; height];
+            for (index, ch) in old.into_iter().take(width * height).enumerate() {
+                self.cells[index / width][index % width] = ch;
+            }
+            self.x = 0;
+            self.y = 0;
+        }
+
+        fn feed(&mut self, bytes: &[u8]) {
+            let text = std::str::from_utf8(bytes).unwrap();
+            let mut chars = text.chars();
+            while let Some(ch) = chars.next() {
+                match ch {
+                    '\x1b' => {
+                        assert_eq!(chars.next(), Some('['));
+                        let final_byte = chars.find(|c| c.is_ascii_alphabetic()).unwrap();
+                        match final_byte {
+                            'H' => (self.x, self.y) = (0, 0),
+                            'J' => {
+                                for row in self.cells.iter_mut().skip(self.y) {
+                                    row.fill(' ');
+                                }
+                            }
+                            'm' => {}
+                            other => panic!("unexpected CSI {other}"),
+                        }
+                    }
+                    '\r' => self.x = 0,
+                    '\n' => self.y += 1,
+                    _ if !ch.is_control() => {
+                        let cells = UnicodeWidthChar::width(ch).unwrap_or(0);
+                        if cells == 0 || self.y >= self.cells.len() {
+                            continue;
+                        }
+                        if self.x + cells > self.width {
+                            self.x = 0;
+                            self.y += 1;
+                        }
+                        if self.y < self.cells.len() {
+                            self.cells[self.y][self.x] = ch;
+                            self.x += cells;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        fn text(&self) -> String {
+            self.cells.iter().flatten().copied().collect()
+        }
+    }
+
     #[test]
     fn row_is_bounded_and_control_free() {
         let row = sanitize_row("id \x1b[31m a界\u{202e}b", 8);
@@ -792,5 +929,75 @@ mod tests {
         let unsafe_row = sanitize_row("evil\x1b[2J", 20);
         let safe_frame = encode_frame(&[unsafe_row], true);
         assert!(!safe_frame.windows(4).any(|window| window == b"\x1b[2J"));
+    }
+
+    #[test]
+    fn encoder_clips_unicode_and_clears_before_smaller_frame() {
+        let long = vec![
+            "running (2)".to_string(),
+            "  [>] ♠A long 界界 title \x1b[31m formerly wrapped".to_string(),
+            "  [>] ♠K second card".to_string(),
+            "3 total".to_string(),
+        ];
+        let wide = fit_rows(long, 28, 6);
+        assert_eq!(wide.len(), 4);
+        assert!(wide.iter().all(|row| {
+            row.chars()
+                .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
+                .sum::<usize>()
+                <= 27
+        }));
+        assert!(wide[1].contains("界"));
+        assert!(!wide[1].contains('\x1b'));
+
+        // This checks frame bytes only. A native PTY readback is still needed
+        // to establish physical row clearing and shell isolation.
+        let narrow = fit_rows(vec!["running (1)".into(), "  [>] ♠A 界".into()], 12, 3);
+        let repaint = encode_frame(&narrow, true);
+        assert!(repaint.starts_with(b"\x1b[H\x1b[J"));
+        assert_eq!(
+            repaint
+                .windows(3)
+                .filter(|chunk| *chunk == b"\x1b[H")
+                .count(),
+            1
+        );
+        assert!(narrow.iter().all(|row| {
+            row.chars()
+                .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
+                .sum::<usize>()
+                <= 11
+        }));
+    }
+
+    #[test]
+    fn virtual_pane_repaint_erases_wrapped_deleted_card_after_resize() {
+        let mut watch = VirtualPane::new(28, 10);
+
+        let old = fit_rows(
+            vec![
+                "running (2)".into(),
+                "  [>] ♠A 界界 old title \x1b[31m".into(),
+                "  [>] ♠K deleted card".into(),
+            ],
+            28,
+            8,
+        );
+        watch.feed(&encode_frame(&old, true));
+        assert!(watch.text().contains('K'), "old card must occupy cells");
+        watch.resize_with_reflow(12);
+        assert!(watch.text().contains('K'), "old card must survive resize");
+
+        let new = fit_rows(vec!["running (1)".into(), "  [>] ♠A 界".into()], 12, 8);
+        watch.feed(&encode_frame(&new, true));
+        assert!(watch.text().contains('A'));
+        assert!(
+            !watch.text().contains('K'),
+            "deleted card remained in cells"
+        );
+        assert!(
+            !watch.text().contains("[31m"),
+            "old title remained in cells"
+        );
     }
 }
