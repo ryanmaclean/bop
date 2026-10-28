@@ -785,6 +785,47 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
         ]),
         "Zellij did not create invoking shell pane"
     );
+    // openpty supplied 12x90 before Zellij started. The hosted origin shell
+    // retained that size, but its mediated watch child saw zero dimensions.
+    // Notify Zellij of the outer PTY size after the invoking pane exists.
+    let mut outer_size = libc::winsize {
+        ws_row: 0,
+        ws_col: 0,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    assert_eq!(
+        unsafe {
+            libc::ioctl(
+                session.master.as_raw_fd(),
+                libc::TIOCGWINSZ,
+                &mut outer_size,
+            )
+        },
+        0,
+        "outer PTY size unavailable"
+    );
+    assert_eq!(
+        (outer_size.ws_row, outer_size.ws_col),
+        (12, 90),
+        "outer PTY initial size incorrect"
+    );
+    assert_eq!(
+        unsafe {
+            libc::ioctl(
+                session.master.as_raw_fd(),
+                libc::TIOCSWINSZ,
+                &mut outer_size,
+            )
+        },
+        0,
+        "outer PTY size notification failed"
+    );
+    assert_eq!(
+        unsafe { libc::kill(-(session.child.id() as i32), libc::SIGWINCH) },
+        0,
+        "Zellij size notification failed"
+    );
     let startup = until("invoking shell startup PID and TTY", || {
         let pid = fs::read_to_string(root.join("invoker-start-pid"))
             .ok()?
