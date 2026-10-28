@@ -213,7 +213,6 @@ fn recursive_notify_observes_metadata_under_new_team_directory() {
         .join("fresh.jobcard")
         .join("meta.json");
     fs::create_dir_all(metadata.parent().unwrap()).unwrap();
-    fs::write(&metadata, b"{\"fixture\":\"new-subtree\"}").unwrap();
 
     let started = Instant::now();
     let mut traced = 0usize;
@@ -266,10 +265,30 @@ fn recursive_notify_observes_metadata_under_new_team_directory() {
         }
         matched
     };
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let observed = receive_until(&metadata, deadline);
-    // A separately named late probe distinguishes a rapid-create registration
-    // gap from a watcher that never reports paths in this new subtree.
+    // Directory creation and inotify's recursive watch registration are not
+    // atomic. Establish an observable event from inside the new bundle before
+    // testing a distinct metadata path. Each retry is driven by a bounded
+    // receive timeout; no fixed sleep or pathless event can satisfy the gate.
+    let ready_probe = metadata.with_file_name("ready-probe.json");
+    let ready_deadline = Instant::now() + Duration::from_secs(5);
+    let mut attempt = 0usize;
+    let mut ready = false;
+    while Instant::now() < ready_deadline && !ready {
+        attempt += 1;
+        fs::write(&ready_probe, format!("probe-{attempt}")).unwrap();
+        let window = (Instant::now() + Duration::from_millis(400)).min(ready_deadline);
+        ready = receive_until(&ready_probe, window);
+    }
+    println!("native_watch_ready observed={ready} attempts={attempt}");
+    assert!(
+        ready,
+        "no path-attributed event inside new bundle before deadline"
+    );
+
+    fs::write(&metadata, b"{\"fixture\":\"new-subtree\"}").unwrap();
+    let observed = receive_until(&metadata, Instant::now() + Duration::from_secs(5));
+    // A separately named late probe distinguishes a target-specific miss
+    // after readiness from a broader loss of subsequent subtree events.
     let late_probe = metadata.with_file_name("late-probe.json");
     let late_observed = if observed {
         false
@@ -278,11 +297,11 @@ fn recursive_notify_observes_metadata_under_new_team_directory() {
         receive_until(&late_probe, Instant::now() + Duration::from_secs(3))
     };
     println!(
-        "native_event_summary initial_metadata={observed} late_probe={late_observed} traced={traced} suppressed={suppressed}"
+        "native_event_summary ready={ready} metadata_after_ready={observed} late_probe={late_observed} traced={traced} suppressed={suppressed}"
     );
     assert!(
         observed,
-        "no path-attributed immediate metadata event below new subtree; late_probe={late_observed}"
+        "no path-attributed metadata event after observed subtree readiness; late_probe={late_observed}"
     );
     assert_eq!(
         fs::read(&metadata).unwrap(),
