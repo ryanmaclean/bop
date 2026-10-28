@@ -315,7 +315,7 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
     )
     .unwrap();
     let session_name = format!("bop-pty-{}", std::process::id());
-    let session = start_session(root, &zellij, session_name);
+    let mut session = start_session(root, &zellij, session_name);
     // v0.43.1's dump-screen/write actions address the focused pane only.
     // A successful dump can be a plugin, so identify the explicit shell by
     // its private PID/TTY and have that same shell launch the watch command.
