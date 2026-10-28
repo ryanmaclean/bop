@@ -393,13 +393,12 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
         .trim()
         .parse::<i32>()
         .unwrap();
-    assert_eq!(
-        typed_pid, startup.0,
+    assert!(
+        typed_pid == startup.0,
         "typed sentinel came from another shell"
     );
-    assert_eq!(
-        origin.trim(),
-        startup.1.trim(),
+    assert!(
+        origin.trim() == startup.1.trim(),
         "typed sentinel came from another tty"
     );
     let origin_path = Path::new(origin.trim());
