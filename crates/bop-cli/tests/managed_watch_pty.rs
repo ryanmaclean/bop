@@ -95,14 +95,12 @@ impl Session {
         let deadline = Instant::now() + Duration::from_secs(5);
         for mut remaining in [line.as_bytes(), b"\r".as_slice()] {
             while !remaining.is_empty() {
+                assert!(Instant::now() < deadline, "outer PTY input timed out");
                 match self.master.write(remaining) {
                     Ok(0) => panic!("outer PTY stopped accepting input"),
                     Ok(written) => remaining = &remaining[written..],
                     Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(err)
-                        if err.kind() == std::io::ErrorKind::WouldBlock
-                            && Instant::now() < deadline =>
-                    {
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(POLL);
                     }
                     Err(_) => panic!("outer PTY input failed or timed out"),
