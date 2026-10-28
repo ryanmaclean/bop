@@ -9,7 +9,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU32, Ordering},
     Arc,
 };
 use std::thread;
@@ -17,6 +17,36 @@ use std::time::{Duration, Instant};
 
 const TIMEOUT: Duration = Duration::from_secs(20);
 const POLL: Duration = Duration::from_millis(100);
+
+// Observe only fixed CLI failure phrases in the existing PTY drain. No raw
+// terminal bytes, error text, or paths are retained in the diagnostic receipt.
+const WATCH_ERRORS: [(&[u8], u32); 9] = [
+    (
+        b"interactive bop status --watch requires a mediated Zellij pane",
+        1,
+    ),
+    (b"Zellij pane launch timed out", 2),
+    (b"Zellij could not open the mediated watch pane", 4),
+    (
+        b"watch pane readiness was not acknowledged within 20 seconds",
+        8,
+    ),
+    (b"watch pane launch capability mismatch", 16),
+    (b"watch pane startup failed:", 32),
+    (b"watch pane sent an invalid startup acknowledgment", 64),
+    (b"error: unexpected argument", 128),
+    (b"Error: ", 256),
+];
+
+fn classify_watch_bytes(window: &[u8]) -> u32 {
+    WATCH_ERRORS.iter().fold(0, |flags, (needle, bit)| {
+        if window.windows(needle.len()).any(|part| part == *needle) {
+            flags | bit
+        } else {
+            flags
+        }
+    })
+}
 
 fn until<T>(description: &str, mut probe: impl FnMut() -> Option<T>) -> T {
     let deadline = Instant::now() + TIMEOUT;
@@ -60,11 +90,29 @@ struct Session {
     home: PathBuf,
     zellij: PathBuf,
     stop: Arc<AtomicBool>,
+    watch_errors: Arc<AtomicU32>,
     drain: Option<thread::JoinHandle<()>>,
     master: File,
 }
 
 impl Session {
+    fn watch_error_class(&self) -> &'static str {
+        let flags = self.watch_errors.load(Ordering::Relaxed);
+        match flags & !256 {
+            1 => "missing_zellij_session",
+            2 => "zellij_launch_timeout",
+            4 => "zellij_open_failed",
+            8 => "readiness_timeout",
+            16 => "capability_mismatch",
+            32 => "pane_startup_failed",
+            64 => "invalid_acknowledgment",
+            128 => "zellij_argument_error",
+            0 if flags & 256 != 0 => "other_error_text",
+            0 => "no_error_text_seen",
+            _ => "multiple_error_classes",
+        }
+    }
+
     fn command(&self) -> Command {
         let mut command = Command::new(&self.zellij);
         command
@@ -184,12 +232,24 @@ fn start_session(root: &Path, zellij: &Path, session: String) -> Session {
     );
     let stop = Arc::new(AtomicBool::new(false));
     let drain_stop = stop.clone();
+    let watch_errors = Arc::new(AtomicU32::new(0));
+    let drain_errors = watch_errors.clone();
     let drain = thread::spawn(move || {
         let mut bytes = [0u8; 8192];
+        let mut tail = Vec::with_capacity(128);
+        let mut window = Vec::with_capacity(8192 + 128);
         while !drain_stop.load(Ordering::Relaxed) {
             match reader.read(&mut bytes) {
                 Ok(0) => break,
-                Ok(_) => {}
+                Ok(n) => {
+                    window.clear();
+                    window.extend_from_slice(&tail);
+                    window.extend_from_slice(&bytes[..n]);
+                    drain_errors.fetch_or(classify_watch_bytes(&window), Ordering::Relaxed);
+                    tail.clear();
+                    let start = window.len().saturating_sub(128);
+                    tail.extend_from_slice(&window[start..]);
+                }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => thread::sleep(POLL),
                 Err(_) => break,
             }
@@ -201,6 +261,7 @@ fn start_session(root: &Path, zellij: &Path, session: String) -> Session {
         home: root.to_path_buf(),
         zellij: zellij.to_path_buf(),
         stop,
+        watch_errors,
         drain: Some(drain),
         master,
     }
@@ -301,7 +362,7 @@ fn fixed_marker(root: &Path, name: &str) -> &'static str {
     }
 }
 
-fn report_watch_probe(cards: &Path, temp_root: &Path, origin_id: (u64, u64)) {
+fn report_watch_probe(cards: &Path, temp_root: &Path, origin_id: (u64, u64), session: &Session) {
     // Diagnostics only: this never supplies a pane ID to the acceptance gate.
     let Ok(bop) = fs::canonicalize(env!("CARGO_BIN_EXE_bop")) else {
         eprintln!(
@@ -376,8 +437,9 @@ fn report_watch_probe(cards: &Path, temp_root: &Path, origin_id: (u64, u64)) {
         }
     }
     eprintln!(
-        "watch probe: child_exit={} session_env={} session_match={} shell_stdout_tty={} zellij_on_path={} dev_tty_openable={} shell_live={} beat_nonempty={} proc_scan_truncated={} proc={} bop_exe={} cmdline_unreadable={} status_watch={} helper={} cards_match={} stdout_fd_meta={} distinct_fd_id={}",
+        "watch probe: child_exit={} error_class={} session_env={} session_match={} shell_stdout_tty={} zellij_on_path={} dev_tty_openable={} shell_live={} beat_nonempty={} proc_scan_truncated={} proc={} bop_exe={} cmdline_unreadable={} status_watch={} helper={} cards_match={} stdout_fd_meta={} distinct_fd_id={}",
         watch_child_exit(temp_root),
+        session.watch_error_class(),
         fixed_marker(temp_root, "watch-session-env"),
         fixed_marker(temp_root, "watch-session-match"),
         fixed_marker(temp_root, "watch-shell-stdout-tty"),
@@ -518,7 +580,7 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
                 break id;
             }
             if Instant::now() >= deadline {
-                report_watch_probe(&cards, root, origin_id);
+                report_watch_probe(&cards, root, origin_id, &session);
                 panic!("timed out waiting for distinct live watch pane tty");
             }
             thread::sleep(POLL);
