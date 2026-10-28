@@ -414,14 +414,45 @@ async fn stop_worker(
 
 fn frame_dimensions(managed: bool) -> anyhow::Result<Option<(u16, u16)>> {
     if managed {
-        let (Width(width), Height(height)) =
-            terminal_size().ok_or_else(|| anyhow::anyhow!("watch pane dimensions unavailable"))?;
+        let (Width(width), Height(height)) = terminal_size().ok_or_else(|| {
+            #[cfg(unix)]
+            {
+                anyhow::anyhow!(
+                    "watch pane dimensions unavailable: stdout={} stderr={} stdin={}",
+                    fixed_fd_size_class(libc::STDOUT_FILENO),
+                    fixed_fd_size_class(libc::STDERR_FILENO),
+                    fixed_fd_size_class(libc::STDIN_FILENO),
+                )
+            }
+            #[cfg(not(unix))]
+            {
+                anyhow::anyhow!("watch pane dimensions unavailable")
+            }
+        })?;
         if width == 0 || height == 0 {
             anyhow::bail!("watch pane dimensions are zero");
         }
         Ok(Some((width, height)))
     } else {
         Ok(None)
+    }
+}
+
+#[cfg(unix)]
+fn fixed_fd_size_class(fd: libc::c_int) -> &'static str {
+    if unsafe { libc::isatty(fd) } != 1 {
+        return "not_tty";
+    }
+    let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
+    if unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, size.as_mut_ptr()) } != 0 {
+        return "ioctl_failed";
+    }
+    let size = unsafe { size.assume_init() };
+    if size.ws_row == 0 || size.ws_col == 0 {
+        "zero"
+    } else {
+        // The second query can race a resize after terminal_size() returned None.
+        "positive_late"
     }
 }
 

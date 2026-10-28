@@ -119,6 +119,23 @@ fn fixed_inner_startup_class(raw: &[u8]) -> &'static str {
     selected.unwrap_or("unclassified_inner_error")
 }
 
+fn fixed_dimension_fd_class(raw: &[u8], label: &[u8]) -> &'static str {
+    let mut selected = None;
+    for class in ["not_tty", "ioctl_failed", "zero", "positive_late"] {
+        let needle = [label, &b"="[..], class.as_bytes()].concat();
+        if raw
+            .windows(needle.len())
+            .any(|part| part == needle.as_slice())
+        {
+            if selected.is_some() {
+                return "ambiguous";
+            }
+            selected = Some(class);
+        }
+    }
+    selected.unwrap_or("missing")
+}
+
 fn until<T>(description: &str, mut probe: impl FnMut() -> Option<T>) -> T {
     let deadline = Instant::now() + TIMEOUT;
     loop {
@@ -179,22 +196,66 @@ impl Session {
         self.stderr_dir.path().join("pipe")
     }
 
-    fn child_stderr_summary(&self) -> (&'static str, &'static str, &'static str) {
+    fn child_stderr_summary(
+        &self,
+    ) -> (
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static str,
+    ) {
         if self.stderr_reader_error.load(Ordering::Relaxed) {
-            return ("capture_error", "untrusted", "untrusted");
+            return (
+                "capture_error",
+                "untrusted",
+                "untrusted",
+                "untrusted",
+                "untrusted",
+                "untrusted",
+            );
         }
         let path = self.stderr_dir.path().join("captured");
         let Ok(meta) = fs::symlink_metadata(&path) else {
-            return ("capture_missing", "untrusted", "untrusted");
+            return (
+                "capture_missing",
+                "untrusted",
+                "untrusted",
+                "untrusted",
+                "untrusted",
+                "untrusted",
+            );
         };
         if !meta.file_type().is_file() || meta.len() > STDERR_CAPTURE_CAP as u64 {
-            return ("capture_invalid", "untrusted", "untrusted");
+            return (
+                "capture_invalid",
+                "untrusted",
+                "untrusted",
+                "untrusted",
+                "untrusted",
+                "untrusted",
+            );
         }
         let Ok(raw) = fs::read(&path) else {
-            return ("capture_unreadable", "untrusted", "untrusted");
+            return (
+                "capture_unreadable",
+                "untrusted",
+                "untrusted",
+                "untrusted",
+                "untrusted",
+                "untrusted",
+            );
         };
         if raw.len() > STDERR_CAPTURE_CAP {
-            return ("capture_invalid", "untrusted", "untrusted");
+            return (
+                "capture_invalid",
+                "untrusted",
+                "untrusted",
+                "untrusted",
+                "untrusted",
+                "untrusted",
+            );
         }
         let state = if self.stderr_truncated.load(Ordering::Relaxed) {
             "truncated"
@@ -211,7 +272,23 @@ impl Session {
         } else {
             "not_classified"
         };
-        (state, class, inner)
+        let dimensions = if inner == "dimensions_unavailable" {
+            (
+                fixed_dimension_fd_class(&raw, b"stdout"),
+                fixed_dimension_fd_class(&raw, b"stderr"),
+                fixed_dimension_fd_class(&raw, b"stdin"),
+            )
+        } else {
+            ("not_classified", "not_classified", "not_classified")
+        };
+        (
+            state,
+            class,
+            inner,
+            dimensions.0,
+            dimensions.1,
+            dimensions.2,
+        )
     }
 
     fn command(&self) -> Command {
@@ -526,24 +603,31 @@ fn fixed_marker(root: &Path, name: &str) -> &'static str {
 
 fn report_watch_probe(cards: &Path, temp_root: &Path, origin_id: (u64, u64), session: &Session) {
     // Diagnostics only: this never supplies a pane ID to the acceptance gate.
-    let (stderr_state, stderr_class, inner_class) = session.child_stderr_summary();
+    let (stderr_state, stderr_class, inner_class, size_stdout, size_stderr, size_stdin) =
+        session.child_stderr_summary();
     let Ok(bop) = fs::canonicalize(env!("CARGO_BIN_EXE_bop")) else {
         eprintln!(
-            "watch probe: executable=unreadable child_exit={} stderr_state={} stderr_class={} inner_class={}",
+            "watch probe: executable=unreadable child_exit={} stderr_state={} stderr_class={} inner_class={} size_stdout={} size_stderr={} size_stdin={}",
             watch_child_exit(temp_root),
             stderr_state,
             stderr_class,
-            inner_class
+            inner_class,
+            size_stdout,
+            size_stderr,
+            size_stdin
         );
         return;
     };
     let Ok(entries) = fs::read_dir("/proc") else {
         eprintln!(
-            "watch probe: proc=unreadable child_exit={} stderr_state={} stderr_class={} inner_class={}",
+            "watch probe: proc=unreadable child_exit={} stderr_state={} stderr_class={} inner_class={} size_stdout={} size_stderr={} size_stdin={}",
             watch_child_exit(temp_root),
             stderr_state,
             stderr_class,
-            inner_class
+            inner_class,
+            size_stdout,
+            size_stderr,
+            size_stdin
         );
         return;
     };
@@ -606,12 +690,15 @@ fn report_watch_probe(cards: &Path, temp_root: &Path, origin_id: (u64, u64), ses
         }
     }
     eprintln!(
-        "watch probe: child_exit={} error_class={} stderr_state={} stderr_class={} inner_class={} session_env={} session_match={} shell_stdout_tty={} zellij_on_path={} dev_tty_openable={} pane_size_ready={} shell_live={} beat_nonempty={} proc_scan_truncated={} proc={} bop_exe={} cmdline_unreadable={} status_watch={} helper={} cards_match={} stdout_fd_meta={} distinct_fd_id={}",
+        "watch probe: child_exit={} error_class={} stderr_state={} stderr_class={} inner_class={} size_stdout={} size_stderr={} size_stdin={} session_env={} session_match={} shell_stdout_tty={} zellij_on_path={} dev_tty_openable={} pane_size_ready={} shell_live={} beat_nonempty={} proc_scan_truncated={} proc={} bop_exe={} cmdline_unreadable={} status_watch={} helper={} cards_match={} stdout_fd_meta={} distinct_fd_id={}",
         watch_child_exit(temp_root),
         session.watch_error_class(),
         stderr_state,
         stderr_class,
         inner_class,
+        size_stdout,
+        size_stderr,
+        size_stdin,
         fixed_marker(temp_root, "watch-session-env"),
         fixed_marker(temp_root, "watch-session-match"),
         fixed_marker(temp_root, "watch-shell-stdout-tty"),
