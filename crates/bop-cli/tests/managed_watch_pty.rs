@@ -279,6 +279,107 @@ fn watch_tty(root: &Path) -> Option<(u64, u64)> {
     }
 }
 
+fn watch_child_exit(root: &Path) -> &'static str {
+    match fs::read_to_string(root.join("watch-child-exit")) {
+        Ok(status) if status.trim() == "0" => "success",
+        Ok(status) if status.trim().parse::<u8>().is_ok() => "failure",
+        Ok(_) => "invalid",
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => "absent",
+        Err(_) => "unreadable",
+    }
+}
+
+fn report_watch_probe(root: &Path, origin_id: (u64, u64)) {
+    // Diagnostics only: this never supplies a pane ID to the acceptance gate.
+    let Ok(bop) = fs::canonicalize(env!("CARGO_BIN_EXE_bop")) else {
+        eprintln!(
+            "watch probe: executable=unreadable child_exit={}",
+            watch_child_exit(root)
+        );
+        return;
+    };
+    let Ok(entries) = fs::read_dir("/proc") else {
+        eprintln!(
+            "watch probe: proc=unreadable child_exit={}",
+            watch_child_exit(root)
+        );
+        return;
+    };
+    let mut processes = 0usize;
+    let mut executable = 0usize;
+    let mut command_unreadable = 0usize;
+    let mut status_watch = 0usize;
+    let mut helper = 0usize;
+    let mut cards = 0usize;
+    let mut stdout_fd_meta = 0usize;
+    let mut distinct_fd_id = 0usize;
+    let mut proc_scan_truncated = false;
+    use std::os::unix::fs::MetadataExt;
+    for entry in entries.flatten() {
+        let pid = entry.file_name();
+        if !pid
+            .to_string_lossy()
+            .bytes()
+            .all(|byte| byte.is_ascii_digit())
+        {
+            continue;
+        }
+        if processes == 10000 {
+            proc_scan_truncated = true;
+            break;
+        }
+        processes = processes.saturating_add(1);
+        if fs::canonicalize(entry.path().join("exe")).ok().as_deref() != Some(&bop) {
+            continue;
+        }
+        executable = executable.saturating_add(1);
+        let Ok(args) = fs::read(entry.path().join("cmdline")) else {
+            command_unreadable = command_unreadable.saturating_add(1);
+            continue;
+        };
+        if args.split(|byte| *byte == 0).any(|arg| arg == b"status")
+            && args.split(|byte| *byte == 0).any(|arg| arg == b"--watch")
+        {
+            status_watch = status_watch.saturating_add(1);
+        }
+        if !args
+            .split(|byte| *byte == 0)
+            .any(|arg| arg == b"__watch-pane")
+        {
+            continue;
+        }
+        helper = helper.saturating_add(1);
+        if !args
+            .split(|byte| *byte == 0)
+            .any(|arg| arg == root.as_os_str().as_encoded_bytes())
+        {
+            continue;
+        }
+        cards = cards.saturating_add(1);
+        if let Ok(tty) = fs::metadata(entry.path().join("fd/1")) {
+            stdout_fd_meta = stdout_fd_meta.saturating_add(1);
+            if (tty.dev(), tty.ino()) != origin_id {
+                distinct_fd_id = distinct_fd_id.saturating_add(1);
+            }
+        }
+    }
+    eprintln!(
+        "watch probe: child_exit={} shell_live={} beat_nonempty={} proc_scan_truncated={} proc={} bop_exe={} cmdline_unreadable={} status_watch={} helper={} cards_match={} stdout_fd_meta={} distinct_fd_id={}",
+        watch_child_exit(root),
+        shell_live(root),
+        beat_len(root) > 0,
+        proc_scan_truncated,
+        processes,
+        executable,
+        command_unreadable,
+        status_watch,
+        helper,
+        cards,
+        stdout_fd_meta,
+        distinct_fd_id,
+    );
+}
+
 #[test]
 #[ignore = "requires reviewed disposable Linux PTY/Zellij toolchain and hosted artifact audit"]
 fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
@@ -327,7 +428,7 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
             "--",
             "/bin/sh",
             "-c",
-            "printf '%s' \"$$\" > \"$1/invoker-start-pid\"; tty > \"$1/invoker-start-tty\"; printf '%s' \"$$\" > \"$1/shell-pid\"; tty > \"$1/origin-tty\"; printf x >> \"$1/shell-beat\"; \"$2\" --cards-dir \"$3\" status --watch & while :; do printf x >> \"$1/shell-beat\"; sleep 0.1; done",
+            "printf '%s' \"$$\" > \"$1/invoker-start-pid\"; tty > \"$1/invoker-start-tty\"; printf '%s' \"$$\" > \"$1/shell-pid\"; tty > \"$1/origin-tty\"; printf x >> \"$1/shell-beat\"; { \"$2\" --cards-dir \"$3\" status --watch; printf '%s' \"$?\" > \"$1/watch-child-exit\"; } & while :; do printf x >> \"$1/shell-beat\"; sleep 0.1; done",
             "bop-invoker",
             root.to_str().expect("temp path must be UTF-8"),
             env!("CARGO_BIN_EXE_bop"),
@@ -392,7 +493,19 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
     use std::os::unix::fs::MetadataExt;
     let origin_meta = fs::metadata(origin_path).unwrap();
     let origin_id = (origin_meta.dev(), origin_meta.ino());
-    let pane_id = until("distinct live watch pane tty", || watch_tty(&cards));
+    let pane_id = {
+        let deadline = Instant::now() + TIMEOUT;
+        loop {
+            if let Some(id) = watch_tty(&cards) {
+                break id;
+            }
+            if Instant::now() >= deadline {
+                report_watch_probe(&cards, origin_id);
+                panic!("timed out waiting for distinct live watch pane tty");
+            }
+            thread::sleep(POLL);
+        }
+    };
     assert_ne!(pane_id, origin_id, "watch reused the invoking shell PTY");
     let initial = until("initial watch cells", || {
         let screen = session.dump(root)?;
