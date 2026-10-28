@@ -2,9 +2,12 @@
 
 #![cfg(target_os = "linux")]
 
+use std::ffi::CString;
 use std::fs::{self, File, OpenOptions};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -17,6 +20,7 @@ use std::time::{Duration, Instant};
 
 const TIMEOUT: Duration = Duration::from_secs(20);
 const POLL: Duration = Duration::from_millis(100);
+const STDERR_CAPTURE_CAP: usize = 16 * 1024;
 
 // Observe only fixed CLI failure phrases in the existing PTY drain. No raw
 // terminal bytes, error text, or paths are retained in the diagnostic receipt.
@@ -46,6 +50,22 @@ fn classify_watch_bytes(window: &[u8]) -> u32 {
             flags
         }
     })
+}
+
+fn fixed_error_class(flags: u32) -> &'static str {
+    match flags & !256 {
+        1 => "missing_zellij_session",
+        2 => "zellij_launch_timeout",
+        4 => "zellij_open_failed",
+        8 => "readiness_timeout",
+        16 => "capability_mismatch",
+        32 => "pane_startup_failed",
+        64 => "invalid_acknowledgment",
+        128 => "zellij_argument_error",
+        0 if flags & 256 != 0 => "other_error_text",
+        0 => "no_error_text_seen",
+        _ => "multiple_error_classes",
+    }
 }
 
 fn until<T>(description: &str, mut probe: impl FnMut() -> Option<T>) -> T {
@@ -91,26 +111,51 @@ struct Session {
     zellij: PathBuf,
     stop: Arc<AtomicBool>,
     watch_errors: Arc<AtomicU32>,
+    stderr_dir: tempfile::TempDir,
+    stderr_truncated: Arc<AtomicBool>,
+    stderr_reader_error: Arc<AtomicBool>,
+    stderr_reader: Option<thread::JoinHandle<()>>,
     drain: Option<thread::JoinHandle<()>>,
     master: File,
 }
 
 impl Session {
     fn watch_error_class(&self) -> &'static str {
-        let flags = self.watch_errors.load(Ordering::Relaxed);
-        match flags & !256 {
-            1 => "missing_zellij_session",
-            2 => "zellij_launch_timeout",
-            4 => "zellij_open_failed",
-            8 => "readiness_timeout",
-            16 => "capability_mismatch",
-            32 => "pane_startup_failed",
-            64 => "invalid_acknowledgment",
-            128 => "zellij_argument_error",
-            0 if flags & 256 != 0 => "other_error_text",
-            0 => "no_error_text_seen",
-            _ => "multiple_error_classes",
+        fixed_error_class(self.watch_errors.load(Ordering::Relaxed))
+    }
+
+    fn stderr_fifo(&self) -> PathBuf {
+        self.stderr_dir.path().join("pipe")
+    }
+
+    fn child_stderr_summary(&self) -> (&'static str, &'static str) {
+        if self.stderr_reader_error.load(Ordering::Relaxed) {
+            return ("capture_error", "untrusted");
         }
+        let path = self.stderr_dir.path().join("captured");
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            return ("capture_missing", "untrusted");
+        };
+        if !meta.file_type().is_file() || meta.len() > STDERR_CAPTURE_CAP as u64 {
+            return ("capture_invalid", "untrusted");
+        }
+        let Ok(raw) = fs::read(&path) else {
+            return ("capture_unreadable", "untrusted");
+        };
+        if raw.len() > STDERR_CAPTURE_CAP {
+            return ("capture_invalid", "untrusted");
+        }
+        let state = if self.stderr_truncated.load(Ordering::Relaxed) {
+            "truncated"
+        } else {
+            "bounded"
+        };
+        let class = if raw.is_empty() {
+            "empty"
+        } else {
+            fixed_error_class(classify_watch_bytes(&raw))
+        };
+        (state, class)
     }
 
     fn command(&self) -> Command {
@@ -161,6 +206,9 @@ impl Drop for Session {
         if let Some(drain) = self.drain.take() {
             let _ = drain.join();
         }
+        if let Some(reader) = self.stderr_reader.take() {
+            let _ = reader.join();
+        }
     }
 }
 
@@ -171,6 +219,24 @@ fn duplicate(file: &File) -> File {
 }
 
 fn start_session(root: &Path, zellij: &Path, session: String) -> Session {
+    let stderr_dir = tempfile::Builder::new()
+        .prefix("watch-stderr-")
+        .tempdir_in(zellij.parent().expect("Zellij tool directory"))
+        .expect("private watch stderr directory");
+    let stderr_pipe = stderr_dir.path().join("pipe");
+    let pipe_c = CString::new(stderr_pipe.as_os_str().as_bytes()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(pipe_c.as_ptr(), 0o600) }, 0);
+    let mut pipe_reader = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(&stderr_pipe)
+        .expect("private watch stderr pipe reader");
+    let captured = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(stderr_dir.path().join("captured"))
+        .expect("private bounded watch stderr capture");
     let mut master_fd = -1;
     let mut slave_fd = -1;
     let mut size = libc::winsize {
@@ -232,6 +298,42 @@ fn start_session(root: &Path, zellij: &Path, session: String) -> Session {
     );
     let stop = Arc::new(AtomicBool::new(false));
     let drain_stop = stop.clone();
+    let stderr_stop = stop.clone();
+    let stderr_truncated = Arc::new(AtomicBool::new(false));
+    let stderr_reader_error = Arc::new(AtomicBool::new(false));
+    let reader_truncated = stderr_truncated.clone();
+    let reader_error = stderr_reader_error.clone();
+    let stderr_reader = thread::spawn(move || {
+        let mut captured = captured;
+        let mut saved = 0usize;
+        let mut bytes = [0u8; 8192];
+        let mut can_save = true;
+        while !stderr_stop.load(Ordering::Relaxed) {
+            match pipe_reader.read(&mut bytes) {
+                Ok(0) => thread::sleep(POLL),
+                Ok(n) => {
+                    let keep = n.min(STDERR_CAPTURE_CAP.saturating_sub(saved));
+                    if keep < n {
+                        reader_truncated.store(true, Ordering::Relaxed);
+                    }
+                    if can_save && keep > 0 {
+                        if captured.write_all(&bytes[..keep]).is_err() {
+                            reader_error.store(true, Ordering::Relaxed);
+                            can_save = false;
+                        } else {
+                            saved += keep;
+                        }
+                    }
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => thread::sleep(POLL),
+                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => {
+                    reader_error.store(true, Ordering::Relaxed);
+                    break;
+                }
+            }
+        }
+    });
     let watch_errors = Arc::new(AtomicU32::new(0));
     let drain_errors = watch_errors.clone();
     let drain = thread::spawn(move || {
@@ -262,6 +364,10 @@ fn start_session(root: &Path, zellij: &Path, session: String) -> Session {
         zellij: zellij.to_path_buf(),
         stop,
         watch_errors,
+        stderr_dir,
+        stderr_truncated,
+        stderr_reader_error,
+        stderr_reader: Some(stderr_reader),
         drain: Some(drain),
         master,
     }
@@ -364,17 +470,22 @@ fn fixed_marker(root: &Path, name: &str) -> &'static str {
 
 fn report_watch_probe(cards: &Path, temp_root: &Path, origin_id: (u64, u64), session: &Session) {
     // Diagnostics only: this never supplies a pane ID to the acceptance gate.
+    let (stderr_state, stderr_class) = session.child_stderr_summary();
     let Ok(bop) = fs::canonicalize(env!("CARGO_BIN_EXE_bop")) else {
         eprintln!(
-            "watch probe: executable=unreadable child_exit={}",
-            watch_child_exit(temp_root)
+            "watch probe: executable=unreadable child_exit={} stderr_state={} stderr_class={}",
+            watch_child_exit(temp_root),
+            stderr_state,
+            stderr_class
         );
         return;
     };
     let Ok(entries) = fs::read_dir("/proc") else {
         eprintln!(
-            "watch probe: proc=unreadable child_exit={}",
-            watch_child_exit(temp_root)
+            "watch probe: proc=unreadable child_exit={} stderr_state={} stderr_class={}",
+            watch_child_exit(temp_root),
+            stderr_state,
+            stderr_class
         );
         return;
     };
@@ -437,9 +548,11 @@ fn report_watch_probe(cards: &Path, temp_root: &Path, origin_id: (u64, u64), ses
         }
     }
     eprintln!(
-        "watch probe: child_exit={} error_class={} session_env={} session_match={} shell_stdout_tty={} zellij_on_path={} dev_tty_openable={} shell_live={} beat_nonempty={} proc_scan_truncated={} proc={} bop_exe={} cmdline_unreadable={} status_watch={} helper={} cards_match={} stdout_fd_meta={} distinct_fd_id={}",
+        "watch probe: child_exit={} error_class={} stderr_state={} stderr_class={} session_env={} session_match={} shell_stdout_tty={} zellij_on_path={} dev_tty_openable={} shell_live={} beat_nonempty={} proc_scan_truncated={} proc={} bop_exe={} cmdline_unreadable={} status_watch={} helper={} cards_match={} stdout_fd_meta={} distinct_fd_id={}",
         watch_child_exit(temp_root),
         session.watch_error_class(),
+        stderr_state,
+        stderr_class,
         fixed_marker(temp_root, "watch-session-env"),
         fixed_marker(temp_root, "watch-session-match"),
         fixed_marker(temp_root, "watch-shell-stdout-tty"),
@@ -500,6 +613,7 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
     // A successful dump can be a plugin, so identify the explicit shell by
     // its private PID/TTY and have that same shell launch the watch command.
     until("Zellij session", || session.dump(root));
+    let stderr_fifo = session.stderr_fifo();
     assert!(
         session.action(&[
             "new-pane",
@@ -507,12 +621,13 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
             "--",
             "/bin/sh",
             "-c",
-            "printf '%s' \"$$\" > \"$1/invoker-start-pid\"; tty > \"$1/invoker-start-tty\"; printf '%s' \"$$\" > \"$1/shell-pid\"; tty > \"$1/origin-tty\"; printf x >> \"$1/shell-beat\"; if [ -n \"${ZELLIJ_SESSION_NAME:-}\" ]; then printf yes > \"$1/watch-session-env\"; else printf no > \"$1/watch-session-env\"; fi; if [ \"${ZELLIJ_SESSION_NAME:-}\" = \"$4\" ]; then printf yes > \"$1/watch-session-match\"; else printf no > \"$1/watch-session-match\"; fi; if [ -t 1 ]; then printf yes > \"$1/watch-shell-stdout-tty\"; else printf no > \"$1/watch-shell-stdout-tty\"; fi; if command -v zellij >/dev/null 2>&1; then printf yes > \"$1/watch-zellij-on-path\"; else printf no > \"$1/watch-zellij-on-path\"; fi; if (: < /dev/tty) 2>/dev/null; then printf yes > \"$1/watch-dev-tty-openable\"; else printf no > \"$1/watch-dev-tty-openable\"; fi; { \"$2\" --cards-dir \"$3\" status --watch < /dev/tty; printf '%s' \"$?\" > \"$1/watch-child-exit\"; } & while :; do printf x >> \"$1/shell-beat\"; sleep 0.1; done",
+            "printf '%s' \"$$\" > \"$1/invoker-start-pid\"; tty > \"$1/invoker-start-tty\"; printf '%s' \"$$\" > \"$1/shell-pid\"; tty > \"$1/origin-tty\"; printf x >> \"$1/shell-beat\"; if [ -n \"${ZELLIJ_SESSION_NAME:-}\" ]; then printf yes > \"$1/watch-session-env\"; else printf no > \"$1/watch-session-env\"; fi; if [ \"${ZELLIJ_SESSION_NAME:-}\" = \"$4\" ]; then printf yes > \"$1/watch-session-match\"; else printf no > \"$1/watch-session-match\"; fi; if [ -t 1 ]; then printf yes > \"$1/watch-shell-stdout-tty\"; else printf no > \"$1/watch-shell-stdout-tty\"; fi; if command -v zellij >/dev/null 2>&1; then printf yes > \"$1/watch-zellij-on-path\"; else printf no > \"$1/watch-zellij-on-path\"; fi; if (: < /dev/tty) 2>/dev/null; then printf yes > \"$1/watch-dev-tty-openable\"; else printf no > \"$1/watch-dev-tty-openable\"; fi; { \"$2\" --cards-dir \"$3\" status --watch < /dev/tty 2> \"$5\"; printf '%s' \"$?\" > \"$1/watch-child-exit\"; } & while :; do printf x >> \"$1/shell-beat\"; sleep 0.1; done",
             "bop-invoker",
             root.to_str().expect("temp path must be UTF-8"),
             env!("CARGO_BIN_EXE_bop"),
             cards.to_str().expect("cards path must be UTF-8"),
             &session.session,
+            stderr_fifo.to_str().expect("stderr pipe path must be UTF-8"),
         ]),
         "Zellij did not create invoking shell pane"
     );
@@ -658,6 +773,10 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
         unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
         0,
         "worker lock retained after Ctrl-C"
+    );
+    assert!(
+        session.child_stderr_summary().0 == "bounded",
+        "child stderr diagnostic capture incomplete"
     );
     println!("physical PTY, distinct watch tty, live shell sentinel, create/resize/delete cells, Ctrl-C and lock release verified");
 }
