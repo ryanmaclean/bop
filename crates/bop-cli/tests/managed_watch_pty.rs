@@ -3,7 +3,7 @@
 #![cfg(target_os = "linux")]
 
 use std::fs::{self, File, OpenOptions};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -87,12 +87,28 @@ impl Session {
         run_bounded(command)
     }
 
-    fn type_line(&self, line: &str) {
-        assert!(
-            self.action(&["write-chars", line]),
-            "Zellij did not accept shell input"
-        );
-        assert!(self.action(&["write", "13"]), "Zellij did not accept Enter");
+    fn type_line(&mut self, line: &str) {
+        // Exercise the same outer PTY input route as a person typing into
+        // Zellij. CLI actions can be accepted while targeting a different
+        // focused pane; the private PID/TTY sentinel below still proves
+        // whether this input reached the intended invoking shell.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        for mut remaining in [line.as_bytes(), b"\r".as_slice()] {
+            while !remaining.is_empty() {
+                match self.master.write(remaining) {
+                    Ok(0) => panic!("outer PTY stopped accepting input"),
+                    Ok(written) => remaining = &remaining[written..],
+                    Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(err)
+                        if err.kind() == std::io::ErrorKind::WouldBlock
+                            && Instant::now() < deadline =>
+                    {
+                        thread::sleep(POLL);
+                    }
+                    Err(_) => panic!("outer PTY input failed or timed out"),
+                }
+            }
+        }
     }
 
     fn dump(&self, root: &Path) -> Option<String> {
