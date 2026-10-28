@@ -19,6 +19,17 @@ const READY: u8 = 1;
 const EVENT: u8 = 2;
 
 #[cfg(unix)]
+struct ReapWorkerOnDrop(std::process::Child);
+
+#[cfg(unix)]
+impl Drop for ReapWorkerOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[cfg(unix)]
 #[test]
 fn direct_pane_without_launch_capability_refuses_before_drawing() {
     let temp = tempfile::tempdir().unwrap();
@@ -188,6 +199,100 @@ fn worker_registers_events_and_releases_after_parent_pipe_closes() {
         0
     );
     result.unwrap();
+}
+
+/// The worker's IPC event is pathless, but a preexisting card bundle leaves
+/// the metadata write as the only post-readiness filesystem stimulus.
+#[test]
+#[cfg(unix)]
+#[ignore = "requires approved native host and selected license/tool closure"]
+fn worker_ipc_forwards_preexisting_card_metadata_write_and_releases_lock() {
+    let temp = tempfile::tempdir().unwrap();
+    let cards = temp.path().join(".cards");
+    let card = cards.join("pending/fixture.jobcard");
+    fs::create_dir_all(&card).unwrap();
+    let lock_path = cards.join(".locks/watch.lock");
+    let metadata = card.join("meta.json");
+
+    let mut child = ReapWorkerOnDrop(
+        Command::new(env!("CARGO_BIN_EXE_bop"))
+            .arg("--cards-dir")
+            .arg(&cards)
+            .arg("__watch-worker")
+            .env_clear()
+            .env("HOME", temp.path())
+            .env("TMPDIR", temp.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let stdin = child.0.stdin.take().unwrap();
+    let mut stdout = child.0.stdout.take().unwrap();
+    let (tx, rx) = mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        let mut byte = [0u8; 1];
+        while stdout.read_exact(&mut byte).is_ok() {
+            if tx.send(byte[0]).is_err() {
+                break;
+            }
+        }
+    });
+
+    assert_eq!(rx.recv_timeout(Duration::from_secs(5)), Ok(READY));
+    assert!(lock_path.is_file(), "worker did not create singleton lock");
+    let probe = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .unwrap();
+    assert_ne!(
+        unsafe { libc::flock(probe.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+        0,
+        "second writer acquired live worker lock"
+    );
+    assert_eq!(
+        rx.recv_timeout(Duration::from_millis(300)),
+        Err(mpsc::RecvTimeoutError::Timeout),
+        "worker emitted an event before metadata write"
+    );
+
+    fs::write(&metadata, b"{\"fixture\":\"worker-ipc\"}").unwrap();
+    assert_eq!(
+        rx.recv_timeout(Duration::from_secs(5)),
+        Ok(EVENT),
+        "worker did not forward metadata stimulus"
+    );
+    assert_eq!(
+        fs::read(&metadata).unwrap(),
+        b"{\"fixture\":\"worker-ipc\"}"
+    );
+
+    drop(stdin);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if child.0.try_wait().unwrap().is_some() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "worker did not exit after parent pipe closed"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    reader.join().unwrap();
+    let probe = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .unwrap();
+    assert_eq!(
+        unsafe { libc::flock(probe.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+        0,
+        "worker lock was not released"
+    );
+    println!("worker_ipc ready=true metadata_event=true lock_released=true");
 }
 
 /// Path-aware native witness for newly created subtrees. The worker's EVENT
