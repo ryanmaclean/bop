@@ -608,33 +608,46 @@ fn fixed_marker(root: &Path, name: &str) -> &'static str {
     }
 }
 
+fn fixed_pre_stty_size(root: &Path) -> &'static str {
+    match fs::read_to_string(root.join("watch-pane-pre-stty-size")) {
+        Ok(value) if value == "positive" => "positive",
+        Ok(value) if value == "zero" => "zero",
+        Ok(value) if value == "unavailable" => "unavailable",
+        Ok(_) => "invalid",
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => "absent",
+        Err(_) => "unreadable",
+    }
+}
+
 fn report_watch_probe(cards: &Path, temp_root: &Path, origin_id: (u64, u64), session: &Session) {
     // Diagnostics only: this never supplies a pane ID to the acceptance gate.
     let (stderr_state, stderr_class, inner_class, size_stdout, size_stderr, size_stdin) =
         session.child_stderr_summary();
     let Ok(bop) = fs::canonicalize(env!("CARGO_BIN_EXE_bop")) else {
         eprintln!(
-            "watch probe: executable=unreadable child_exit={} stderr_state={} stderr_class={} inner_class={} size_stdout={} size_stderr={} size_stdin={}",
+            "watch probe: executable=unreadable child_exit={} stderr_state={} stderr_class={} inner_class={} size_stdout={} size_stderr={} size_stdin={} pre_stty_size={}",
             watch_child_exit(temp_root),
             stderr_state,
             stderr_class,
             inner_class,
             size_stdout,
             size_stderr,
-            size_stdin
+            size_stdin,
+            fixed_pre_stty_size(temp_root)
         );
         return;
     };
     let Ok(entries) = fs::read_dir("/proc") else {
         eprintln!(
-            "watch probe: proc=unreadable child_exit={} stderr_state={} stderr_class={} inner_class={} size_stdout={} size_stderr={} size_stdin={}",
+            "watch probe: proc=unreadable child_exit={} stderr_state={} stderr_class={} inner_class={} size_stdout={} size_stderr={} size_stdin={} pre_stty_size={}",
             watch_child_exit(temp_root),
             stderr_state,
             stderr_class,
             inner_class,
             size_stdout,
             size_stderr,
-            size_stdin
+            size_stdin,
+            fixed_pre_stty_size(temp_root)
         );
         return;
     };
@@ -697,7 +710,7 @@ fn report_watch_probe(cards: &Path, temp_root: &Path, origin_id: (u64, u64), ses
         }
     }
     eprintln!(
-        "watch probe: child_exit={} error_class={} stderr_state={} stderr_class={} inner_class={} size_stdout={} size_stderr={} size_stdin={} session_env={} session_match={} shell_stdout_tty={} zellij_on_path={} dev_tty_openable={} pane_size_ready={} shell_live={} beat_nonempty={} proc_scan_truncated={} proc={} bop_exe={} cmdline_unreadable={} status_watch={} helper={} cards_match={} stdout_fd_meta={} distinct_fd_id={}",
+        "watch probe: child_exit={} error_class={} stderr_state={} stderr_class={} inner_class={} size_stdout={} size_stderr={} size_stdin={} pre_stty_size={} session_env={} session_match={} shell_stdout_tty={} zellij_on_path={} dev_tty_openable={} pane_size_ready={} shell_live={} beat_nonempty={} proc_scan_truncated={} proc={} bop_exe={} cmdline_unreadable={} status_watch={} helper={} cards_match={} stdout_fd_meta={} distinct_fd_id={}",
         watch_child_exit(temp_root),
         session.watch_error_class(),
         stderr_state,
@@ -706,6 +719,7 @@ fn report_watch_probe(cards: &Path, temp_root: &Path, origin_id: (u64, u64), ses
         size_stdout,
         size_stderr,
         size_stdin,
+        fixed_pre_stty_size(temp_root),
         fixed_marker(temp_root, "watch-session-env"),
         fixed_marker(temp_root, "watch-session-match"),
         fixed_marker(temp_root, "watch-shell-stdout-tty"),
@@ -816,7 +830,7 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
             "--",
             "/bin/sh",
             "-c",
-            "printf '%s' \"$$\" > \"$1/invoker-start-pid\"; tty > \"$1/invoker-start-tty\"; printf '%s' \"$$\" > \"$1/shell-pid\"; tty > \"$1/origin-tty\"; printf x >> \"$1/shell-beat\"; if [ -n \"${ZELLIJ_SESSION_NAME:-}\" ]; then printf yes > \"$1/watch-session-env\"; else printf no > \"$1/watch-session-env\"; fi; if [ \"${ZELLIJ_SESSION_NAME:-}\" = \"$4\" ]; then printf yes > \"$1/watch-session-match\"; else printf no > \"$1/watch-session-match\"; fi; if [ -t 1 ]; then printf yes > \"$1/watch-shell-stdout-tty\"; else printf no > \"$1/watch-shell-stdout-tty\"; fi; if command -v zellij >/dev/null 2>&1; then printf yes > \"$1/watch-zellij-on-path\"; else printf no > \"$1/watch-zellij-on-path\"; fi; if (: < /dev/tty) 2>/dev/null; then printf yes > \"$1/watch-dev-tty-openable\"; else printf no > \"$1/watch-dev-tty-openable\"; fi; if stty rows 12 cols 90 < /dev/tty 2>/dev/null && [ \"$(stty size < /dev/tty 2>/dev/null)\" = \"12 90\" ]; then printf yes > \"$1/watch-pane-size-ready\"; else printf no > \"$1/watch-pane-size-ready\"; exit 1; fi; { \"$2\" --cards-dir \"$3\" status --watch < /dev/tty 2> \"$5\"; printf '%s' \"$?\" > \"$1/watch-child-exit\"; } & while :; do printf x >> \"$1/shell-beat\"; sleep 0.1; done",
+            "printf '%s' \"$$\" > \"$1/invoker-start-pid\"; tty > \"$1/invoker-start-tty\"; printf '%s' \"$$\" > \"$1/shell-pid\"; tty > \"$1/origin-tty\"; printf x >> \"$1/shell-beat\"; if [ -n \"${ZELLIJ_SESSION_NAME:-}\" ]; then printf yes > \"$1/watch-session-env\"; else printf no > \"$1/watch-session-env\"; fi; if [ \"${ZELLIJ_SESSION_NAME:-}\" = \"$4\" ]; then printf yes > \"$1/watch-session-match\"; else printf no > \"$1/watch-session-match\"; fi; if [ -t 1 ]; then printf yes > \"$1/watch-shell-stdout-tty\"; else printf no > \"$1/watch-shell-stdout-tty\"; fi; if command -v zellij >/dev/null 2>&1; then printf yes > \"$1/watch-zellij-on-path\"; else printf no > \"$1/watch-zellij-on-path\"; fi; if (: < /dev/tty) 2>/dev/null; then printf yes > \"$1/watch-dev-tty-openable\"; else printf no > \"$1/watch-dev-tty-openable\"; fi; pre_size=\"$(stty size < /dev/tty 2>/dev/null || true)\"; pre_class=unavailable; case \"$pre_size\" in *\" \"*) pre_rows=\"${pre_size%% *}\"; pre_cols=\"${pre_size#* }\"; case \"$pre_rows:$pre_cols\" in *[!0-9:]*|:*|*:) ;; *) if [ \"$pre_rows\" -gt 0 ] && [ \"$pre_cols\" -gt 0 ]; then pre_class=positive; else pre_class=zero; fi ;; esac ;; esac; printf '%s' \"$pre_class\" > \"$1/watch-pane-pre-stty-size\"; if stty rows 12 cols 90 < /dev/tty 2>/dev/null && [ \"$(stty size < /dev/tty 2>/dev/null)\" = \"12 90\" ]; then printf yes > \"$1/watch-pane-size-ready\"; else printf no > \"$1/watch-pane-size-ready\"; exit 1; fi; { \"$2\" --cards-dir \"$3\" status --watch < /dev/tty 2> \"$5\"; printf '%s' \"$?\" > \"$1/watch-child-exit\"; } & while :; do printf x >> \"$1/shell-beat\"; sleep 0.1; done",
             "bop-invoker",
             root.to_str().expect("temp path must be UTF-8"),
             env!("CARGO_BIN_EXE_bop"),
