@@ -338,7 +338,9 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
             "--",
             "/bin/sh",
             "-c",
-            "printf 'BOP_INVOKER_READY_9V\\n'; exec /bin/sh",
+            "printf '%s' \"$$\" > \"$1/invoker-start-pid\"; tty > \"$1/invoker-start-tty\"; printf 'BOP_INVOKER_READY_9V\\n'; exec /bin/sh",
+            "bop-invoker",
+            root.to_str().expect("temp path must be UTF-8"),
         ]),
         "Zellij did not create invoking shell pane"
     );
@@ -356,13 +358,23 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
         }
     }
     if !shell_marker {
+        let start_pid = fs::read_to_string(root.join("invoker-start-pid")).ok();
+        let start_tty = fs::read_to_string(root.join("invoker-start-tty")).ok();
         let child_state = match session.child.try_wait() {
             Ok(None) => "running",
             Ok(Some(_)) => "exited",
             Err(_) => "unknown",
         };
         eprintln!(
-            "physical invoking pane readiness: focused_dump={} shell_marker={} zellij_child_state={}",
+            "physical invoking pane readiness: start_pid_file={} start_pid_parseable={} start_tty_file={} start_tty_devpts={} focused_dump={} shell_marker={} zellij_child_state={}",
+            start_pid.is_some(),
+            start_pid
+                .as_ref()
+                .is_some_and(|pid| pid.trim().parse::<i32>().is_ok()),
+            start_tty.is_some(),
+            start_tty
+                .as_ref()
+                .is_some_and(|tty| tty.trim().starts_with("/dev/pts/")),
             focused_dump, shell_marker, child_state
         );
         panic!("timed out waiting for focused invoking shell pane");
