@@ -327,7 +327,46 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
     .unwrap();
     let session_name = format!("bop-pty-{}", std::process::id());
     let mut session = start_session(root, &zellij, session_name);
-    until("Zellij shell pane", || session.dump(root));
+    // v0.43.1's dump-screen/write actions address the focused pane only.
+    // A successful dump can be a plugin or an unready pane, so create an
+    // explicit invoking shell and wait for output from that pane first.
+    until("Zellij session", || session.dump(root));
+    assert!(
+        session.action(&[
+            "new-pane",
+            "--in-place",
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf 'BOP_INVOKER_READY_9V\\n'; exec /bin/sh",
+        ]),
+        "Zellij did not create invoking shell pane"
+    );
+    let deadline = Instant::now() + TIMEOUT;
+    let mut focused_dump = false;
+    let mut shell_marker = false;
+    while !shell_marker && Instant::now() < deadline {
+        let focused = session.dump(root);
+        focused_dump |= focused.is_some();
+        shell_marker = focused
+            .as_ref()
+            .is_some_and(|screen| screen.contains("BOP_INVOKER_READY_9V"));
+        if !shell_marker {
+            thread::sleep(POLL);
+        }
+    }
+    if !shell_marker {
+        let child_state = match session.child.try_wait() {
+            Ok(None) => "running",
+            Ok(Some(_)) => "exited",
+            Err(_) => "unknown",
+        };
+        eprintln!(
+            "physical invoking pane readiness: focused_dump={} shell_marker={} zellij_child_state={}",
+            focused_dump, shell_marker, child_state
+        );
+        panic!("timed out waiting for focused invoking shell pane");
+    }
     session.type_line("printf '%s' \"$$\" > \"$BOP_SHELL_PID\"; tty > \"$BOP_ORIGIN\"; (while :; do printf x >> \"$BOP_BEAT\"; sleep 0.1; done) &");
     let deadline = Instant::now() + TIMEOUT;
     while !(shell_live(root) && beat_len(root) > 2) && Instant::now() < deadline {
