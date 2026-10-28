@@ -307,6 +307,7 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
         &old,
         &bop_core::Meta {
             id: "DELETED_UNIQUE_7Q".into(),
+            stage: "implement".into(),
             title: Some("Old card across a wide terminal with OLD_TAIL_7Q".into()),
             token: Some("⚀".into()),
             ..Default::default()
@@ -317,6 +318,7 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
         &keep,
         &bop_core::Meta {
             id: "REMAINING_UNIQUE_8R".into(),
+            stage: "implement".into(),
             title: Some("Remaining card".into()),
             token: Some("⚁".into()),
             ..Default::default()
