@@ -310,7 +310,7 @@ fn report_watch_probe(cards: &Path, temp_root: &Path, origin_id: (u64, u64)) {
     let mut command_unreadable = 0usize;
     let mut status_watch = 0usize;
     let mut helper = 0usize;
-    let mut cards = 0usize;
+    let mut cards_match = 0usize;
     let mut stdout_fd_meta = 0usize;
     let mut distinct_fd_id = 0usize;
     let mut proc_scan_truncated = false;
@@ -355,7 +355,7 @@ fn report_watch_probe(cards: &Path, temp_root: &Path, origin_id: (u64, u64)) {
         {
             continue;
         }
-        cards = cards.saturating_add(1);
+        cards_match = cards_match.saturating_add(1);
         if let Ok(tty) = fs::metadata(entry.path().join("fd/1")) {
             stdout_fd_meta = stdout_fd_meta.saturating_add(1);
             if (tty.dev(), tty.ino()) != origin_id {
@@ -374,7 +374,7 @@ fn report_watch_probe(cards: &Path, temp_root: &Path, origin_id: (u64, u64)) {
         command_unreadable,
         status_watch,
         helper,
-        cards,
+        cards_match,
         stdout_fd_meta,
         distinct_fd_id,
     );
