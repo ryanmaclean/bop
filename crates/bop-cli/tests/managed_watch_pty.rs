@@ -136,6 +136,13 @@ fn fixed_dimension_fd_class(raw: &[u8], label: &[u8]) -> &'static str {
     selected.unwrap_or("missing")
 }
 
+fn initial_cell_mask(screen: &str) -> u8 {
+    u8::from(screen.contains("DELETED_UNIQUE_7Q"))
+        | (u8::from(screen.contains("REMAINING_UNIQUE_8R")) << 1)
+        | (u8::from(screen.contains("OLD_TAIL_7Q")) << 2)
+        | (u8::from(screen.contains("watching .cards/")) << 3)
+}
+
 fn until<T>(description: &str, mut probe: impl FnMut() -> Option<T>) -> T {
     let deadline = Instant::now() + TIMEOUT;
     loop {
@@ -849,14 +856,50 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
         }
     };
     assert_ne!(pane_id, origin_id, "watch reused the invoking shell PTY");
-    let initial = until("initial watch cells", || {
-        let screen = session.dump(root)?;
-        (screen.contains("DELETED_UNIQUE_7Q")
-            && screen.contains("REMAINING_UNIQUE_8R")
-            && screen.contains("OLD_TAIL_7Q")
-            && screen.contains("watching .cards/"))
-        .then_some(screen)
-    });
+    let initial = {
+        let deadline = Instant::now() + TIMEOUT;
+        let mut dump_ok = 0u8;
+        let mut dump_missing = 0u8;
+        let mut ever_mask = 0u8;
+        let mut last_mask = 0u8;
+        let mut last_frame = "unavailable";
+        loop {
+            if let Some(screen) = session.dump(root) {
+                dump_ok = dump_ok.saturating_add(1);
+                last_mask = initial_cell_mask(&screen);
+                ever_mask |= last_mask;
+                last_frame = if screen.is_empty() {
+                    "empty"
+                } else {
+                    "nonempty"
+                };
+                if last_mask == 0b1111 {
+                    break screen;
+                }
+            } else {
+                dump_missing = dump_missing.saturating_add(1);
+                last_frame = "unavailable";
+            }
+            if Instant::now() >= deadline {
+                report_watch_probe(&cards, root, origin_id, &session);
+                eprintln!(
+                    "initial watch cells: dump_ok={} dump_missing={} ever_mask={} last_mask={} last_frame={} watch_tty_same={} shell_live={} beat_nonempty={} child_exit={} error_class={}",
+                    dump_ok,
+                    dump_missing,
+                    ever_mask,
+                    last_mask,
+                    last_frame,
+                    watch_tty(&cards) == Some(pane_id),
+                    shell_live(root),
+                    beat_len(root) > 0,
+                    watch_child_exit(root),
+                    session.watch_error_class(),
+                );
+                panic!("timed out waiting for initial watch cells");
+            }
+            thread::sleep(POLL);
+        }
+    };
     assert!(initial.len() < 32768);
     let before = beat_len(root);
     until("invoking shell sentinel during watch", || {
