@@ -3,7 +3,7 @@
 #![cfg(target_os = "linux")]
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::Read;
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -87,28 +87,6 @@ impl Session {
         run_bounded(command)
     }
 
-    fn type_line(&mut self, line: &str) {
-        // Exercise the same outer PTY input route as a person typing into
-        // Zellij. CLI actions can be accepted while targeting a different
-        // focused pane; the private PID/TTY sentinel below still proves
-        // whether this input reached the intended invoking shell.
-        let deadline = Instant::now() + Duration::from_secs(5);
-        for mut remaining in [line.as_bytes(), b"\r".as_slice()] {
-            while !remaining.is_empty() {
-                assert!(Instant::now() < deadline, "outer PTY input timed out");
-                match self.master.write(remaining) {
-                    Ok(0) => panic!("outer PTY stopped accepting input"),
-                    Ok(written) => remaining = &remaining[written..],
-                    Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(POLL);
-                    }
-                    Err(_) => panic!("outer PTY input failed or timed out"),
-                }
-            }
-        }
-    }
-
     fn dump(&self, root: &Path) -> Option<String> {
         let path = root.join("focused-pane.txt");
         let _ = fs::remove_file(&path);
@@ -184,9 +162,6 @@ fn start_session(root: &Path, zellij: &Path, session: String) -> Session {
         )
         .env("BOP_ZELLIJ", zellij)
         .env("BOP_SESSION", &session)
-        .env("BOP_BEAT", root.join("shell-beat"))
-        .env("BOP_SHELL_PID", root.join("shell-pid"))
-        .env("BOP_ORIGIN", root.join("origin-tty"))
         .stdin(Stdio::from(stdin))
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
@@ -340,10 +315,10 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
     )
     .unwrap();
     let session_name = format!("bop-pty-{}", std::process::id());
-    let mut session = start_session(root, &zellij, session_name);
+    let session = start_session(root, &zellij, session_name);
     // v0.43.1's dump-screen/write actions address the focused pane only.
     // A successful dump can be a plugin, so identify the explicit shell by
-    // its private startup PID/TTY and join the typed sentinel to both.
+    // its private PID/TTY and have that same shell launch the watch command.
     until("Zellij session", || session.dump(root));
     assert!(
         session.action(&[
@@ -352,9 +327,11 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
             "--",
             "/bin/sh",
             "-c",
-            "printf '%s' \"$$\" > \"$1/invoker-start-pid\"; tty > \"$1/invoker-start-tty\"; printf 'BOP_INVOKER_READY_9V\\n'; exec /bin/sh",
+            "printf '%s' \"$$\" > \"$1/invoker-start-pid\"; tty > \"$1/invoker-start-tty\"; printf '%s' \"$$\" > \"$1/shell-pid\"; tty > \"$1/origin-tty\"; printf x >> \"$1/shell-beat\"; \"$2\" --cards-dir \"$3\" status --watch & while :; do printf x >> \"$1/shell-beat\"; sleep 0.1; done",
             "bop-invoker",
             root.to_str().expect("temp path must be UTF-8"),
+            env!("CARGO_BIN_EXE_bop"),
+            cards.to_str().expect("cards path must be UTF-8"),
         ]),
         "Zellij did not create invoking shell pane"
     );
@@ -367,27 +344,21 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
         let tty = fs::read_to_string(root.join("invoker-start-tty")).ok()?;
         (pid > 0 && tty.trim().starts_with("/dev/pts/")).then_some((pid, tty))
     });
-    // The marker is useful diagnostically, but a focused dump need not show
-    // this pane. The same PID/TTY join below is the required pane identity.
-    let focused_marker = session
-        .dump(root)
-        .is_some_and(|screen| screen.contains("BOP_INVOKER_READY_9V"));
-    session.type_line("printf '%s' \"$$\" > \"$BOP_SHELL_PID\"; tty > \"$BOP_ORIGIN\"; (while :; do printf x >> \"$BOP_BEAT\"; sleep 0.1; done) &");
+    // The invoking shell itself records the origin and keeps the beat ticking
+    // while its child opens the mediated watch pane.
     let deadline = Instant::now() + TIMEOUT;
     while !(shell_live(root) && beat_len(root) > 2) && Instant::now() < deadline {
         thread::sleep(POLL);
     }
     if !(shell_live(root) && beat_len(root) > 2) {
         let pid_file = fs::read_to_string(root.join("shell-pid")).ok();
-        let focused = session.dump(root);
         let child_state = match session.child.try_wait() {
             Ok(None) => "running",
             Ok(Some(_)) => "exited",
             Err(_) => "unknown",
         };
         eprintln!(
-            "physical shell readiness: startup_pid_tty=true focused_marker={} pid_file={} pid_parseable={} shell_live={} beat_bytes={} origin_file={} focused_dump={} command_echo={} zellij_child_state={}",
-            focused_marker,
+            "physical shell readiness: startup_pid_tty=true pid_file={} pid_parseable={} shell_live={} beat_bytes={} origin_file={} zellij_child_state={}",
             pid_file.is_some(),
             pid_file
                 .as_ref()
@@ -395,25 +366,23 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
             shell_live(root),
             beat_len(root),
             root.join("origin-tty").is_file(),
-            focused.is_some(),
-            focused.as_ref().is_some_and(|screen| screen.contains("BOP_SHELL_PID")),
             child_state,
         );
         panic!("timed out waiting for invoking shell and ticking sentinel");
     }
     let origin = fs::read_to_string(root.join("origin-tty")).unwrap();
-    let typed_pid = fs::read_to_string(root.join("shell-pid"))
+    let shell_pid = fs::read_to_string(root.join("shell-pid"))
         .unwrap()
         .trim()
         .parse::<i32>()
         .unwrap();
     assert!(
-        typed_pid == startup.0,
-        "typed sentinel came from another shell"
+        shell_pid == startup.0,
+        "watch launcher came from another shell"
     );
     assert!(
         origin.trim() == startup.1.trim(),
-        "typed sentinel came from another tty"
+        "watch launcher came from another tty"
     );
     let origin_path = Path::new(origin.trim());
     assert!(
@@ -423,12 +392,6 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
     use std::os::unix::fs::MetadataExt;
     let origin_meta = fs::metadata(origin_path).unwrap();
     let origin_id = (origin_meta.dev(), origin_meta.ino());
-    let command = format!(
-        "{} --cards-dir {} status --watch",
-        env!("CARGO_BIN_EXE_bop"),
-        cards.display()
-    );
-    session.type_line(&command);
     let pane_id = until("distinct live watch pane tty", || watch_tty(&cards));
     assert_ne!(pane_id, origin_id, "watch reused the invoking shell PTY");
     let initial = until("initial watch cells", || {
