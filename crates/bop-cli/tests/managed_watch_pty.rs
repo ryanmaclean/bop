@@ -289,19 +289,19 @@ fn watch_child_exit(root: &Path) -> &'static str {
     }
 }
 
-fn report_watch_probe(root: &Path, origin_id: (u64, u64)) {
+fn report_watch_probe(cards: &Path, temp_root: &Path, origin_id: (u64, u64)) {
     // Diagnostics only: this never supplies a pane ID to the acceptance gate.
     let Ok(bop) = fs::canonicalize(env!("CARGO_BIN_EXE_bop")) else {
         eprintln!(
             "watch probe: executable=unreadable child_exit={}",
-            watch_child_exit(root)
+            watch_child_exit(temp_root)
         );
         return;
     };
     let Ok(entries) = fs::read_dir("/proc") else {
         eprintln!(
             "watch probe: proc=unreadable child_exit={}",
-            watch_child_exit(root)
+            watch_child_exit(temp_root)
         );
         return;
     };
@@ -351,7 +351,7 @@ fn report_watch_probe(root: &Path, origin_id: (u64, u64)) {
         helper = helper.saturating_add(1);
         if !args
             .split(|byte| *byte == 0)
-            .any(|arg| arg == root.as_os_str().as_encoded_bytes())
+            .any(|arg| arg == cards.as_os_str().as_encoded_bytes())
         {
             continue;
         }
@@ -365,9 +365,9 @@ fn report_watch_probe(root: &Path, origin_id: (u64, u64)) {
     }
     eprintln!(
         "watch probe: child_exit={} shell_live={} beat_nonempty={} proc_scan_truncated={} proc={} bop_exe={} cmdline_unreadable={} status_watch={} helper={} cards_match={} stdout_fd_meta={} distinct_fd_id={}",
-        watch_child_exit(root),
-        shell_live(root),
-        beat_len(root) > 0,
+        watch_child_exit(temp_root),
+        shell_live(temp_root),
+        beat_len(temp_root) > 0,
         proc_scan_truncated,
         processes,
         executable,
@@ -500,7 +500,7 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
                 break id;
             }
             if Instant::now() >= deadline {
-                report_watch_probe(&cards, origin_id);
+                report_watch_probe(&cards, root, origin_id);
                 panic!("timed out waiting for distinct live watch pane tty");
             }
             thread::sleep(POLL);
