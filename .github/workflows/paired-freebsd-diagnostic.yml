@@ -224,14 +224,14 @@ jobs:
           git -C "$GITHUB_WORKSPACE" remote add origin https://github.com/ryanmaclean/bop.git
           git -C "$GITHUB_WORKSPACE" -c credential.helper= fetch --no-tags --no-recurse-submodules --depth=20 origin refs/pull/23/head
           test "$(git -C "$GITHUB_WORKSPACE" rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
-          git -C "$GITHUB_WORKSPACE" cat-file -e '9b9574d141a2a7fce32a7aa74cf699b6393bc0da^{commit}'
-          git -C "$GITHUB_WORKSPACE" -c submodule.recurse=false checkout --detach --force 9b9574d141a2a7fce32a7aa74cf699b6393bc0da
+          git -C "$GITHUB_WORKSPACE" cat-file -e '6f9507e4325dd2684c69b7690e9868a6860e894c^{commit}'
+          git -C "$GITHUB_WORKSPACE" -c submodule.recurse=false checkout --detach --force 6f9507e4325dd2684c69b7690e9868a6860e894c
 
       - name: Verify exact source and lock before compilation
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = '9b9574d141a2a7fce32a7aa74cf699b6393bc0da'
+          test "$(git rev-parse HEAD)" = '6f9507e4325dd2684c69b7690e9868a6860e894c'
           echo 'd16018d33360816f65c6fc3c1f27efeb87f3dc6b38b7399c357a27a4668a8c81  Cargo.lock' | sha256sum --check --status
           test -z "$(git status --porcelain --untracked-files=no)"
           git rev-parse HEAD > diagnostic/source-commit.txt
@@ -258,6 +258,14 @@ jobs:
             recursive_notify_observes_metadata_under_new_team_directory \
             -- --ignored --exact --nocapture 2>&1 | tee diagnostic/recursive-path.log
 
+      - name: Witness worker IPC for preexisting card metadata stimulus
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +nightly-2026-02-20 test --locked -p bop --test managed_watch_worker \
+            worker_ipc_forwards_preexisting_card_metadata_write_and_releases_lock \
+            -- --ignored --exact --nocapture 2>&1 | tee diagnostic/worker-ipc.log
+
       - name: Mark scoped diagnostic complete
         shell: bash
         run: |
@@ -267,17 +275,41 @@ jobs:
           test -s diagnostic/lock-sha256.txt
           test -s diagnostic/virtual-pane.log
           test -s diagnostic/recursive-path.log
+          test -s diagnostic/worker-ipc.log
           grep -Fq 'running 1 test' diagnostic/virtual-pane.log
           grep -Fq 'test managed_watch::tests::virtual_pane_repaint_erases_wrapped_deleted_card_after_resize ... ok' diagnostic/virtual-pane.log
           grep -Fq '1 passed; 0 failed' diagnostic/virtual-pane.log
           grep -Fq 'running 1 test' diagnostic/recursive-path.log
           grep -Fq 'test recursive_notify_observes_metadata_under_new_team_directory ... ok' diagnostic/recursive-path.log
           grep -Fq '1 passed; 0 failed' diagnostic/recursive-path.log
+          grep -Fq 'running 1 test' diagnostic/worker-ipc.log
+          grep -Fq 'test worker_ipc_forwards_preexisting_card_metadata_write_and_releases_lock ... ok' diagnostic/worker-ipc.log
+          grep -Fq '1 passed; 0 failed' diagnostic/worker-ipc.log
           rm diagnostic/INCOMPLETE
-          printf '%s\n' 'two scoped Linux fixture commands completed successfully' > diagnostic/SCOPE.txt
+          printf '%s\n' 'three scoped Linux fixture commands completed successfully; worker EVENT is pathless; no physical PTY or shell sentinel tested' > diagnostic/SCOPE.txt
+
+      - name: Bound diagnostic receipts even on failure
+        id: bound
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d diagnostic && test ! -L diagnostic
+          test -f diagnostic/INCOMPLETE || test -f diagnostic/SCOPE.txt
+          test ! -f diagnostic/INCOMPLETE || test ! -f diagnostic/SCOPE.txt
+          test "$(find diagnostic -type f | wc -l)" -le 8
+          test -z "$(find diagnostic ! -type f ! -type d -print -quit)"
+          while IFS= read -r path; do
+            case "$path" in
+              diagnostic/INCOMPLETE|diagnostic/SCOPE.txt|diagnostic/workflow-commit.txt|diagnostic/fetch-exit-code.txt|diagnostic/source-commit.txt|diagnostic/lock-sha256.txt|diagnostic/virtual-pane.log|diagnostic/recursive-path.log|diagnostic/worker-ipc.log) ;;
+              *) exit 1 ;;
+            esac
+            test "$(wc -c < "$path")" -le 4194304
+          done < <(find diagnostic -type f -print)
+          test "$(du -sk diagnostic | cut -f1)" -le 8192
 
       - name: Retain scoped raw logs
-        if: always()
+        if: ${{ always() && steps.bound.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: bop-pr23-watch-terminal-diagnostic
