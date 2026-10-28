@@ -781,9 +781,8 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
     // A successful dump can be a plugin, so identify the explicit shell by
     // its private PID/TTY and have that same shell launch the watch command.
     until("Zellij session", || session.dump(root));
-    // openpty supplied 12x90 before Zellij started. The hosted origin shell
-    // retained that size, but its mediated watch child saw zero dimensions.
-    // Notify the live Zellij session before it creates the invoking pane.
+    // openpty supplied 12x90 before Zellij started. Check the outer size;
+    // the differential resize below must occur after the invoking pane exists.
     let mut outer_size = libc::winsize {
         ws_row: 0,
         ws_col: 0,
@@ -806,22 +805,6 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
         (12, 90),
         "outer PTY initial size incorrect"
     );
-    assert_eq!(
-        unsafe {
-            libc::ioctl(
-                session.master.as_raw_fd(),
-                libc::TIOCSWINSZ,
-                &mut outer_size,
-            )
-        },
-        0,
-        "outer PTY size notification failed"
-    );
-    assert_eq!(
-        unsafe { libc::kill(-(session.child.id() as i32), libc::SIGWINCH) },
-        0,
-        "Zellij size notification failed"
-    );
     let stderr_fifo = session.stderr_fifo();
     assert!(
         session.action(&[
@@ -830,7 +813,7 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
             "--",
             "/bin/sh",
             "-c",
-            "printf '%s' \"$$\" > \"$1/invoker-start-pid\"; tty > \"$1/invoker-start-tty\"; printf '%s' \"$$\" > \"$1/shell-pid\"; tty > \"$1/origin-tty\"; printf x >> \"$1/shell-beat\"; if [ -n \"${ZELLIJ_SESSION_NAME:-}\" ]; then printf yes > \"$1/watch-session-env\"; else printf no > \"$1/watch-session-env\"; fi; if [ \"${ZELLIJ_SESSION_NAME:-}\" = \"$4\" ]; then printf yes > \"$1/watch-session-match\"; else printf no > \"$1/watch-session-match\"; fi; if [ -t 1 ]; then printf yes > \"$1/watch-shell-stdout-tty\"; else printf no > \"$1/watch-shell-stdout-tty\"; fi; if command -v zellij >/dev/null 2>&1; then printf yes > \"$1/watch-zellij-on-path\"; else printf no > \"$1/watch-zellij-on-path\"; fi; if (: < /dev/tty) 2>/dev/null; then printf yes > \"$1/watch-dev-tty-openable\"; else printf no > \"$1/watch-dev-tty-openable\"; fi; pre_size=\"$(stty size < /dev/tty 2>/dev/null || true)\"; pre_class=unavailable; case \"$pre_size\" in *\" \"*) pre_rows=\"${pre_size%% *}\"; pre_cols=\"${pre_size#* }\"; case \"$pre_rows:$pre_cols\" in *[!0-9:]*|:*|*:) ;; *) if [ \"$pre_rows\" -gt 0 ] && [ \"$pre_cols\" -gt 0 ]; then pre_class=positive; else pre_class=zero; fi ;; esac ;; esac; printf '%s' \"$pre_class\" > \"$1/watch-pane-pre-stty-size\"; if stty rows 12 cols 90 < /dev/tty 2>/dev/null && [ \"$(stty size < /dev/tty 2>/dev/null)\" = \"12 90\" ]; then printf yes > \"$1/watch-pane-size-ready\"; else printf no > \"$1/watch-pane-size-ready\"; exit 1; fi; { \"$2\" --cards-dir \"$3\" status --watch < /dev/tty 2> \"$5\"; printf '%s' \"$?\" > \"$1/watch-child-exit\"; } & while :; do printf x >> \"$1/shell-beat\"; sleep 0.1; done",
+            "printf '%s' \"$$\" > \"$1/invoker-start-pid\"; tty > \"$1/invoker-start-tty\"; printf '%s' \"$$\" > \"$1/shell-pid\"; tty > \"$1/origin-tty\"; printf x >> \"$1/shell-beat\"; if [ -n \"${ZELLIJ_SESSION_NAME:-}\" ]; then printf yes > \"$1/watch-session-env\"; else printf no > \"$1/watch-session-env\"; fi; if [ \"${ZELLIJ_SESSION_NAME:-}\" = \"$4\" ]; then printf yes > \"$1/watch-session-match\"; else printf no > \"$1/watch-session-match\"; fi; if [ -t 1 ]; then printf yes > \"$1/watch-shell-stdout-tty\"; else printf no > \"$1/watch-shell-stdout-tty\"; fi; if command -v zellij >/dev/null 2>&1; then printf yes > \"$1/watch-zellij-on-path\"; else printf no > \"$1/watch-zellij-on-path\"; fi; if (: < /dev/tty) 2>/dev/null; then printf yes > \"$1/watch-dev-tty-openable\"; else printf no > \"$1/watch-dev-tty-openable\"; fi; pre_size=\"$(stty size < /dev/tty 2>/dev/null || true)\"; pre_class=unavailable; case \"$pre_size\" in *\" \"*) pre_rows=\"${pre_size%% *}\"; pre_cols=\"${pre_size#* }\"; case \"$pre_rows:$pre_cols\" in *[!0-9:]*|:*|*:) ;; *) if [ \"$pre_rows\" -gt 0 ] && [ \"$pre_cols\" -gt 0 ]; then pre_class=positive; else pre_class=zero; fi ;; esac ;; esac; printf '%s' \"$pre_class\" > \"$1/watch-pane-pre-stty-size\"; size_count=0; while [ ! -f \"$1/watch-launch\" ] && [ \"$size_count\" -lt 250 ]; do pane_size=\"$(stty size < /dev/tty 2>/dev/null || true)\"; if [ \"$pane_size\" = \"13 91\" ]; then printf yes > \"$1/watch-pane-changed-size\"; fi; if [ -f \"$1/watch-pane-changed-size\" ] && [ \"$pane_size\" = \"12 90\" ]; then printf yes > \"$1/watch-pane-restored-size\"; fi; printf x >> \"$1/shell-beat\"; sleep 0.1; size_count=$((size_count + 1)); done; if [ ! -f \"$1/watch-launch\" ] || [ ! -f \"$1/watch-pane-changed-size\" ] || [ ! -f \"$1/watch-pane-restored-size\" ]; then exit 1; fi; printf yes > \"$1/watch-pane-size-ready\"; { \"$2\" --cards-dir \"$3\" status --watch < /dev/tty 2> \"$5\"; printf '%s' \"$?\" > \"$1/watch-child-exit\"; } & while :; do printf x >> \"$1/shell-beat\"; sleep 0.1; done",
             "bop-invoker",
             root.to_str().expect("temp path must be UTF-8"),
             env!("CARGO_BIN_EXE_bop"),
@@ -897,6 +880,99 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
     use std::os::unix::fs::MetadataExt;
     let origin_meta = fs::metadata(origin_path).unwrap();
     let origin_id = (origin_meta.dev(), origin_meta.ino());
+    // Zellij v0.43.1 ignores unchanged resize events. Exercise two real outer
+    // PTY size transitions and require the same invoking shell to read both
+    // sizes from its own /dev/tty before it may launch the watch child.
+    let mut changed_size = libc::winsize {
+        ws_row: 13,
+        ws_col: 91,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    assert_eq!(
+        unsafe {
+            libc::ioctl(
+                session.master.as_raw_fd(),
+                libc::TIOCSWINSZ,
+                &mut changed_size,
+            )
+        },
+        0,
+        "outer PTY differential resize failed"
+    );
+    assert_eq!(
+        unsafe { libc::kill(-(session.child.id() as i32), libc::SIGWINCH) },
+        0,
+        "Zellij differential resize notification failed"
+    );
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while fixed_marker(root, "watch-pane-changed-size") != "yes" && Instant::now() < deadline {
+        thread::sleep(POLL);
+    }
+    if fixed_marker(root, "watch-pane-changed-size") != "yes" {
+        eprintln!(
+            "physical size handshake: stage=changed pre_stty={} changed={} restored={} shell_live={} beat_nonempty={}",
+            fixed_pre_stty_size(root),
+            fixed_marker(root, "watch-pane-changed-size"),
+            fixed_marker(root, "watch-pane-restored-size"),
+            shell_live(root),
+            beat_len(root) > 0,
+        );
+        panic!("invoking shell did not observe differential PTY size");
+    }
+    let mut restored_size = libc::winsize {
+        ws_row: 12,
+        ws_col: 90,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    assert_eq!(
+        unsafe {
+            libc::ioctl(
+                session.master.as_raw_fd(),
+                libc::TIOCSWINSZ,
+                &mut restored_size,
+            )
+        },
+        0,
+        "outer PTY restore failed"
+    );
+    assert_eq!(
+        unsafe { libc::kill(-(session.child.id() as i32), libc::SIGWINCH) },
+        0,
+        "Zellij restore notification failed"
+    );
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while fixed_marker(root, "watch-pane-restored-size") != "yes" && Instant::now() < deadline {
+        thread::sleep(POLL);
+    }
+    if fixed_marker(root, "watch-pane-restored-size") != "yes" {
+        eprintln!(
+            "physical size handshake: stage=restored pre_stty={} changed={} restored={} shell_live={} beat_nonempty={}",
+            fixed_pre_stty_size(root),
+            fixed_marker(root, "watch-pane-changed-size"),
+            fixed_marker(root, "watch-pane-restored-size"),
+            shell_live(root),
+            beat_len(root) > 0,
+        );
+        panic!("invoking shell did not observe restored PTY size");
+    }
+    assert!(
+        shell_live(root),
+        "invoking shell exited before watch launch"
+    );
+    let beat_before = beat_len(root);
+    until("invoking shell sentinel before watch launch", || {
+        (shell_live(root) && beat_len(root) > beat_before).then_some(())
+    });
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(root.join("watch-launch"))
+        .unwrap()
+        .write_all(b"go")
+        .unwrap();
     let pane_id = {
         let deadline = Instant::now() + TIMEOUT;
         loop {
