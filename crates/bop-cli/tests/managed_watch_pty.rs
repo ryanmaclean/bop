@@ -326,12 +326,34 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
     )
     .unwrap();
     let session_name = format!("bop-pty-{}", std::process::id());
-    let session = start_session(root, &zellij, session_name);
+    let mut session = start_session(root, &zellij, session_name);
     until("Zellij shell pane", || session.dump(root));
     session.type_line("printf '%s' \"$$\" > \"$BOP_SHELL_PID\"; tty > \"$BOP_ORIGIN\"; (while :; do printf x >> \"$BOP_BEAT\"; sleep 0.1; done) &");
-    until("invoking shell and ticking sentinel", || {
-        (shell_live(root) && beat_len(root) > 2).then_some(())
-    });
+    let deadline = Instant::now() + TIMEOUT;
+    while !(shell_live(root) && beat_len(root) > 2) && Instant::now() < deadline {
+        thread::sleep(POLL);
+    }
+    if !(shell_live(root) && beat_len(root) > 2) {
+        let pid_file = fs::read_to_string(root.join("shell-pid")).ok();
+        let focused = session.dump(root);
+        let child_state = match session.child.try_wait() {
+            Ok(None) => "running",
+            Ok(Some(_)) => "exited",
+            Err(_) => "unknown",
+        };
+        eprintln!(
+            "physical shell readiness: pid_file={} pid_parseable={} shell_live={} beat_bytes={} origin_file={} focused_dump={} command_echo={} zellij_child_state={}",
+            pid_file.is_some(),
+            pid_file.as_ref().is_some_and(|pid| pid.trim().parse::<i32>().is_ok()),
+            shell_live(root),
+            beat_len(root),
+            root.join("origin-tty").is_file(),
+            focused.is_some(),
+            focused.as_ref().is_some_and(|screen| screen.contains("BOP_SHELL_PID")),
+            child_state,
+        );
+        panic!("timed out waiting for invoking shell and ticking sentinel");
+    }
     let origin = fs::read_to_string(root.join("origin-tty")).unwrap();
     let origin_path = Path::new(origin.trim());
     assert!(
