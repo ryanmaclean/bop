@@ -767,27 +767,9 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
     // A successful dump can be a plugin, so identify the explicit shell by
     // its private PID/TTY and have that same shell launch the watch command.
     until("Zellij session", || session.dump(root));
-    let stderr_fifo = session.stderr_fifo();
-    assert!(
-        session.action(&[
-            "new-pane",
-            "--in-place",
-            "--",
-            "/bin/sh",
-            "-c",
-            "printf '%s' \"$$\" > \"$1/invoker-start-pid\"; tty > \"$1/invoker-start-tty\"; printf '%s' \"$$\" > \"$1/shell-pid\"; tty > \"$1/origin-tty\"; printf x >> \"$1/shell-beat\"; if [ -n \"${ZELLIJ_SESSION_NAME:-}\" ]; then printf yes > \"$1/watch-session-env\"; else printf no > \"$1/watch-session-env\"; fi; if [ \"${ZELLIJ_SESSION_NAME:-}\" = \"$4\" ]; then printf yes > \"$1/watch-session-match\"; else printf no > \"$1/watch-session-match\"; fi; if [ -t 1 ]; then printf yes > \"$1/watch-shell-stdout-tty\"; else printf no > \"$1/watch-shell-stdout-tty\"; fi; if command -v zellij >/dev/null 2>&1; then printf yes > \"$1/watch-zellij-on-path\"; else printf no > \"$1/watch-zellij-on-path\"; fi; if (: < /dev/tty) 2>/dev/null; then printf yes > \"$1/watch-dev-tty-openable\"; else printf no > \"$1/watch-dev-tty-openable\"; fi; if stty rows 12 cols 90 < /dev/tty 2>/dev/null && [ \"$(stty size < /dev/tty 2>/dev/null)\" = \"12 90\" ]; then printf yes > \"$1/watch-pane-size-ready\"; else printf no > \"$1/watch-pane-size-ready\"; exit 1; fi; { \"$2\" --cards-dir \"$3\" status --watch < /dev/tty 2> \"$5\"; printf '%s' \"$?\" > \"$1/watch-child-exit\"; } & while :; do printf x >> \"$1/shell-beat\"; sleep 0.1; done",
-            "bop-invoker",
-            root.to_str().expect("temp path must be UTF-8"),
-            env!("CARGO_BIN_EXE_bop"),
-            cards.to_str().expect("cards path must be UTF-8"),
-            &session.session,
-            stderr_fifo.to_str().expect("stderr pipe path must be UTF-8"),
-        ]),
-        "Zellij did not create invoking shell pane"
-    );
     // openpty supplied 12x90 before Zellij started. The hosted origin shell
     // retained that size, but its mediated watch child saw zero dimensions.
-    // Notify Zellij of the outer PTY size after the invoking pane exists.
+    // Notify the live Zellij session before it creates the invoking pane.
     let mut outer_size = libc::winsize {
         ws_row: 0,
         ws_col: 0,
@@ -825,6 +807,24 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
         unsafe { libc::kill(-(session.child.id() as i32), libc::SIGWINCH) },
         0,
         "Zellij size notification failed"
+    );
+    let stderr_fifo = session.stderr_fifo();
+    assert!(
+        session.action(&[
+            "new-pane",
+            "--in-place",
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf '%s' \"$$\" > \"$1/invoker-start-pid\"; tty > \"$1/invoker-start-tty\"; printf '%s' \"$$\" > \"$1/shell-pid\"; tty > \"$1/origin-tty\"; printf x >> \"$1/shell-beat\"; if [ -n \"${ZELLIJ_SESSION_NAME:-}\" ]; then printf yes > \"$1/watch-session-env\"; else printf no > \"$1/watch-session-env\"; fi; if [ \"${ZELLIJ_SESSION_NAME:-}\" = \"$4\" ]; then printf yes > \"$1/watch-session-match\"; else printf no > \"$1/watch-session-match\"; fi; if [ -t 1 ]; then printf yes > \"$1/watch-shell-stdout-tty\"; else printf no > \"$1/watch-shell-stdout-tty\"; fi; if command -v zellij >/dev/null 2>&1; then printf yes > \"$1/watch-zellij-on-path\"; else printf no > \"$1/watch-zellij-on-path\"; fi; if (: < /dev/tty) 2>/dev/null; then printf yes > \"$1/watch-dev-tty-openable\"; else printf no > \"$1/watch-dev-tty-openable\"; fi; if stty rows 12 cols 90 < /dev/tty 2>/dev/null && [ \"$(stty size < /dev/tty 2>/dev/null)\" = \"12 90\" ]; then printf yes > \"$1/watch-pane-size-ready\"; else printf no > \"$1/watch-pane-size-ready\"; exit 1; fi; { \"$2\" --cards-dir \"$3\" status --watch < /dev/tty 2> \"$5\"; printf '%s' \"$?\" > \"$1/watch-child-exit\"; } & while :; do printf x >> \"$1/shell-beat\"; sleep 0.1; done",
+            "bop-invoker",
+            root.to_str().expect("temp path must be UTF-8"),
+            env!("CARGO_BIN_EXE_bop"),
+            cards.to_str().expect("cards path must be UTF-8"),
+            &session.session,
+            stderr_fifo.to_str().expect("stderr pipe path must be UTF-8"),
+        ]),
+        "Zellij did not create invoking shell pane"
     );
     let startup = until("invoking shell startup PID and TTY", || {
         let pid = fs::read_to_string(root.join("invoker-start-pid"))
