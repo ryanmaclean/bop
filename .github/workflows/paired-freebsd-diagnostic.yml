@@ -5,6 +5,15 @@ name: BOP19 Moth5 paired FreeBSD diagnostic
 
 on:
   workflow_dispatch:
+    inputs:
+      physical_pty:
+        description: 'Run the separate PR23 physical PTY/Zellij diagnostic'
+        type: boolean
+        default: false
+      physical_source_sha:
+        description: 'Full reviewed PR23 diagnostic commit SHA (required for physical_pty)'
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -204,7 +213,7 @@ jobs:
           retention-days: 7
 
   pr23-scoped-linux:
-    if: github.ref == 'refs/heads/diagnostic/pr19-watch-terminal-held-20261027'
+    if: github.ref == 'refs/heads/diagnostic/pr19-watch-terminal-held-20261027' && !inputs.physical_pty
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -314,4 +323,121 @@ jobs:
         with:
           name: bop-pr23-watch-terminal-diagnostic
           path: diagnostic/
+          if-no-files-found: error
+
+  pr23-physical-linux:
+    if: github.ref == 'refs/heads/diagnostic/pr19-watch-terminal-held-20261027' && inputs.physical_pty
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Fetch exact reviewed PR23 physical fixture without submodules
+        shell: bash
+        env:
+          GIT_TERMINAL_PROMPT: '0'
+          GIT_ASKPASS: /bin/false
+          REVIEWED_SHA: ${{ inputs.physical_source_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p physical
+          printf '%s\n' 'INCOMPLETE: physical PTY and Zellij assertions unverified' > physical/INCOMPLETE
+          printf '%s\n' "$GITHUB_SHA" > physical/workflow-commit.txt
+          trap 'status=$?; printf "%s\n" "$status" > physical/fetch-exit-code.txt' EXIT
+          [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$REVIEWED_SHA" = "$GITHUB_SHA"
+          test -z "$(find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 ! -name physical -print -quit)"
+          git init -q "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" remote add origin https://github.com/ryanmaclean/bop.git
+          git -C "$GITHUB_WORKSPACE" -c credential.helper= fetch --no-tags --no-recurse-submodules --depth=1 origin refs/pull/23/head
+          test "$(git -C "$GITHUB_WORKSPACE" rev-parse FETCH_HEAD)" = "$REVIEWED_SHA"
+          git -C "$GITHUB_WORKSPACE" -c submodule.recurse=false checkout --detach --force "$REVIEWED_SHA"
+
+      - name: Verify source and lock before compilation
+        shell: bash
+        env:
+          REVIEWED_SHA: ${{ inputs.physical_source_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$REVIEWED_SHA"
+          echo 'd16018d33360816f65c6fc3c1f27efeb87f3dc6b38b7399c357a27a4668a8c81  Cargo.lock' | sha256sum --check --status
+          test -z "$(git status --porcelain --untracked-files=no)"
+          git rev-parse HEAD > physical/source-commit.txt
+          sha256sum Cargo.lock > physical/lock-sha256.txt
+
+      - name: Install pinned MIT Zellij in runner-private directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p physical/tool
+          curl --fail --location --silent --show-error --max-time 60 \
+            https://github.com/zellij-org/zellij/releases/download/v0.43.1/zellij-x86_64-unknown-linux-musl.tar.gz \
+            --output physical/tool/zellij.tar.gz
+          test "$(wc -c < physical/tool/zellij.tar.gz)" -eq 19108370
+          echo '541d98efef5558293ef85ad9acd29e4d920b6e881513b9e77255d8207020d75a  physical/tool/zellij.tar.gz' | sha256sum --check --status
+          test "$(tar -tzf physical/tool/zellij.tar.gz)" = 'zellij'
+          tar -xOzf physical/tool/zellij.tar.gz zellij > physical/tool/zellij
+          chmod 700 physical/tool/zellij
+          sha256sum physical/tool/zellij > physical/zellij-sha256.txt
+          test "$(physical/tool/zellij --version)" = 'zellij 0.43.1'
+          rm physical/tool/zellij.tar.gz
+
+      - name: Select pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        with:
+          toolchain: nightly-2026-02-20
+
+      - name: Exercise real PTY, Zellij cells, and invoking-shell sentinel
+        shell: bash
+        run: |
+          set -euo pipefail
+          BOP_TEST_ZELLIJ="$(pwd -P)/physical/tool/zellij"
+          export BOP_TEST_ZELLIJ
+          timeout --signal=TERM --kill-after=5s 180s \
+            cargo +nightly-2026-02-20 test --locked -p bop --test managed_watch_pty \
+              physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells \
+              -- --ignored --exact --nocapture > physical/physical-pty.log 2>&1
+
+      - name: Mark exact physical diagnostic complete
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat physical/fetch-exit-code.txt)" = '0'
+          test -s physical/source-commit.txt
+          test -s physical/lock-sha256.txt
+          test -s physical/zellij-sha256.txt
+          test -s physical/physical-pty.log
+          grep -Fq 'running 1 test' physical/physical-pty.log
+          grep -Fq 'physical PTY, distinct watch tty, live shell sentinel, create/resize/delete cells, Ctrl-C and lock release verified' physical/physical-pty.log
+          grep -Fq 'test physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells ... ok' physical/physical-pty.log
+          grep -Fq '1 passed; 0 failed' physical/physical-pty.log
+          rm physical/INCOMPLETE
+          printf '%s\n' 'Synthetic physical Linux PTY and Zellij watch path passed; no provider, BSD, or product release acceptance' > physical/SCOPE.txt
+
+      - name: Bound physical diagnostic receipts even on failure
+        id: bound-physical
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d physical && test ! -L physical
+          test -f physical/INCOMPLETE || test -f physical/SCOPE.txt
+          test ! -f physical/INCOMPLETE || test ! -f physical/SCOPE.txt
+          test ! -L physical/tool
+          rm -rf physical/tool
+          test "$(find physical -type f | wc -l)" -le 8
+          test -z "$(find physical ! -type f ! -type d -print -quit)"
+          while IFS= read -r path; do
+            case "$path" in
+              physical/INCOMPLETE|physical/SCOPE.txt|physical/workflow-commit.txt|physical/fetch-exit-code.txt|physical/source-commit.txt|physical/lock-sha256.txt|physical/zellij-sha256.txt|physical/physical-pty.log) ;;
+              *) exit 1 ;;
+            esac
+            test "$(wc -c < "$path")" -le 4194304
+          done < <(find physical -type f -print)
+          test "$(du -sk physical | cut -f1)" -le 8192
+
+      - name: Retain bounded physical diagnostic receipt
+        if: ${{ always() && steps.bound-physical.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: bop-pr23-physical-pty-diagnostic
+          path: physical/
           if-no-files-found: error
