@@ -279,10 +279,22 @@ fn watch_tty(root: &Path) -> Option<(u64, u64)> {
     }
 }
 
-fn watch_child_exit(root: &Path) -> &'static str {
+fn watch_child_exit(root: &Path) -> String {
     match fs::read_to_string(root.join("watch-child-exit")) {
-        Ok(status) if status.trim() == "0" => "success",
-        Ok(status) if status.trim().parse::<u8>().is_ok() => "failure",
+        Ok(status) if status.trim() == "0" => "success".into(),
+        Ok(status) => match status.trim().parse::<u8>() {
+            Ok(code) => format!("exit_{code}"),
+            Err(_) => "invalid".into(),
+        },
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => "absent".into(),
+        Err(_) => "unreadable".into(),
+    }
+}
+
+fn fixed_marker(root: &Path, name: &str) -> &'static str {
+    match fs::read_to_string(root.join(name)) {
+        Ok(value) if value == "yes" => "yes",
+        Ok(value) if value == "no" => "no",
         Ok(_) => "invalid",
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => "absent",
         Err(_) => "unreadable",
@@ -364,8 +376,13 @@ fn report_watch_probe(cards: &Path, temp_root: &Path, origin_id: (u64, u64)) {
         }
     }
     eprintln!(
-        "watch probe: child_exit={} shell_live={} beat_nonempty={} proc_scan_truncated={} proc={} bop_exe={} cmdline_unreadable={} status_watch={} helper={} cards_match={} stdout_fd_meta={} distinct_fd_id={}",
+        "watch probe: child_exit={} session_env={} session_match={} shell_stdout_tty={} zellij_on_path={} dev_tty_openable={} shell_live={} beat_nonempty={} proc_scan_truncated={} proc={} bop_exe={} cmdline_unreadable={} status_watch={} helper={} cards_match={} stdout_fd_meta={} distinct_fd_id={}",
         watch_child_exit(temp_root),
+        fixed_marker(temp_root, "watch-session-env"),
+        fixed_marker(temp_root, "watch-session-match"),
+        fixed_marker(temp_root, "watch-shell-stdout-tty"),
+        fixed_marker(temp_root, "watch-zellij-on-path"),
+        fixed_marker(temp_root, "watch-dev-tty-openable"),
         shell_live(temp_root),
         beat_len(temp_root) > 0,
         proc_scan_truncated,
@@ -428,11 +445,12 @@ fn physical_zellij_watch_preserves_invoking_shell_and_erases_deleted_cells() {
             "--",
             "/bin/sh",
             "-c",
-            "printf '%s' \"$$\" > \"$1/invoker-start-pid\"; tty > \"$1/invoker-start-tty\"; printf '%s' \"$$\" > \"$1/shell-pid\"; tty > \"$1/origin-tty\"; printf x >> \"$1/shell-beat\"; { \"$2\" --cards-dir \"$3\" status --watch < /dev/tty; printf '%s' \"$?\" > \"$1/watch-child-exit\"; } & while :; do printf x >> \"$1/shell-beat\"; sleep 0.1; done",
+            "printf '%s' \"$$\" > \"$1/invoker-start-pid\"; tty > \"$1/invoker-start-tty\"; printf '%s' \"$$\" > \"$1/shell-pid\"; tty > \"$1/origin-tty\"; printf x >> \"$1/shell-beat\"; if [ -n \"${ZELLIJ_SESSION_NAME:-}\" ]; then printf yes > \"$1/watch-session-env\"; else printf no > \"$1/watch-session-env\"; fi; if [ \"${ZELLIJ_SESSION_NAME:-}\" = \"$4\" ]; then printf yes > \"$1/watch-session-match\"; else printf no > \"$1/watch-session-match\"; fi; if [ -t 1 ]; then printf yes > \"$1/watch-shell-stdout-tty\"; else printf no > \"$1/watch-shell-stdout-tty\"; fi; if command -v zellij >/dev/null 2>&1; then printf yes > \"$1/watch-zellij-on-path\"; else printf no > \"$1/watch-zellij-on-path\"; fi; if (: < /dev/tty) 2>/dev/null; then printf yes > \"$1/watch-dev-tty-openable\"; else printf no > \"$1/watch-dev-tty-openable\"; fi; { \"$2\" --cards-dir \"$3\" status --watch < /dev/tty; printf '%s' \"$?\" > \"$1/watch-child-exit\"; } & while :; do printf x >> \"$1/shell-beat\"; sleep 0.1; done",
             "bop-invoker",
             root.to_str().expect("temp path must be UTF-8"),
             env!("CARGO_BIN_EXE_bop"),
             cards.to_str().expect("cards path must be UTF-8"),
+            &session.session,
         ]),
         "Zellij did not create invoking shell pane"
     );
