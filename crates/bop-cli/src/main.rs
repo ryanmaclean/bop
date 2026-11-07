@@ -15,6 +15,7 @@ mod colors;
 mod decision;
 mod diff;
 mod dispatcher;
+mod dispatcher_scan;
 mod doctor;
 mod events;
 mod export;
