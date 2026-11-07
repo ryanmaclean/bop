@@ -16,6 +16,7 @@ mod decision;
 mod diff;
 mod dispatcher;
 mod dispatcher_scan;
+mod watcher_stop;
 mod doctor;
 mod events;
 mod export;
