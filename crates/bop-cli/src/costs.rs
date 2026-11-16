@@ -40,21 +40,45 @@ fn read_daily_budget(root: &Path) -> Option<f64> {
 }
 
 fn write_daily_budget(root: &Path, daily_usd: f64) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        daily_usd.is_finite() && daily_usd > 0.0,
+        "budget must be a positive number of USD"
+    );
     let path = budget_config_path(root);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("cannot create dir {}", parent.display()))?;
     }
 
-    // Merge: read existing file and update only the budget field.
-    let existing_raw = fs::read_to_string(&path).unwrap_or_default();
-    let mut existing: serde_json::Value =
-        serde_json::from_str(&existing_raw).unwrap_or(serde_json::json!({}));
+    // Merge: read existing file and update only the budget field. A config that
+    // exists but cannot be parsed is an error; it is never overwritten.
+    let mut existing: serde_json::Value = match fs::read_to_string(&path) {
+        Ok(raw) if raw.trim().is_empty() => serde_json::json!({}),
+        Ok(raw) => serde_json::from_str(&raw).with_context(|| {
+            format!(
+                "{} is not valid JSON; fix or remove it before setting a budget",
+                path.display()
+            )
+        })?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
+        Err(e) => return Err(e).with_context(|| format!("cannot read {}", path.display())),
+    };
 
-    existing["budget"]["daily_usd"] = serde_json::json!(daily_usd);
+    let obj = existing
+        .as_object_mut()
+        .with_context(|| format!("{} must contain a JSON object", path.display()))?;
+    let budget = obj
+        .entry("budget")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .with_context(|| format!("\"budget\" in {} must be an object", path.display()))?;
+    budget.insert("daily_usd".to_string(), serde_json::json!(daily_usd));
 
-    fs::write(&path, serde_json::to_string_pretty(&existing)?)
-        .with_context(|| format!("cannot write {}", path.display()))?;
+    // Write to a temp file and rename so a crash never leaves a truncated config.
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, serde_json::to_string_pretty(&existing)?)
+        .with_context(|| format!("cannot write {}", tmp.display()))?;
+    fs::rename(&tmp, &path).with_context(|| format!("cannot write {}", path.display()))?;
     Ok(())
 }
 
@@ -273,6 +297,7 @@ fn week_spend(cards: &[CardCost]) -> f64 {
     cards
         .iter()
         .filter(|c| matches!(c.day, Some(d) if d >= week_start && d <= today))
+        .filter(|c| c.has_cost_data)
         .filter_map(|c| c.cost_usd)
         .sum()
 }
@@ -324,7 +349,14 @@ pub fn cmd_costs(
     // Persist budget if --budget flag provided
     if let Some(daily) = budget_set {
         write_daily_budget(root, daily)?;
-        println!("[info] Daily budget set to ${:.2}", daily);
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({ "budget": { "daily_usd": daily } })
+            );
+        } else {
+            println!("[info] Daily budget set to ${:.2}", daily);
+        }
         return Ok(());
     }
 
@@ -562,10 +594,13 @@ fn fmt_tokens(n: u64) -> String {
 
 fn truncate(s: &str, max: usize) -> &str {
     if s.len() <= max {
-        s
-    } else {
-        &s[..max]
+        return s;
     }
+    let mut end = max;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
@@ -652,7 +687,7 @@ mod tests {
             "done",
             "a.bop",
             &format!(
-                r#"{{"id":"a","provider":"codex","finished_at":"{}T10:00:00Z","cost_usd":1.0,"tokens_used":100}}"#,
+                r#"{{"id":"a","provider":"codex","finished_at":"{}T12:00:00Z","cost_usd":1.0,"tokens_used":100}}"#,
                 today
             ),
         );
@@ -661,7 +696,7 @@ mod tests {
             "done",
             "b.bop",
             &format!(
-                r#"{{"id":"b","provider":"codex","finished_at":"{}T10:00:00Z","cost_usd":2.0,"tokens_used":200}}"#,
+                r#"{{"id":"b","provider":"codex","finished_at":"{}T12:00:00Z","cost_usd":2.0,"tokens_used":200}}"#,
                 day2
             ),
         );
@@ -723,6 +758,35 @@ mod tests {
     }
 
     #[test]
+    fn budget_rejects_invalid_values() {
+        let td = tempdir().unwrap();
+        for bad in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
+            assert!(write_daily_budget(td.path(), bad).is_err(), "{bad}");
+        }
+        assert!(!td.path().join(".bop").join("config.json").exists());
+    }
+
+    #[test]
+    fn budget_never_overwrites_unparseable_or_odd_config() {
+        let td = tempdir().unwrap();
+        let root = td.path();
+        fs::create_dir_all(root.join(".bop")).unwrap();
+        let cfg = root.join(".bop").join("config.json");
+        for body in ["{not json", "[1,2]", r#"{"budget":5}"#] {
+            fs::write(&cfg, body).unwrap();
+            assert!(write_daily_budget(root, 3.0).is_err(), "{body}");
+            assert_eq!(fs::read_to_string(&cfg).unwrap(), body);
+        }
+    }
+
+    #[test]
+    fn truncate_respects_char_boundaries() {
+        assert_eq!(truncate("abcdef", 3), "abc");
+        assert_eq!(truncate("ab\u{e9}cd", 3), "ab");
+        assert_eq!(truncate("ab", 3), "ab");
+    }
+
+    #[test]
     fn costs_json_output_valid() {
         let td = tempdir().unwrap();
         let root = make_root(&td);
@@ -748,7 +812,7 @@ mod tests {
             "done",
             "big.bop",
             &format!(
-                r#"{{"id":"big","provider":"claude","finished_at":"{}T10:00:00Z","cost_usd":9.99}}"#,
+                r#"{{"id":"big","provider":"claude","finished_at":"{}T12:00:00Z","cost_usd":9.99}}"#,
                 today
             ),
         );
