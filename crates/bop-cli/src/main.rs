@@ -12,6 +12,7 @@ mod benchmark;
 mod bridge;
 mod cards;
 mod colors;
+mod costs;
 mod decision;
 mod diff;
 mod dispatcher;
@@ -397,6 +398,18 @@ enum Command {
         /// Show detail for a single card id.
         #[arg(long)]
         card: Option<String>,
+    },
+    /// Spend summary and budget alerts across completed cards.
+    Costs {
+        /// Group rows by provider (default), day, or card.
+        #[arg(long, value_enum)]
+        by: Option<costs::CostsBy>,
+        /// Set daily budget alert (persisted to .cards/.bop/config.json).
+        #[arg(long)]
+        budget: Option<f64>,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Run the same spec against multiple providers and compare results.
     Benchmark {
@@ -1184,6 +1197,7 @@ async fn main() -> anyhow::Result<()> {
         } => providers::cmd_providers(watch, json, interval).await,
         Command::Bridge { sub } => bridge::cmd_bridge(sub).await,
         Command::Stats { by, json, card } => stats::cmd_stats(&root, by, json, card.as_deref()),
+        Command::Costs { by, budget, json } => costs::cmd_costs(&root, by, budget, json),
         Command::Benchmark {
             spec_file,
             providers,
