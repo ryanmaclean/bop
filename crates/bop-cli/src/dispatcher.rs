@@ -214,8 +214,13 @@ pub async fn run_dispatcher(
     // Set up filesystem watcher with 100ms debounce on pending/
     let (tx, mut rx) = tokio_mpsc::unbounded_channel();
     let pending_dir_clone = pending_dir.clone();
+    let watcher_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let _watcher_guard = crate::watcher_stop::WatcherStop(std::sync::Arc::clone(&watcher_stop));
 
     std::thread::spawn(move || {
+        if watcher_stop.load(std::sync::atomic::Ordering::Acquire) {
+            return;
+        }
         let (std_tx, std_rx) = std::sync::mpsc::channel();
         let mut debouncer = match new_debouncer(Duration::from_millis(100), std_tx) {
             Ok(d) => d,
@@ -225,6 +230,9 @@ pub async fn run_dispatcher(
             }
         };
 
+        if watcher_stop.load(std::sync::atomic::Ordering::Acquire) {
+            return;
+        }
         if let Err(e) = debouncer
             .watcher()
             .watch(&pending_dir_clone, notify::RecursiveMode::Recursive)
@@ -233,7 +241,7 @@ pub async fn run_dispatcher(
             return;
         }
 
-        for res in std_rx {
+        while let Some(res) = crate::watcher_stop::next_watch_event(&std_rx, &watcher_stop) {
             match res {
                 Ok(events) => {
                     // Filter to only .bop directory events
@@ -244,8 +252,8 @@ pub async fn run_dispatcher(
                                 DebouncedEventKind::Any | DebouncedEventKind::AnyContinuous
                             )
                     });
-                    if relevant {
-                        let _ = tx.send(());
+                    if relevant && tx.send(()).is_err() {
+                        return;
                     }
                 }
                 Err(e) => {
@@ -261,11 +269,17 @@ pub async fn run_dispatcher(
     reap_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
+        if !once && rx.is_closed() {
+            anyhow::bail!("pending watcher exited; refusing to dispatch without it");
+        }
         // Wait for either a filesystem event or reap timer (unless in once mode)
         if !once && !needs_scan {
             tokio::select! {
-                _ = rx.recv() => {
-                    needs_scan = true;
+                event = rx.recv() => {
+                    match event {
+                        Some(()) => needs_scan = true,
+                        None => anyhow::bail!("pending watcher exited; refusing to dispatch without it"),
+                    }
                 }
                 _ = reap_interval.tick(), if !no_reap => {
                     reaper::reap_orphans(
@@ -333,28 +347,14 @@ pub async fn run_dispatcher(
             }
         };
 
-        let running_count = fs::read_dir(&running_dir)
-            .map(|rd| {
-                rd.filter(|e| {
-                    e.as_ref()
-                        .ok()
-                        .and_then(|e| e.path().extension().map(|x| x == "bop"))
-                        .unwrap_or(false)
-                })
-                .count()
-            })
-            .unwrap_or(0);
+        let running_count = crate::dispatcher_scan::running_count(&running_dir)
+            .context("failed to enumerate running cards")?;
         let mut available_slots = max_workers.saturating_sub(running_count);
 
         if available_slots > 0 {
-            if let Ok(entries) = fs::read_dir(&pending_dir) {
-                let pending_cards: Vec<_> = entries
-                    .flatten()
-                    .filter(|e| {
-                        e.path().is_dir()
-                            && e.path().extension().and_then(|s| s.to_str()).unwrap_or("") == "bop"
-                    })
-                    .collect();
+            {
+                let pending_cards = crate::dispatcher_scan::pending_cards(&pending_dir)
+                    .context("failed to enumerate pending cards")?;
 
                 if pending_cards.is_empty() && !shown_empty_hint {
                     eprintln!("[dispatcher] Nothing pending. Try: bop new <template> <id>");
@@ -366,7 +366,7 @@ pub async fn run_dispatcher(
                         break;
                     }
 
-                    let pending_path = ent.path();
+                    let pending_path = ent;
 
                     let name = match pending_path.file_name().and_then(|s| s.to_str()) {
                         Some(n) => n.to_string(),
