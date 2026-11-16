@@ -16,7 +16,6 @@ mod decision;
 mod diff;
 mod dispatcher;
 mod dispatcher_scan;
-mod watcher_stop;
 mod doctor;
 mod events;
 mod export;
@@ -51,6 +50,7 @@ mod translog_cmd;
 mod ui;
 mod util;
 mod watch;
+mod watcher_stop;
 mod webhook;
 mod workspace;
 

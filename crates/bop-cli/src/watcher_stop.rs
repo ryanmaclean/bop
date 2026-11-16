@@ -1,10 +1,18 @@
 //! Cooperative stop for the dispatcher's detached event receiver.
-use std::{sync::{atomic::{AtomicBool, Ordering}, mpsc, Arc}, time::Duration};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc,
+    },
+    time::Duration,
+};
 
 pub(crate) struct WatcherStop(pub(crate) Arc<AtomicBool>);
 
 impl Drop for WatcherStop {
-    fn drop(&mut self) { self.0.store(true, Ordering::Release); }
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
 }
 
 pub(crate) fn next_watch_event<T>(rx: &mpsc::Receiver<T>, stop: &AtomicBool) -> Option<T> {
@@ -36,7 +44,10 @@ mod tests {
             done_tx.send(()).unwrap();
         });
         ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        assert!(matches!(done_rx.recv_timeout(Duration::from_millis(150)), Err(mpsc::RecvTimeoutError::Timeout)));
+        assert!(matches!(
+            done_rx.recv_timeout(Duration::from_millis(150)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
         drop(guard);
         done_rx.recv_timeout(Duration::from_secs(2)).unwrap();
         thread.join().unwrap();

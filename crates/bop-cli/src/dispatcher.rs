@@ -218,7 +218,9 @@ pub async fn run_dispatcher(
     let _watcher_guard = crate::watcher_stop::WatcherStop(std::sync::Arc::clone(&watcher_stop));
 
     std::thread::spawn(move || {
-        if watcher_stop.load(std::sync::atomic::Ordering::Acquire) { return; }
+        if watcher_stop.load(std::sync::atomic::Ordering::Acquire) {
+            return;
+        }
         let (std_tx, std_rx) = std::sync::mpsc::channel();
         let mut debouncer = match new_debouncer(Duration::from_millis(100), std_tx) {
             Ok(d) => d,
@@ -228,7 +230,9 @@ pub async fn run_dispatcher(
             }
         };
 
-        if watcher_stop.load(std::sync::atomic::Ordering::Acquire) { return; }
+        if watcher_stop.load(std::sync::atomic::Ordering::Acquire) {
+            return;
+        }
         if let Err(e) = debouncer
             .watcher()
             .watch(&pending_dir_clone, notify::RecursiveMode::Recursive)
@@ -248,8 +252,8 @@ pub async fn run_dispatcher(
                                 DebouncedEventKind::Any | DebouncedEventKind::AnyContinuous
                             )
                     });
-                    if relevant {
-                        if tx.send(()).is_err() { return; }
+                    if relevant && tx.send(()).is_err() {
+                        return;
                     }
                 }
                 Err(e) => {
