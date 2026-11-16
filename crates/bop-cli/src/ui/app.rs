@@ -1147,6 +1147,12 @@ fn required_width(
 /// 3. `~/.bop/config.json` (`max_workers` or `max_concurrent`)
 /// 4. default `3`
 fn read_wip_limit(cards_root: &Path) -> usize {
+    read_wip_limit_with_global(cards_root, bop_core::config::global_config_path())
+}
+
+/// Same as [`read_wip_limit`], with the global config path supplied by the caller
+/// so tests do not depend on the invoking user's home directory.
+fn read_wip_limit_with_global(cards_root: &Path, global_path: Option<PathBuf>) -> usize {
     const DEFAULT_WIP_LIMIT: usize = 3;
 
     let cards_local = cards_root.join(".bop").join("config.json");
@@ -1163,7 +1169,7 @@ fn read_wip_limit(cards_root: &Path) -> usize {
         }
     }
 
-    if let Some(global_path) = bop_core::config::global_config_path() {
+    if let Some(global_path) = global_path {
         if let Some(limit) = read_wip_limit_from_json(&global_path) {
             return limit;
         }
@@ -1466,7 +1472,9 @@ mod tests {
     #[test]
     fn read_wip_limit_defaults_to_three_when_missing() {
         let td = tempdir().unwrap();
-        let limit = read_wip_limit(td.path());
+        let cards_root = td.path().join(".cards");
+        fs::create_dir_all(&cards_root).unwrap();
+        let limit = read_wip_limit_with_global(&cards_root, None);
         assert_eq!(limit, 3);
     }
 
