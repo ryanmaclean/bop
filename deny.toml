@@ -33,14 +33,6 @@ allow = ["CDLA-Permissive-2.0"]
 name = "webpki-roots"
 
 [[licenses.exceptions]]
-# MPL-2.0: `option-ext` remains through `dirs` -> `dirs-sys`. Keep its
-# exception scoped until that path is removed in a separately reviewed change.
-# Path: bop(-core) -> dirs -> dirs-sys -> option-ext.
-# Review by: 2026-12-31
-allow = ["MPL-2.0"]
-name = "option-ext"
-
-[[licenses.exceptions]]
 # CC0-1.0: public-domain-equivalent dedication, not copyleft. Used by the
 # file-watcher crate.
 # Path: bop -> notify.

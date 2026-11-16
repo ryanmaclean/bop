@@ -120,18 +120,18 @@ impl GeminiProvider {
 
     /// Path to the Gemini credentials file: `~/.gemini/oauth_creds.json`.
     fn credentials_path() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".gemini").join("oauth_creds.json"))
+        bop_core::home_dir().map(|h| h.join(".gemini").join("oauth_creds.json"))
     }
 
     /// Path to Gemini refresh-token file: `~/.gemini/credentials.json`.
     fn refresh_credentials_path() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".gemini").join("credentials.json"))
+        bop_core::home_dir().map(|h| h.join(".gemini").join("credentials.json"))
     }
 
     /// Candidate local session/state files that may contain Gemini quota info.
     fn local_quota_paths() -> Vec<PathBuf> {
         let mut paths = Vec::new();
-        if let Some(home) = dirs::home_dir() {
+        if let Some(home) = bop_core::home_dir() {
             paths.push(home.join(".gemini").join("session.json"));
             paths.push(home.join(".gemini").join("state.json"));
             paths.push(home.join(".config").join("gemini").join("session.json"));

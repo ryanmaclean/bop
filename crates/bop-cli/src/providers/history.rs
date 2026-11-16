@@ -29,7 +29,7 @@ pub struct HistoryEntry {
 
 /// Return the default history file path: `~/.bop/provider-history.jsonl`.
 pub fn history_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".bop").join("provider-history.jsonl"))
+    bop_core::home_dir().map(|h| h.join(".bop").join("provider-history.jsonl"))
 }
 
 /// Ensure the history file is ready for append operations.
