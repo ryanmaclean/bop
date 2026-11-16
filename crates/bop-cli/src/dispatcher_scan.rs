@@ -27,10 +27,16 @@ fn pending_entries(
     let mut cards = Vec::new();
     for entry in entries {
         let path = entry?;
-        if path.extension().is_some_and(|extension| extension == "bop")
-            && fs::metadata(&path)?.is_dir()
-        {
-            cards.push(path);
+        if !path.extension().is_some_and(|extension| extension == "bop") {
+            continue;
+        }
+        // A card that is claimed or removed between read_dir and stat is not an
+        // uncertain scan; skip it. Any other stat error still fails the scan.
+        match fs::metadata(&path) {
+            Ok(meta) if meta.is_dir() => cards.push(path),
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
         }
     }
     Ok(cards)
@@ -89,6 +95,9 @@ mod tests {
         ];
         assert!(pending_entries(paths).is_err());
         fs::remove_file(file).unwrap();
+        // an entry that vanished after read_dir is skipped, not an error
+        let gone = root.join("gone.bop");
+        assert!(pending_entries([Ok(gone)]).unwrap().is_empty());
         fs::remove_dir(card).unwrap();
         fs::remove_dir(root).unwrap();
     }
