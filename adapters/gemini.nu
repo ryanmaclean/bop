@@ -10,7 +10,9 @@ def is_rate_limited [text: string]: nothing -> bool {
         or ($text | str contains --ignore-case "resource_exhausted")
         or ($text | str contains --ignore-case "quota exceeded")
         or ($text | str contains --ignore-case "quota has been exhausted")
-        or ($text | str contains "429"))
+        or ($text | str contains "429 Too")
+        or ($text | str contains "status: 429")
+        or ($text | str contains "\"code\":429"))
 }
 
 def main [
@@ -40,17 +42,24 @@ def main [
 
     let prompt = open --raw $prompt_abs
     let model = if "GEMINI_MODEL" in $env { $env.GEMINI_MODEL } else { "gemini-2.5-flash" }
-    ^gemini -m $model -p $prompt o> $stdout_abs e> $stderr_abs
-    let rc = $env.LAST_EXIT_CODE
-
-    if ($stderr_abs | path exists) {
-        let stderr_text = open --raw $stderr_abs
-        if (is_rate_limited $stderr_text) {
-            exit 75
-        }
+    if (which gemini | is-empty) {
+        "gemini CLI not found in PATH\n" | save --append $stderr_abs
+        exit 127
     }
 
-    exit $rc
+    # `complete` is used because $env.LAST_EXIT_CODE is not reliable when both
+    # stdout and stderr are redirected.
+    let res = (do { ^gemini -m $model -p $prompt } | complete)
+    $res.stdout | save --force $stdout_abs
+    $res.stderr | save --force $stderr_abs
+
+    # Only a failed run can be a rate limit; a successful run that merely logs
+    # a quota warning must not be retried.
+    if $res.exit_code != 0 and (is_rate_limited $res.stderr) {
+        exit 75
+    }
+
+    exit $res.exit_code
 }
 
 def run_tests []: nothing -> nothing {
@@ -70,6 +79,9 @@ def run_tests []: nothing -> nothing {
 
     # test 4: rate-limit detection — quota exhausted
     assert (is_rate_limited "RESOURCE_EXHAUSTED: quota has been exhausted") "should detect quota exhaustion"
+
+    # test 4b: a bare "429" inside a timestamp or port is not a rate limit
+    assert (not (is_rate_limited "2026-11-16T10:04:29.429Z listening on :8429")) "bare 429 digits should not trigger"
 
     # test 5: non-rate-limit error should not trigger
     assert (not (is_rate_limited "syntax error in prompt")) "normal errors should not trigger rate-limit"
