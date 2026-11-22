@@ -1,1 +1,0 @@
-try again your API was failing, you shouldn't repeat over and over when that happens

@@ -168,6 +168,13 @@ pub struct RunBinder<'a> {
 
 impl<'a> RunBinder<'a> {
     pub fn begin(backend: &'a mut dyn FsVersionBackend, run: RunIdentity) -> anyhow::Result<Self> {
+        anyhow::ensure!(run.attempt > 0, "run attempt must be 1-based");
+        let expected = RunIdentity::for_attempt(&run.card_id, &run.request_id, run.attempt);
+        anyhow::ensure!(
+            run.run_id == expected.run_id && run.parent_run_id == expected.parent_run_id,
+            "run id or parent does not match card, request, and attempt"
+        );
+
         let before = backend.begin_run(&run)?;
         let name = backend.name().to_string();
         Ok(RunBinder {
@@ -183,8 +190,26 @@ impl<'a> RunBinder<'a> {
         })
     }
 
-    /// Observe a committed record. Records must arrive in log order.
+    /// Observe a committed record belonging to this run, in log order.
+    /// Attempt zero Create/Promote records prepare the first execution attempt.
+    /// Invalid records are rejected before the backend can observe them.
     pub fn committed(&mut self, rec: &Record) -> anyhow::Result<()> {
+        let run = &self.binding.run;
+        anyhow::ensure!(
+            rec.object_id == crate::translog::object_id_for(&run.card_id),
+            "record belongs to a different card"
+        );
+        let request_id: String = rec.request_id.iter().map(|b| format!("{b:02x}")).collect();
+        anyhow::ensure!(
+            request_id == run.request_id,
+            "record belongs to a different request"
+        );
+        let prepares_first_attempt =
+            run.attempt == 1 && rec.attempt == 0 && matches!(rec.op, Op::Create | Op::Promote);
+        anyhow::ensure!(
+            rec.attempt == run.attempt || prepares_first_attempt,
+            "record belongs to a different execution attempt"
+        );
         if let Some(last) = self.binding.transitions.last() {
             anyhow::ensure!(
                 rec.tid > last.tid,
@@ -396,6 +421,57 @@ mod tests {
         (x, y)
     }
 
+    #[derive(Default)]
+    struct BeginCountBackend {
+        begins: usize,
+    }
+
+    impl FsVersionBackend for BeginCountBackend {
+        fn name(&self) -> &str {
+            "counting"
+        }
+
+        fn begin_run(&mut self, _run: &RunIdentity) -> anyhow::Result<Option<FsVersion>> {
+            self.begins += 1;
+            Ok(None)
+        }
+
+        fn commit_transition(
+            &mut self,
+            _run: &RunIdentity,
+            _rec: &Record,
+        ) -> anyhow::Result<Option<FsVersion>> {
+            Ok(None)
+        }
+
+        fn end_run(&mut self, _run: &RunIdentity) -> anyhow::Result<Option<FsVersion>> {
+            Ok(None)
+        }
+    }
+
+    #[test]
+    fn malformed_run_identity_is_rejected_before_backend_begin() {
+        let run = RunIdentity::for_attempt("card-fsv", "00112233445566778899aabbccddeeff", 1);
+        let mut attempt_zero = run.clone();
+        attempt_zero.attempt = 0;
+        attempt_zero.run_id = run_id_for(&run.card_id, &run.request_id, 0);
+
+        let mut wrong_run_id = run.clone();
+        wrong_run_id.run_id = "forged".into();
+
+        let mut wrong_parent = RunIdentity::for_attempt(&run.card_id, &run.request_id, 2);
+        wrong_parent.parent_run_id = None;
+
+        let mut backend = BeginCountBackend::default();
+        for invalid in [attempt_zero, wrong_run_id, wrong_parent] {
+            assert!(RunBinder::begin(&mut backend, invalid).is_err());
+            assert_eq!(backend.begins, 0);
+        }
+
+        RunBinder::begin(&mut backend, run).unwrap().end().unwrap();
+        assert_eq!(backend.begins, 1);
+    }
+
     #[test]
     fn run_ids_are_deterministic_and_chain_retries() {
         let a1 = RunIdentity::for_attempt("c", "ab", 1);
@@ -493,11 +569,71 @@ mod tests {
         assert_eq!(back, b);
 
         let mut nb = NoBackend;
-        let mut binder = RunBinder::begin(&mut nb, RunIdentity::for_attempt("c", "ab", 1)).unwrap();
+        let mut binder = RunBinder::begin(&mut nb, b.run.clone()).unwrap();
         let rec = translog::recover(&d.path().join("merged").join("card-fsv.bop"))
             .unwrap()
             .records;
         binder.committed(&rec[1]).unwrap();
         assert!(binder.committed(&rec[0]).is_err());
+    }
+
+    #[test]
+    fn foreign_records_are_rejected_before_backend_or_binding_changes() {
+        let d = tempdir().unwrap();
+        let run = drive(d.path(), &mut NoBackend, true).run;
+        let records = translog::recover(&d.path().join("merged/card-fsv.bop"))
+            .unwrap()
+            .records;
+        let claim = &records[1];
+        let mut backend = TidShape::new(100);
+        let mut binder = RunBinder::begin(&mut backend, run.clone()).unwrap();
+        for field in ["card", "request", "attempt"] {
+            let mut foreign = claim.clone();
+            match field {
+                "card" => foreign.object_id = translog::object_id_for("another-card"),
+                "request" => foreign.request_id[0] ^= 1,
+                "attempt" => foreign.attempt += 1,
+                _ => unreachable!(),
+            }
+            assert!(
+                binder.committed(&foreign).is_err(),
+                "accepted foreign {field}"
+            );
+        }
+        binder.committed(claim).unwrap();
+        let binding = binder.end().unwrap();
+        assert_eq!(binding.transitions.len(), 1);
+        assert_eq!(binding.after.unwrap().id, "0x0000000000000065");
+
+        // A later attempt must not absorb the previous attempt or its setup.
+        let retry = RunIdentity::for_attempt(&run.card_id, &run.request_id, 2);
+        let mut backend = NoBackend;
+        let mut binder = RunBinder::begin(&mut backend, retry).unwrap();
+        assert!(binder.committed(&records[0]).is_err());
+        assert!(binder.committed(claim).is_err());
+        let mut next_claim = claim.clone();
+        next_claim.attempt = 2;
+        binder.committed(&next_claim).unwrap();
+        assert_eq!(binder.end().unwrap().transitions.len(), 1);
+    }
+
+    #[test]
+    fn only_create_and_promote_can_prepare_first_attempt() {
+        let d = tempdir().unwrap();
+        let run = drive(d.path(), &mut NoBackend, true).run;
+        let mut rec = translog::recover(&d.path().join("merged/card-fsv.bop"))
+            .unwrap()
+            .records[0]
+            .clone();
+        let mut backend = NoBackend;
+        let mut binder = RunBinder::begin(&mut backend, run).unwrap();
+        binder.committed(&rec).unwrap();
+        rec.tid += 1;
+        rec.op = Op::Promote;
+        binder.committed(&rec).unwrap();
+        rec.tid += 1;
+        rec.op = Op::Claim;
+        assert!(binder.committed(&rec).is_err());
+        assert_eq!(binder.end().unwrap().transitions.len(), 2);
     }
 }

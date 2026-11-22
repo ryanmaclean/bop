@@ -42,10 +42,6 @@ enum JoinState {
     Running(tokio::task::JoinHandle<()>),
     Done(Result<(), String>),
 }
-struct WakeNothing;
-impl std::task::Wake for WakeNothing {
-    fn wake(self: Arc<Self>) {}
-}
 fn join_ready(entry: &Entry) -> Result<bool, String> {
     use std::future::Future;
     let mut slot = entry.task.lock().map_err(|_| "owner task poisoned")?;
@@ -54,8 +50,7 @@ fn join_ready(entry: &Entry) -> Result<bool, String> {
         JoinState::Done(result) => result.clone().map(|_| true),
         JoinState::Running(task) => {
             // Poll in place: cancellation never removes a pending JoinHandle.
-            let waker = std::task::Waker::from(Arc::new(WakeNothing));
-            let mut cx = std::task::Context::from_waker(&waker);
+            let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
             match std::pin::Pin::new(task).poll(&mut cx) {
                 std::task::Poll::Pending => Ok(false),
                 std::task::Poll::Ready(result) => {
