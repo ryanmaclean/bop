@@ -9,8 +9,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
         with:
+          toolchain: nightly-2026-02-20
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       # Nushell must be on PATH before `make check`: the dispatcher integration

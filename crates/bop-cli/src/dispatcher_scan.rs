@@ -27,7 +27,7 @@ fn pending_entries(
     let mut cards = Vec::new();
     for entry in entries {
         let path = entry?;
-        if !path.extension().is_some_and(|extension| extension == "bop") {
+        if path.extension().is_none_or(|extension| extension != "bop") {
             continue;
         }
         // A card that is claimed or removed between read_dir and stat is not an

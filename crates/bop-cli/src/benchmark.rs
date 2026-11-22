@@ -75,7 +75,7 @@ impl TempWorkspace {
             "{}-{}-{}",
             Utc::now().timestamp_millis(),
             std::process::id(),
-            dispatcher::short_run_id()
+            dispatcher::short_run_id().context("failed to mint benchmark workspace ID")?
         );
         let root = std::env::temp_dir().join(format!("bop-benchmark-{uniq}"));
         fs::create_dir_all(&root)
